@@ -1,0 +1,7 @@
+{
+  "name": "minimal-notification",
+  "version": "1.0",
+  "modes": ["notify"],
+  "html": "template.html",
+  "css": "template.css"
+}

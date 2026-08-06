@@ -1,0 +1,73 @@
+:root {
+  color-scheme: light dark;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  color: #202124;
+  background: transparent;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+button, input, textarea, select { font: inherit; }
+
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid #377dff;
+  outline-offset: 2px;
+}
+
+.popu-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 22px;
+  border: 1px solid rgba(0, 0, 0, .12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .98);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, .22);
+}
+
+.popu-heading { display: flex; gap: 12px; align-items: flex-start; }
+.popu-icon { width: 28px; height: 28px; flex: 0 0 auto; border-radius: 50%; display: grid; place-items: center; font-weight: 700; }
+.popu-icon[data-severity="info"] { color: #1d5fd0; background: #e8f0ff; }
+.popu-icon[data-severity="success"] { color: #087a3e; background: #e4f6ec; }
+.popu-icon[data-severity="warning"] { color: #8a5700; background: #fff2d1; }
+.popu-icon[data-severity="error"] { color: #b42318; background: #fee9e7; }
+.popu-title { margin: 1px 0 0; font-size: 18px; line-height: 1.35; font-weight: 650; }
+.popu-message { margin: 12px 0; color: #525866; white-space: pre-wrap; overflow-wrap: anywhere; }
+.popu-details { display: grid; grid-template-columns: minmax(88px, auto) 1fr; gap: 6px 14px; margin: 4px 0 14px; }
+.popu-detail-label { color: #777e8b; }
+.popu-detail-value { min-width: 0; overflow-wrap: anywhere; }
+.popu-form { display: grid; gap: 12px; min-height: 0; overflow: auto; padding: 2px; }
+.popu-field { display: grid; gap: 5px; }
+.popu-field-inline { display: flex; align-items: center; gap: 8px; }
+.popu-field label, .popu-legend { font-weight: 600; }
+.popu-field input[type="text"], .popu-field input[type="number"], .popu-field textarea, .popu-field select {
+  width: 100%; border: 1px solid #c9ced8; border-radius: 7px; padding: 8px 10px; background: #fff; color: #202124;
+}
+.popu-field textarea { min-height: 78px; resize: vertical; }
+.popu-options { display: flex; flex-wrap: wrap; gap: 10px 16px; }
+.popu-error { min-height: 17px; color: #b42318; font-size: 12px; }
+.popu-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; padding-top: 18px; }
+.popu-button { border: 0; border-radius: 7px; padding: 8px 17px; cursor: pointer; }
+.popu-button-primary { color: #fff; background: #377dff; }
+.popu-button-secondary { color: #252a34; background: #edf0f5; }
+.popu-button-danger { color: #fff; background: #d92d20; }
+.popu-close { position: absolute; right: 13px; top: 10px; border: 0; background: transparent; color: #777e8b; font-size: 20px; cursor: pointer; }
+.popu-progress { width: 100%; margin-top: 8px; }
+
+@media (prefers-color-scheme: dark) {
+  :root { color: #f1f3f7; }
+  .popu-shell { background: rgba(35, 38, 45, .98); border-color: rgba(255, 255, 255, .14); }
+  .popu-message, .popu-detail-label, .popu-close { color: #abb2bf; }
+  .popu-field input[type="text"], .popu-field input[type="number"], .popu-field textarea, .popu-field select { background: #17191e; color: #f1f3f7; border-color: #555d6b; }
+  .popu-button-secondary { color: #f1f3f7; background: #4a505c; }
+}
+

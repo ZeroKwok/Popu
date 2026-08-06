@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "mode": "notify",
+  "template": "notification",
+  "position": "bottom_right",
+  "duration_ms": 8000,
+  "content": {
+    "severity": "success",
+    "title": "Backup completed",
+    "message": "128 files, 2.4 GB, 03:21.",
+    "progress": 100
+  }
+}
+

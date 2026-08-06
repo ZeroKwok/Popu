@@ -1,0 +1,7 @@
+/src-tauri/target/
+/node_modules/
+/dist/
+/.pytest_cache/
+/**/__pycache__/
+*.pyc
+

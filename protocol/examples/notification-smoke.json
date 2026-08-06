@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "mode": "notify",
+  "template": "notification",
+  "position": "bottom_right",
+  "duration_ms": 800,
+  "content": {
+    "severity": "success",
+    "title": "Popu smoke test",
+    "message": "This notification should close automatically."
+  }
+}

@@ -78,6 +78,8 @@ popu templates validate --path .\templates\my-template
 - `notify`：窗口成功创建后立即返回；stdout 输出 `{ "status": "shown" }`。`shown` 仅表示窗口已创建，不表示通知在后续展示期间不会崩溃、被系统关闭或被用户关闭。
 - 退出码：`0` 请求已正常完成/显示；`10` 用户取消或关闭；`11` 对话框超时；`12` 请求、模板或运行时错误。
 
+这里的“返回”指 `popu notify` 父进程退出。Windows PowerShell 5.1 的 native pipeline 可能继续跟踪仍在显示的 UI 后代；要求提示符也立即恢复时应使用 `Start-Process` 或 Python SDK。
+
 ### 4.2 Python SDK
 
 Python 包名建议为 `popu`，仅负责构造和校验 JSON、调用已安装的 `popu.exe`、解析返回值。它不嵌入 Tauri，也不自行实现窗口。
@@ -91,7 +93,7 @@ result = show(DialogRequest.confirm(
     position=Position.CURSOR_SCREEN_CENTER,
 ))
 
-if result.status == "submitted" and result.values["confirmed"]:
+if result.status == "submitted" and result.action == "confirm":
     replace_files()
 
 notify(Notification.success(
@@ -168,7 +170,7 @@ notify(Notification.success(
 
 - `form.fields[].type` 使用渲染控件名称：`text`、`textarea`、`checkbox`、`select`、`radio_group`、`number`。
 - 用户输入是 `values` 的唯一来源；action 不得注入、覆盖或隐式修改任何字段。
-- 模板提交的 `values` 必须与已渲染字段一一对应，Rust 端重新校验；action 不得注入、覆盖或隐式修改任何字段。
+- 模板提交的 `values` 不得包含未知字段，且必须满足必填与类型约束；Rust 端重新校验。
 - `submit: true` 表示先校验所有字段，再返回 `status: "submitted"`、当前 `values` 与该 action ID。
 - `result_status: "cancelled"` 表示立即返回取消；标题栏关闭和 Alt+F4 返回 `closed`；超时返回 `timed_out`。
 - v1 不支持 action 携带固定业务字段。需要固定业务选择时，使用 `select` 或 `radio_group` 字段显式呈现给用户。
@@ -198,26 +200,25 @@ v1 只保证以下两种位置，其余位置留给后续版本：
 ```text
 my-template/
 ├── manifest.json       # 名称、版本、支持的 mode、允许的字段
-├── index.html
-├── template.css
-└── template.js
+├── template.html
+└── template.css
 ```
 
-`manifest.json` 声明模板名称和支持的 schema 版本。Host 在显示前校验模板、请求模式和字段；不兼容即失败，不回退到未知模板。
+`manifest.json` 声明模板名称和支持的协议版本。当前 Rust 进程在显示前校验模板名称、请求模式、必需 slot 和路径边界；不兼容即失败，不回退到未知模板。v1 外部模板仅替换 HTML/CSS 布局，不加载模板自带 JavaScript。
 
 ### 7.2 模板桥接 API
 
-模板前端只获得两件事：只读 `request` 数据和窄桥接对象 `popu`。
+打包的通用渲染器只获得只读 `request` 数据和以下窄桥接能力：
 
 ```javascript
-const request = await popu.getRequest();       // read-only structured data
-await popu.submit({ action: "confirm", values: collectFormValues() });
-await popu.close({ status: "cancelled" });
+const bootstrap = await invoke("get_bootstrap");
+await invoke("submit", { action: "confirm", values: collectFormValues() });
+await invoke("finish", { status: "cancelled", action: "cancel" });
 ```
 
-内置模板强制使用 CSP，禁止动态导航、远程脚本、远程图片和网络请求；同时不开放 Shell、文件系统、Tauri 任意 command 或 `eval`。HTML 中展示文本必须使用安全文本节点或经过受限 sanitizer 的 Markdown；不得将 `content` 字段插入 `innerHTML`。
+模板 HTML 本身来自受信任的安装内容，可作为布局载入；所有请求中的 `title/message/details/label/value` 只能通过 `textContent` 或表单属性写入，不得拼接进模板 HTML。应用强制使用 CSP，禁止远程脚本、远程图片和网络请求；同时不开放 Shell、文件系统、任意 Tauri command 或 `eval`。
 
-第三方本地模板在 v1 被视为安装方的可信代码：Popu 只限制其宿主 bridge 权限，**不承诺**阻止其自身 JavaScript 发起网络请求。将来若要把第三方模板也限制为离线安全模板，必须强制 CSP、导航拦截、签名和权限清单；不能沿用当前信任模型。
+第三方本地模板在 v1 被视为安装方的可信布局，但仍不执行模板 JavaScript。模板只能改变结构与样式，交互、校验和 IPC 均由随 Popu 打包的通用渲染器完成。
 
 ### 7.3 v1 渲染控件白名单
 
@@ -231,7 +232,7 @@ await popu.close({ status: "cancelled" });
 | 输入 | `checkbox` | 单项确认或“应用到后续项”。 |
 | 输入 | `select`、`radio_group` | 有限候选项选择；选项只包含稳定 value 与显示 label。 |
 | 输入 | `number` | 数字输入；支持最小值、最大值和步进。 |
-| 操作 | `button` | `primary`、`secondary`、`danger` 三种样式，可提交固定值或取消/关闭。 |
+| 操作 | `button` | `primary`、`secondary`、`danger` 三种样式，可提交当前表单或取消。 |
 | 通知 | `progress`（只读） | 仅展示 0–100 的当前进度；v1 不支持用户拖动或任务控制。 |
 | 通知 | `close` | 关闭通知；不会向调用方回传业务结果。 |
 
@@ -312,10 +313,10 @@ CLI / Python SDK ── IPC ──► Popu Host（唯一 UI owner）
 
 以下能力不属于当前 CLI 原型；仅在明确升级为 IPC Host 后由 Host 实现。Host 只在请求仍处于活动状态时使用 key 去重；它不保存终态，因此不能提供跨重启的“永不重复显示”。默认策略如下：
 
-| 场景 | Prototype 行为 |
+| 场景 | 未来 IPC Host 行为 |
 | --- | --- |
-| 任意 CLI/Python 进程中重复 `dialog` | coordinator 合并为同一个窗口；所有等待者收到同一个响应。 |
-| 任意 CLI/Python 进程中重复 `notify` | coordinator 更新已显示的通知内容并重新开始显示计时。 |
+| 任意 CLI/Python 进程中重复 `dialog` | Host 合并为同一个窗口；所有等待者收到同一个响应。 |
+| 任意 CLI/Python 进程中重复 `notify` | Host 更新已显示的通知内容并重新开始显示计时。 |
 | 窗口已关闭、提交或超时后再次调用 | 视为新请求，再次显示。长期幂等由调用方保存业务状态。 |
 
 请求可通过 `dedupe_policy` 覆盖默认行为：`coalesce`（合并）、`replace`（更新活动通知）、`allow`（始终新建）。`dialog` 不允许 `replace`，避免用户在填写时请求内容被悄然改变。
@@ -330,7 +331,7 @@ v1 目标为 Windows 10/11 x64。Tauri 负责原生无边框窗口、always-on-t
 
 | 风险 | v1 控制措施 |
 | --- | --- |
-| AI 注入脚本/HTML | 请求只传 schema 数据；模板是本地可信资源；禁止 `innerHTML` 与远程资源。 |
+| AI 注入脚本/HTML | 请求只传 schema 数据；可信模板 HTML 与请求数据分离；请求文本只写入安全文本节点；禁止远程资源。 |
 | 用户误判操作 | 对话框明确展示标题、来源、目标、风险和取消按钮；高风险动作由调用方最终执行。 |
 | 用户关闭窗口 | 返回 `closed`；调用方默认不执行副作用。 |
 | 用户无响应 | `dialog` 按 `timeout_seconds` 返回 `timed_out`；默认不批准。 |
@@ -357,11 +358,7 @@ popu/
 │       ├── form/
 │       └── notification/
 ├── python/                    # Python SDK
-├── tests/
-│   ├── protocol/
-│   ├── templates/
-│   └── windows-e2e/
-└── packaging/windows/
+└── src-tauri/tests/         # CLI 与协议 fixture 集成测试
 ```
 
 ## 13. 测试策略与用例
@@ -375,7 +372,6 @@ popu/
 | 最小 `dialog` 请求 | 校验成功，补齐默认位置、窗口大小和模板。 |
 | 最小 `notify` 请求 | 校验成功，`duration_ms` 使用默认值。 |
 | 缺少 `version`、未知 mode/字段类型 | 拒绝请求，退出码 `12`，不得创建窗口。 |
-| `dialog` 的 action 引用不存在字段 | 拒绝请求。 |
 | required `checkbox` 未勾选后提交 | 拒绝提交；不得由 action 写入 `values` 绕过校验。 |
 | Cancel action、标题栏关闭、超时 | 分别返回 `cancelled`、`closed`、`timed_out`。 |
 | `notify` 包含 form 或等待响应 action | 拒绝请求。 |

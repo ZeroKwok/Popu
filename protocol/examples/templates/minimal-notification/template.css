@@ -1,0 +1,13 @@
+.minimal-card {
+  display: grid;
+  gap: 8px;
+  height: 100%;
+  padding: 24px;
+  color: #172033;
+  background: #f7f9ff;
+}
+
+.minimal-card p {
+  margin: 0;
+  color: #526078;
+}

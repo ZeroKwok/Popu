@@ -1,0 +1,10 @@
+{
+  "name": "popu",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "cargo build --release --manifest-path src-tauri/Cargo.toml",
+    "check:ui": "node --check ui/app.js"
+  }
+}

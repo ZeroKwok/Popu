@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://popu.dev/schema/popu-1.0.json",
+  "title": "Popu request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "mode", "content"],
+  "properties": {
+    "version": { "const": "1.0" },
+    "mode": { "enum": ["dialog", "notify"] },
+    "template": { "type": "string", "minLength": 1 },
+    "position": { "enum": ["bottom_right", "cursor_screen_center"] },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "always_on_top": { "type": "boolean" },
+        "width": { "type": "number", "minimum": 160, "maximum": 2000 },
+        "height": { "type": "number", "minimum": 160, "maximum": 2000 }
+      }
+    },
+    "content": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title"],
+      "properties": {
+        "severity": { "enum": ["info", "success", "warning", "error"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 20000 },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "value"],
+            "properties": {
+              "label": { "type": "string" },
+              "value": { "type": "string" }
+            }
+          }
+        },
+        "progress": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "form": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/field" }
+        }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/action" }
+    },
+    "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+    "duration_ms": { "type": "integer", "minimum": 500, "maximum": 86400000 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "mode": { "const": "dialog" } } },
+      "then": { "required": ["actions"] },
+      "else": {
+        "properties": {
+          "form": false,
+          "actions": { "maxItems": 0 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "label"],
+      "properties": {
+        "value": { "type": "string" },
+        "label": { "type": "string" }
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "label"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "type": { "enum": ["text", "textarea", "checkbox", "select", "radio_group", "number"] },
+        "label": { "type": "string", "minLength": 1 },
+        "required": { "type": "boolean" },
+        "placeholder": { "type": "string" },
+        "default": {},
+        "min_length": { "type": "integer", "minimum": 0 },
+        "max_length": { "type": "integer", "minimum": 0 },
+        "pattern": { "type": "string" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "step": { "type": "number", "exclusiveMinimum": 0 },
+        "options": { "type": "array", "items": { "$ref": "#/$defs/option" } }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "label": { "type": "string", "minLength": 1 },
+        "style": { "enum": ["primary", "secondary", "danger"] },
+        "submit": { "const": true },
+        "result_status": { "enum": ["cancelled", "closed"] }
+      },
+      "oneOf": [
+        { "required": ["submit"], "not": { "required": ["result_status"] } },
+        { "required": ["result_status"], "not": { "required": ["submit"] } }
+      ]
+    }
+  }
+}
+

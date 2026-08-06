@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "mode": "dialog",
+  "template": "confirm",
+  "position": "cursor_screen_center",
+  "content": {
+    "severity": "info",
+    "title": "Automated timeout smoke test",
+    "message": "This window should close automatically after one second."
+  },
+  "actions": [
+    { "id": "ok", "label": "OK", "style": "primary", "submit": true }
+  ],
+  "timeout_seconds": 1
+}
