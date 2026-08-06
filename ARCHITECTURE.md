@@ -35,7 +35,7 @@ Python / Shell / automation
 
 - 不持久化请求、响应、待办任务或审计记录。
 - 不支持调用进程崩溃后的恢复、查询、重试、跨设备同步或多人审批。
-- 不启动常驻守护进程、不使用 SQLite、不开放网络端口；仅允许活动期间的本地进程间协调通道。
+- 不启动 coordinator/常驻守护进程，不使用 SQLite，不开放网络端口或本地 IPC 服务。
 - 不支持远程模板 URL、模型下发任意 HTML/JavaScript、iframe 或模板中的任意系统访问。
 - 不在 v1 支持 macOS/Linux；设计中保留未来迁移到 Tauri 对应 WebView 的空间。
 
@@ -75,7 +75,7 @@ popu templates validate --path .\templates\my-template
 ```
 
 - `dialog --wait`：stdout 仅输出一个 `InteractionResponse` JSON；stderr 输出诊断日志。
-- `notify`：窗口成功创建后立即返回；stdout 输出 `{ "status": "shown" }`。
+- `notify`：窗口成功创建后立即返回；stdout 输出 `{ "status": "shown" }`。`shown` 仅表示窗口已创建，不表示通知在后续展示期间不会崩溃、被系统关闭或被用户关闭。
 - 退出码：`0` 请求已正常完成/显示；`10` 用户取消或关闭；`11` 对话框超时；`12` 请求、模板或运行时错误。
 
 ### 4.2 Python SDK
@@ -123,12 +123,12 @@ notify(Notification.success(
   },
   "form": {
     "fields": [
-      { "id": "confirmed", "type": "boolean", "label": "Replace files", "required": true }
+      { "id": "confirmed", "type": "checkbox", "label": "Replace files", "required": true }
     ]
   },
   "actions": [
-    { "id": "confirm", "label": "Replace", "style": "danger", "submit": { "confirmed": true } },
-    { "id": "cancel", "label": "Cancel", "style": "secondary", "close": true }
+    { "id": "confirm", "label": "Replace", "style": "danger", "submit": true },
+    { "id": "cancel", "label": "Cancel", "style": "secondary", "result_status": "cancelled" }
   ],
   "timeout_seconds": 300
 }
@@ -164,13 +164,22 @@ notify(Notification.success(
 
 `status` 只能是 `submitted`、`cancelled`、`closed` 或 `timed_out`。`notify` 不产生业务响应；调用方仅接收 `shown` 或错误。
 
+### 5.4 表单与 action 语义
+
+- `form.fields[].type` 使用渲染控件名称：`text`、`textarea`、`checkbox`、`select`、`radio_group`、`number`。
+- 用户输入是 `values` 的唯一来源；action 不得注入、覆盖或隐式修改任何字段。
+- 模板提交的 `values` 必须与已渲染字段一一对应，Rust 端重新校验；action 不得注入、覆盖或隐式修改任何字段。
+- `submit: true` 表示先校验所有字段，再返回 `status: "submitted"`、当前 `values` 与该 action ID。
+- `result_status: "cancelled"` 表示立即返回取消；标题栏关闭和 Alt+F4 返回 `closed`；超时返回 `timed_out`。
+- v1 不支持 action 携带固定业务字段。需要固定业务选择时，使用 `select` 或 `radio_group` 字段显式呈现给用户。
+
 ## 6. 位置与窗口策略
 
 v1 只保证以下两种位置，其余位置留给后续版本：
 
 | `position` | 行为 |
 | --- | --- |
-| `bottom_right` | 在当前活动屏幕工作区的右下角显示，保留系统任务栏与配置的边距。适合通知。 |
+| `bottom_right` | 在**请求创建瞬间鼠标所在屏幕**的工作区右下角显示，保留系统任务栏与配置的边距。读取鼠标失败时使用主屏。适合通知。 |
 | `cursor_screen_center` | 读取当前鼠标坐标，识别鼠标所在屏幕，在该屏幕工作区居中显示。适合需要立即关注的对话框。 |
 
 实现细节：Tauri/Rust 后端负责获取屏幕与鼠标信息、DPI 换算和裁边；HTML 不自行计算屏幕坐标。窗口默认 `always_on_top: true`，但仅第一次出现时尝试获取键盘焦点；通知不抢焦点。多屏、缩放、任务栏位置变化必须有自动化测试和手工测试。
@@ -182,7 +191,7 @@ v1 只保证以下两种位置，其余位置留给后续版本：
 ### 7.1 模板来源
 
 1. **内置模板**：随 `popu.exe` 打包，例如 `confirm`、`form`、`notification`。
-2. **本地模板目录**：调用方通过 `--template-dir` 或请求中的受控配置启用；目录由集成方安装和管理，不能由 AI 返回的请求指定任意路径。
+2. **本地模板目录**：启动方通过 `--template-dir` 的受信任配置启用；目录由集成方安装和管理，不能由 AI 返回的请求指定任意路径。该参数不是请求 JSON 的一部分。
 
 每个模板目录包含：
 
@@ -202,13 +211,13 @@ my-template/
 
 ```javascript
 const request = await popu.getRequest();       // read-only structured data
-await popu.submit({ action: "confirm", values: { confirmed: true } });
+await popu.submit({ action: "confirm", values: collectFormValues() });
 await popu.close({ status: "cancelled" });
 ```
 
-不开放 Shell、文件系统、网络、Tauri 任意 command、动态导航、`eval` 或远程脚本加载。HTML 中展示文本必须使用安全文本节点或经过受限 sanitizer 的 Markdown；不得将 `content` 字段插入 `innerHTML`。
+内置模板强制使用 CSP，禁止动态导航、远程脚本、远程图片和网络请求；同时不开放 Shell、文件系统、Tauri 任意 command 或 `eval`。HTML 中展示文本必须使用安全文本节点或经过受限 sanitizer 的 Markdown；不得将 `content` 字段插入 `innerHTML`。
 
-第三方模板在 v1 被视为本地可信代码。将来若开放模板市场或远程下载，必须增加签名、沙箱和权限清单，不能沿用当前信任模型。
+第三方本地模板在 v1 被视为安装方的可信代码：Popu 只限制其宿主 bridge 权限，**不承诺**阻止其自身 JavaScript 发起网络请求。将来若要把第三方模板也限制为离线安全模板，必须强制 CSP、导航拦截、签名和权限清单；不能沿用当前信任模型。
 
 ### 7.3 v1 渲染控件白名单
 
@@ -249,7 +258,7 @@ v1 暂不支持日期选择器、文件选择器、富文本编辑器、表格�
 └───────────────────────────────────────────────────────────┘
 ```
 
-不需要常驻 Host daemon、SQLite 或 HTTP server。Rust 端的临时 coordinator 在有活动请求时使用 Windows Named Pipe 接收本地 CLI 请求，并在最后一个请求结束后立即退出。`dialog` 的 CLI 进程从 coordinator 转发响应至 stdout；`notify` 的 CLI 进程在收到 `ready` 后返回，随后不保留任何业务数据。
+不需要 Host daemon、SQLite、Named Pipe 或 HTTP server。`dialog` 进程自身拥有 Tauri 窗口并通过 stdout 返回响应。`notify` 的 CLI 进程启动一个短生命周期 UI 子进程，在收到 `ready` 后返回；该 UI 子进程继承请求数据和可选 lifetime pipe，随后不保留任何业务数据。
 
 ### 8.1 调用方生命周期绑定（Windows）
 
@@ -261,6 +270,8 @@ v1 暂不支持日期选择器、文件选择器、富文本编辑器、表格�
 4. `notify` 创建窗口并完成 ready 握手后可立即返回给 Python；Python 继续持有写端，因此 UI 能存活到时限、被用户关闭或 Python 退出。
 
 Python 进程崩溃、被结束或正常退出时，操作系统会关闭其管道写端，Popu 将可靠地得到 EOF。该方案也能自然迁移到 Unix。纯 CLI 的 `popu notify` 没有可由其自动继承的“祖先进程存活句柄”，因此默认不承诺绑定；需要严格绑定时由自动化调用方使用 Python SDK，或未来显式传入受控的 `--lifetime-handle`。
+
+**句柄所有权规则：** Python 仅保留 pipe 写端；CLI 和 `notify` UI 子进程仅继承读端。CLI 在派生 UI 后必须关闭自己的读端副本；UI 绝不能继承任何写端。否则即使 Python 退出，仍有写端存活，UI 也不会收到 EOF。
 
 Windows Job Object 可以作为原生调用方的替代实现：调用方创建带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 Job 并将 Popu 加入其中。它同样要求调用方参与管理，不能由 Popu 单方面建立。
 
@@ -274,29 +285,32 @@ Python worker B ── pipe B ──► Popu notify B
 Python worker C ── pipe C ──► Popu dialog C
 ```
 
-### 9.1 临时 Rust coordinator（v1）
+### 9.1 CLI 原型的边界
 
-协调逻辑只能存在于 Rust/Popu Host：它是所有 CLI、Python SDK 与未来语言调用进入 UI 前的唯一权威。Python SDK 只负责启动 CLI/维持 lifetime pipe/解析 JSON，不缓存、排队、去重或决定窗口位置。
 
-- 第一个 `popu` 调用取得单例锁并启动 coordinator；后续 CLI 通过当前用户可访问的 Windows Named Pipe 发送请求。
-- coordinator 的状态只存在内存：活动请求、请求订阅者、窗口队列、通知堆叠位置及 lifetime pipe。
-- `dialog` 按 `concurrency_key` 做 FIFO 互斥；无 key 的 dialog 可同时显示，但 coordinator 负责避免完全重叠。
-- `notify` 统一管理右下角的堆叠、动画与到期移除。
-- `cursor_screen_center` 仍适合低并发确认；coordinator 在同一屏幕已有中心对话框时按队列展示，避免覆盖。
-- 最后一个请求终态完成、所有客户端断开并且没有窗口后，coordinator 关闭 Named Pipe 并退出。
+- 每次 `dialog` 均显示独立窗口；不对不同调用做队列、互斥或去重。
+- 每次 `notify` 均显示独立窗口；同一屏幕的右下角通知可能重叠，原型阶段接受该限制。
+- `cursor_screen_center` 的并发窗口也可能重叠，因此只适用于低并发、需要立即处理的确认。
+- 同一个请求多次调用等同于多个请求；业务层若需要幂等、合并、取消或“仅提示一次”，必须在调用 Popu 前完成判断。
 
-这不是常驻守护进程或任务服务：它不落盘、不接受网络请求，也不能在进程重启后恢复请求。
+这条边界使 CLI 保持真正的“一次调用、一扇窗口、一次响应”模型，不产生隐式跨进程状态。
 
-调用方可通过 `concurrency_key` 表达业务互斥需求，例如同一部署、同一设备或同一订单不应同时出现多个确认框。
+### 9.2 未来升级：IPC Host 的活动期幂等
 
-### 9.1.1 重复请求与活动期幂等
+只有在需要跨进程去重、全局通知堆叠、对话框队列、`concurrency_key` 互斥或跨调用取消时，才引入下面的**替代运行模型**；不能在当前 CLI 中暗藏这些状态：
+
+```text
+CLI / Python SDK ── IPC ──► Popu Host（唯一 UI owner）
+                                  │
+                                  └── in-memory active-session state
+```
 
 每个请求应提供调用方生成的 `request_id`，并可选提供 `dedupe_key`。两者语义不同：
 
 - `request_id`：一次业务交互的唯一标识；同一个调用重试时必须保持不变。
 - `dedupe_key`：调用方定义的业务去重范围，例如 `"deploy:prod:2026-08-06"`。未提供时默认使用 `request_id`。
 
-Popu **只在请求仍处于活动状态时**使用 key 去重；它不保存终态，因此不能提供跨重启的“永不重复显示”。默认策略如下：
+以下能力不属于当前 CLI 原型；仅在明确升级为 IPC Host 后由 Host 实现。Host 只在请求仍处于活动状态时使用 key 去重；它不保存终态，因此不能提供跨重启的“永不重复显示”。默认策略如下：
 
 | 场景 | Prototype 行为 |
 | --- | --- |
@@ -350,10 +364,82 @@ popu/
 └── packaging/windows/
 ```
 
-## 13. 原型里程碑
+## 13. 测试策略与用例
 
-1. **CLI 核心**：实现 Rust coordinator、单例锁、当前用户 Named Pipe、schema、`dialog --wait`、stdout 响应及 `confirm` 内置模板。
-2. **通知与定位**：实现 `notify`、`bottom_right`、`cursor_screen_center`、活动期去重、并发队列和多屏 DPI 测试。
+测试以“Rust 核心逻辑可确定地单测、真实 WebView 仅做少量端到端验证”为原则。窗口位置、调用隔离和生命周期不能只靠人工点一点确认。
+
+### 13.1 协议与 CLI（自动化）
+
+| 用例 | 断言 |
+| --- | --- |
+| 最小 `dialog` 请求 | 校验成功，补齐默认位置、窗口大小和模板。 |
+| 最小 `notify` 请求 | 校验成功，`duration_ms` 使用默认值。 |
+| 缺少 `version`、未知 mode/字段类型 | 拒绝请求，退出码 `12`，不得创建窗口。 |
+| `dialog` 的 action 引用不存在字段 | 拒绝请求。 |
+| required `checkbox` 未勾选后提交 | 拒绝提交；不得由 action 写入 `values` 绕过校验。 |
+| Cancel action、标题栏关闭、超时 | 分别返回 `cancelled`、`closed`、`timed_out`。 |
+| `notify` 包含 form 或等待响应 action | 拒绝请求。 |
+| 关闭/取消/超时 | stdout 分别只输出 `closed`、`cancelled`、`timed_out` JSON，退出码符合 CLI 合约。 |
+| stdout/stderr 分离 | stdout 可被 `json.loads()` 直接解析；诊断与日志绝不污染 stdout。 |
+| 同一 schema fixture 经 CLI 和 Python SDK | 请求与响应 JSON 完全一致。 |
+
+### 13.2 模板与渲染安全（自动化）
+
+| 用例 | 断言 |
+| --- | --- |
+| 内置 `confirm/form/notification` | 每种白名单控件都能正确渲染、提交和校验。 |
+| 合法外部模板 manifest | 模式、schema 版本、允许字段匹配时才可加载。 |
+| 缺 manifest、未知模板、版本不匹配 | 明确失败，不静默回退。 |
+| `title/message/details` 中包含 `<script>`、`<img onerror>`、`javascript:` | 仅作为文本显示；不执行脚本、不发起网络请求。 |
+| 模板请求未知 bridge command | Rust 端拒绝，前端不能取得文件系统/Shell/网络权限。 |
+| 内置模板尝试 `fetch`、跳转或加载远程图片 | CSP/导航拦截拒绝请求。 |
+| 模板目录路径穿越 | `..`、符号链接越界和请求中动态指定模板路径均被拒绝。 |
+| 字段校验 | 必填、长度、正则、数字范围错误时禁用提交并显示固定错误提示。 |
+
+### 13.3 独立调用与并发（Rust 单元/集成测试）
+
+| 用例 | 断言 |
+| --- | --- |
+| 两个相同 dialog 请求 | 创建两个独立窗口；响应不能串到对方 stdout。 |
+| 两个相同 notify 请求 | 创建两个独立通知；无共享状态。 |
+| 两个并发调用方 | 结束 A，只关闭 A 的窗口；B 继续可交互。 |
+| 多个右下角通知 | 每个窗口按自身工作区右下角计算；跨进程重叠属于已知原型限制。 |
+| 中心对话框同屏并发 | 可能重叠；这是已知原型限制。 |
+
+### 13.4 lifetime pipe 与异常退出（Windows 集成测试）
+
+测试工具启动一个可控的假调用方进程，记录 Popu 子进程 PID 和窗口标识，再触发对应故障。每个用例都必须验证：窗口关闭、Popu 退出、没有 stdout 成功响应、没有孤儿进程。
+
+| 用例 | 操作 |
+| --- | --- |
+| 正常调用方退出 | 关闭 lifetime pipe 写端。 |
+| 调用方崩溃 | `TerminateProcess` 假调用方。 |
+| dialog 等待中退出 | 用户尚未点击时结束调用方。 |
+| notify 显示中退出 | 通知尚未到期时结束调用方。 |
+| 两个调用方并发 | 结束 A，只关闭 A 的窗口；B 继续可交互。 |
+| pipe 创建/传递失败 | 请求失败且不创建不可关闭的 UI。 |
+| Python 已退出但 CLI/UI 遗留写端副本 | 测试失败；正确实现必须使 UI 收到 EOF 并退出。 |
+
+### 13.5 位置、DPI 与可访问性
+
+位置计算必须抽成无 UI 的纯 Rust 函数，以虚拟显示器参数做单元测试：单屏、双屏横向/纵向、负坐标、125%/150%/200% DPI、任务栏在四个边、鼠标刚好位于屏幕边界、窗口大于工作区。
+
+Windows 端到端测试至少覆盖：右下角窗口不遮挡任务栏；鼠标所在屏幕中心定位正确；Tab 顺序、Enter 默认动作、Esc 取消、可见焦点与屏幕阅读器名称；亮/暗主题、最小与高 DPI；以及 WebView2 缺失时显示可诊断错误而不是崩溃。
+
+多显示器与真实 DPI 组合很难在普通 CI 完整模拟：CI 运行纯位置函数和单屏 UI smoke test，发布前在物理双屏 Windows 机器执行手工验收矩阵。
+
+### 13.6 测试夹具与质量门槛
+
+- `protocol/examples/` 中每个合法请求都是跨 CLI、Python 与 Rust 的共享 fixture；非法请求放入 `invalid/`。
+- Rust 单元测试覆盖 schema、响应校验、位置和 pipe 生命周期；不依赖真实 WebView。
+- UI 使用稳定的 `data-testid` 与可访问性名称，避免以像素或任意 CSS class 作为自动化选择器。
+- CI 至少运行格式化、lint、Rust 单元/集成测试、Python 测试、schema fixture 校验和 Windows UI smoke test。
+- 对 lifetime pipe、模板桥接和窗口定位这三类高风险逻辑要求回归测试；修复 bug 时先添加能复现问题的测试。
+
+## 14. 原型里程碑
+
+1. **CLI 核心**：实现 schema、`dialog --wait`、stdout 响应及 `confirm` 内置模板。
+2. **通知与定位**：实现 `notify`、`bottom_right`、`cursor_screen_center`、多窗口独立生命周期和多屏 DPI 测试。
 3. **可替换模板**：实现 manifest、`--template-dir`、模板验证及桥接 API。
 4. **Python SDK 与发布**：提供同步 API、lifetime pipe、Windows 安装包、WebView2 Runtime 检测、示例与端到端测试。
 5. **再评估**：基于 Windows 原型的真实使用，再决定存储/恢复、其他平台、远程通道或其他语言 SDK 是否值得增加。
