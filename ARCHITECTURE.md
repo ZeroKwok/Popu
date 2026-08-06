@@ -35,7 +35,7 @@ Python / Shell / automation
 
 - 不持久化请求、响应、待办任务或审计记录。
 - 不支持调用进程崩溃后的恢复、查询、重试、跨设备同步或多人审批。
-- 不启动常驻守护进程、不使用 SQLite、不开放网络端口或本地 IPC 服务。
+- 不启动常驻守护进程、不使用 SQLite、不开放网络端口；仅允许活动期间的本地进程间协调通道。
 - 不支持远程模板 URL、模型下发任意 HTML/JavaScript、iframe 或模板中的任意系统访问。
 - 不在 v1 支持 macOS/Linux；设计中保留未来迁移到 Tauri 对应 WebView 的空间。
 
@@ -61,7 +61,7 @@ caller ── popu notify ──► Popu 确认窗口已创建 ──► caller 
                               └── 用户关闭 / duration 到期后退出
 ```
 
-为避免调用方退出导致通知消失，CLI 启动一个短生命周期的 detached UI 子进程；父进程只等待“窗口创建成功/失败”的握手。通知不落盘，机器重启或 Popu 被关闭后自然消失。
+CLI 启动一个短生命周期 UI 子进程；父进程只等待“窗口创建成功/失败”的握手。通过 Python SDK 调用时，UI 子进程持有调用方提供的 lifetime pipe，并在调用方退出时立即关闭自身。纯 CLI 调用默认只保证窗口自行到期或被关闭；若需要严格生命周期绑定，调用方必须提供 lifetime pipe。通知不落盘，机器重启或 Popu 被关闭后自然消失。
 
 ## 4. CLI 与 Python API
 
@@ -210,6 +210,30 @@ await popu.close({ status: "cancelled" });
 
 第三方模板在 v1 被视为本地可信代码。将来若开放模板市场或远程下载，必须增加签名、沙箱和权限清单，不能沿用当前信任模型。
 
+### 7.3 v1 渲染控件白名单
+
+所有内置模板和可替换模板都应基于下面的稳定控件契约渲染。AI/调用方可以组合这些控件，但不能请求任意 DOM、脚本或自定义控件类型。
+
+| 分类 | 控件 | 用途 |
+| --- | --- | --- |
+| 结构 | `title`、`message`、`details` | 标题、纯文本/受限 Markdown 正文、键值详情列表。 |
+| 状态 | `severity`、`icon` | `info`、`success`、`warning`、`error` 四种语义状态及对应内置图标。 |
+| 输入 | `text`、`textarea` | 短文本与多行反馈；支持必填、长度、placeholder 与正则校验。 |
+| 输入 | `checkbox` | 单项确认或“应用到后续项”。 |
+| 输入 | `select`、`radio_group` | 有限候选项选择；选项只包含稳定 value 与显示 label。 |
+| 输入 | `number` | 数字输入；支持最小值、最大值和步进。 |
+| 操作 | `button` | `primary`、`secondary`、`danger` 三种样式，可提交固定值或取消/关闭。 |
+| 通知 | `progress`（只读） | 仅展示 0–100 的当前进度；v1 不支持用户拖动或任务控制。 |
+| 通知 | `close` | 关闭通知；不会向调用方回传业务结果。 |
+
+内置模板的最小组合为：
+
+- `confirm`：`title + message + details + checkbox? + buttons`
+- `form`：`title + message + text/textarea/checkbox/select/radio_group/number + buttons`
+- `notification`：`severity + icon + title + message + details? + progress? + close`
+
+v1 暂不支持日期选择器、文件选择器、富文本编辑器、表格编辑、树控件、代码编辑器、图片上传、远程图片、超链接跳转和内嵌网页。确有需求时，应先新增正式 schema 控件类型和跨模板测试，而不是由模板私自解释未知字段。
+
 ## 8. 进程与内部架构
 
 ```text
@@ -225,15 +249,70 @@ await popu.close({ status: "cancelled" });
 └───────────────────────────────────────────────────────────┘
 ```
 
-不需要 Host daemon、SQLite、Named Pipe 或 HTTP server。`dialog` 结果通过该进程的 stdout 返回；`notify` 的 UI 子进程用一次性受控启动参数/匿名管道接收请求并回传 ready 状态，随后不保留任何业务数据。
+不需要常驻 Host daemon、SQLite 或 HTTP server。Rust 端的临时 coordinator 在有活动请求时使用 Windows Named Pipe 接收本地 CLI 请求，并在最后一个请求结束后立即退出。`dialog` 的 CLI 进程从 coordinator 转发响应至 stdout；`notify` 的 CLI 进程在收到 `ready` 后返回，随后不保留任何业务数据。
 
-## 9. Windows 与 Tauri
+### 8.1 调用方生命周期绑定（Windows）
+
+“调用方退出，Popu 也退出”需要调用方协作，不能仅靠 `parent_pid`：PID 可以复用；更重要的是 `popu notify` 为了立即返回会派生 UI 子进程，此时 UI 的直接父进程很快退出。v1 使用 **lifetime pipe** 作为唯一可靠的通用机制。
+
+1. Python SDK 创建匿名管道，将写端保留在 Python 进程，将只读端以受控继承方式传给 Popu（`--lifetime-handle`）。
+2. Popu 在 UI 生命周期中异步等待该读端：读端收到 EOF 代表调用方已经关闭管道或进程已退出；此时 Popu 关闭所有窗口并退出，不生成成功响应。
+3. `dialog` 通常无需额外 pipe，因为 Python 会等待其子进程；但 SDK 仍传递 pipe，使调用方被强制终止时也能关闭窗口。
+4. `notify` 创建窗口并完成 ready 握手后可立即返回给 Python；Python 继续持有写端，因此 UI 能存活到时限、被用户关闭或 Python 退出。
+
+Python 进程崩溃、被结束或正常退出时，操作系统会关闭其管道写端，Popu 将可靠地得到 EOF。该方案也能自然迁移到 Unix。纯 CLI 的 `popu notify` 没有可由其自动继承的“祖先进程存活句柄”，因此默认不承诺绑定；需要严格绑定时由自动化调用方使用 Python SDK，或未来显式传入受控的 `--lifetime-handle`。
+
+Windows Job Object 可以作为原生调用方的替代实现：调用方创建带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 Job 并将 Popu 加入其中。它同样要求调用方参与管理，不能由 Popu 单方面建立。
+
+## 9. 并发模型
+
+每个调用是独立会话，拥有独立的 request、窗口、timeout 与 lifetime pipe。因此任意一个调用方退出，只会关闭它自己创建的 Popu 窗口，不影响其他调用方。
+
+```text
+Python worker A ── pipe A ──► Popu dialog A
+Python worker B ── pipe B ──► Popu notify B
+Python worker C ── pipe C ──► Popu dialog C
+```
+
+### 9.1 临时 Rust coordinator（v1）
+
+协调逻辑只能存在于 Rust/Popu Host：它是所有 CLI、Python SDK 与未来语言调用进入 UI 前的唯一权威。Python SDK 只负责启动 CLI/维持 lifetime pipe/解析 JSON，不缓存、排队、去重或决定窗口位置。
+
+- 第一个 `popu` 调用取得单例锁并启动 coordinator；后续 CLI 通过当前用户可访问的 Windows Named Pipe 发送请求。
+- coordinator 的状态只存在内存：活动请求、请求订阅者、窗口队列、通知堆叠位置及 lifetime pipe。
+- `dialog` 按 `concurrency_key` 做 FIFO 互斥；无 key 的 dialog 可同时显示，但 coordinator 负责避免完全重叠。
+- `notify` 统一管理右下角的堆叠、动画与到期移除。
+- `cursor_screen_center` 仍适合低并发确认；coordinator 在同一屏幕已有中心对话框时按队列展示，避免覆盖。
+- 最后一个请求终态完成、所有客户端断开并且没有窗口后，coordinator 关闭 Named Pipe 并退出。
+
+这不是常驻守护进程或任务服务：它不落盘、不接受网络请求，也不能在进程重启后恢复请求。
+
+调用方可通过 `concurrency_key` 表达业务互斥需求，例如同一部署、同一设备或同一订单不应同时出现多个确认框。
+
+### 9.1.1 重复请求与活动期幂等
+
+每个请求应提供调用方生成的 `request_id`，并可选提供 `dedupe_key`。两者语义不同：
+
+- `request_id`：一次业务交互的唯一标识；同一个调用重试时必须保持不变。
+- `dedupe_key`：调用方定义的业务去重范围，例如 `"deploy:prod:2026-08-06"`。未提供时默认使用 `request_id`。
+
+Popu **只在请求仍处于活动状态时**使用 key 去重；它不保存终态，因此不能提供跨重启的“永不重复显示”。默认策略如下：
+
+| 场景 | Prototype 行为 |
+| --- | --- |
+| 任意 CLI/Python 进程中重复 `dialog` | coordinator 合并为同一个窗口；所有等待者收到同一个响应。 |
+| 任意 CLI/Python 进程中重复 `notify` | coordinator 更新已显示的通知内容并重新开始显示计时。 |
+| 窗口已关闭、提交或超时后再次调用 | 视为新请求，再次显示。长期幂等由调用方保存业务状态。 |
+
+请求可通过 `dedupe_policy` 覆盖默认行为：`coalesce`（合并）、`replace`（更新活动通知）、`allow`（始终新建）。`dialog` 不允许 `replace`，避免用户在填写时请求内容被悄然改变。
+
+## 10. Windows 与 Tauri
 
 v1 目标为 Windows 10/11 x64。Tauri 负责原生无边框窗口、always-on-top 和 Windows WebView2；所有前端资源本地打包，默认不加载外部 URL。WebView2 Runtime 使用 Evergreen 分发，安装器应检测运行时是否可用并给出修复方式。固定版 Runtime 会显著增大包体，不作为原型默认方案。 [WebView2 distribution](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution)
 
 未来迁移到 macOS/Linux 时，核心协议、模板清单和 Python/CLI 合约不变；仅窗口定位、安装器和 WebView 运行时适配需要重新验证。
 
-## 10. 安全与失败语义
+## 11. 安全与失败语义
 
 | 风险 | v1 控制措施 |
 | --- | --- |
@@ -246,7 +325,7 @@ v1 目标为 Windows 10/11 x64。Tauri 负责原生无边框窗口、always-on-t
 
 Popu 的“确认”不是操作授权的替代品。对删除、支付、上传、执行命令等动作，调用方应把确定的操作摘要传给 Popu，并在收到有效响应后自行执行。
 
-## 11. 仓库布局
+## 12. 仓库布局
 
 ```text
 popu/
@@ -271,14 +350,10 @@ popu/
 └── packaging/windows/
 ```
 
-## 12. 原型里程碑
+## 13. 原型里程碑
 
-1. **CLI 核心**：实现 schema、`dialog --wait`、stdout 响应及 `confirm` 内置模板。
-2. **通知与定位**：实现 `notify`、`bottom_right`、`cursor_screen_center`、多屏 DPI 测试。
+1. **CLI 核心**：实现 Rust coordinator、单例锁、当前用户 Named Pipe、schema、`dialog --wait`、stdout 响应及 `confirm` 内置模板。
+2. **通知与定位**：实现 `notify`、`bottom_right`、`cursor_screen_center`、活动期去重、并发队列和多屏 DPI 测试。
 3. **可替换模板**：实现 manifest、`--template-dir`、模板验证及桥接 API。
-4. **Python SDK 与发布**：提供同步 API、Windows 安装包、WebView2 Runtime 检测、示例与端到端测试。
+4. **Python SDK 与发布**：提供同步 API、lifetime pipe、Windows 安装包、WebView2 Runtime 检测、示例与端到端测试。
 5. **再评估**：基于 Windows 原型的真实使用，再决定存储/恢复、其他平台、远程通道或其他语言 SDK 是否值得增加。
-
-## 13. FoneTool 的当前关系
-
-Popu 在 `com/popu` 中作为独立仓库原型，不接入 FoneTool C++ 构建系统，也不引入 C++ SDK。现阶段由 Python 自动化或 Shell 调用 `popu.exe` 验证产品体验；若验证成功，再决定是否为 FoneTool 添加专门的调用层。
