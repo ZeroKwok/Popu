@@ -678,4 +678,14 @@ mod tests {
         values.insert("count".into(), json!(2));
         assert!(request.submitted_response("ok", values).is_err());
     }
+
+    #[test]
+    fn parses_short_and_long_content_layout_examples() {
+        for example in [
+            include_str!("../../protocol/examples/dialog-short-content.json"),
+            include_str!("../../protocol/examples/dialog-long-content.json"),
+        ] {
+            Request::parse(example).unwrap();
+        }
+    }
 }

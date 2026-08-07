@@ -204,6 +204,8 @@ my-template/
 └── template.css
 ```
 
+模板可使用以下 Popu 交互标记：`data-popu-drag-region` 定义可拖动窗口的背景区域，`data-popu-selectable` 定义允许用户选中和复制的文本区域。内置模板将卡片背景标为 drag region，正文和详情标为 selectable；按钮、表单控件、标签和 selectable 元素本身不会触发拖动。
+
 `manifest.json` 声明模板名称和支持的协议版本。当前 Rust 进程在显示前校验模板名称、请求模式、必需 slot 和路径边界；不兼容即失败，不回退到未知模板。v1 外部模板仅替换 HTML/CSS 布局，不加载模板自带 JavaScript。
 
 ### 7.2 模板桥接 API
@@ -323,7 +325,7 @@ CLI / Python SDK ── IPC ──► Popu Host（唯一 UI owner）
 
 ## 10. Windows 与 Tauri
 
-v1 目标为 Windows 10/11 x64。Tauri 负责原生无边框窗口、always-on-top 和 Windows WebView2；所有前端资源本地打包，默认不加载外部 URL。WebView2 Runtime 使用 Evergreen 分发，安装器应检测运行时是否可用并给出修复方式。固定版 Runtime 会显著增大包体，不作为原型默认方案。 [WebView2 distribution](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution)
+v1 目标为 Windows 10/11 x64。Tauri 负责原生无边框窗口、always-on-top 和 Windows WebView2；所有前端资源本地打包，默认不加载外部 URL。窗口和 WebView 使用透明背景，Windows 通过原生圆角 Window Region 让圆角外部的透明区域鼠标穿透到底层窗口；其他平台以后按各自窗口系统能力适配。WebView2 Runtime 使用 Evergreen 分发，安装器应检测运行时是否可用并给出修复方式。固定版 Runtime 会显著增大包体，不作为原型默认方案。 [WebView2 distribution](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution)
 
 未来迁移到 macOS/Linux 时，核心协议、模板清单和 Python/CLI 合约不变；仅窗口定位、安装器和 WebView 运行时适配需要重新验证。
 
@@ -421,6 +423,8 @@ popu/
 位置计算必须抽成无 UI 的纯 Rust 函数，以虚拟显示器参数做单元测试：单屏、双屏横向/纵向、负坐标、125%/150%/200% DPI、任务栏在四个边、鼠标刚好位于屏幕边界、窗口大于工作区。
 
 Windows 端到端测试至少覆盖：右下角窗口不遮挡任务栏；鼠标所在屏幕中心定位正确；Tab 顺序、Enter 默认动作、Esc 取消、可见焦点与屏幕阅读器名称；亮/暗主题、最小与高 DPI；以及 WebView2 缺失时显示可诊断错误而不是崩溃。
+
+透明窗口测试还必须覆盖：圆角外部点击穿透至底层测试窗口、卡片内部可正常点击；WebView 四边保留固定 9px 透明阴影区，卡片和阴影均不得溢出该区域；拖动 `data-popu-drag-region` 的空白区域会移动窗口；正文/详情可选择复制但不触发拖动；标题、背景和按钮文字不可选择。`dialog-short-content.json` 验证最小高度的短内容，`dialog-long-content.json` 验证换行、详情、表单滚动和操作区可达性。
 
 多显示器与真实 DPI 组合很难在普通 CI 完整模拟：CI 运行纯位置函数和单屏 UI smoke test，发布前在物理双屏 Windows 机器执行手工验收矩阵。
 

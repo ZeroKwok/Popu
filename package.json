@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "cargo build --release --manifest-path src-tauri/Cargo.toml",
-    "check:ui": "node --check ui/app.js"
+    "check:ui": "node --check ui\\app.js",
+    "test-dialog": "src-tauri\\target\\release\\popu.exe dialog --request protocol\\examples\\dialog-confirm.json --wait",
+    "test-notify": "src-tauri\\target\\release\\popu.exe notify --request protocol\\examples\\notification-success.json"
   }
 }

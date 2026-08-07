@@ -165,18 +165,31 @@ pub fn run_ui(
             let state = app.state::<RuntimeState>();
             let (width, height) = state.bootstrap.request.window_size();
             let is_notify = state.bootstrap.request.mode == Mode::Notify;
-            WebviewWindowBuilder::new(app, "popu", WebviewUrl::App("index.html".into()))
-                .title(&state.bootstrap.request.content.title)
-                .inner_size(width, height)
-                .min_inner_size(160.0, 160.0)
-                .decorations(false)
-                .resizable(false)
-                .always_on_top(state.bootstrap.request.window.always_on_top)
-                .skip_taskbar(is_notify)
-                .focused(!is_notify)
-                .visible(false)
-                .shadow(true)
-                .build()?;
+            let window =
+                WebviewWindowBuilder::new(app, "popu", WebviewUrl::App("index.html".into()))
+                    .title(&state.bootstrap.request.content.title)
+                    .inner_size(width, height)
+                    .min_inner_size(160.0, 160.0)
+                    .decorations(false)
+                    .transparent(true)
+                    .resizable(false)
+                    .always_on_top(state.bootstrap.request.window.always_on_top)
+                    .skip_taskbar(is_notify)
+                    .focused(!is_notify)
+                    .visible(false)
+                    // Windows adds a separate native layer for an undecorated
+                    // shadow. In a transparent WebView this is visible as an
+                    // oversized rounded frame around the HTML card, so Popu
+                    // deliberately has no native shadow.
+                    .shadow(false)
+                    .build()?;
+
+            #[cfg(windows)]
+            if let Err(error) = apply_rounded_window_region(&window) {
+                // Transparency remains useful even if a system policy or an
+                // unexpected platform detail prevents a shaped hit-test area.
+                eprintln!("Popu warning: cannot apply transparent window region: {error}");
+            }
 
             if state.bootstrap.request.mode == Mode::Dialog {
                 let timeout = state.bootstrap.request.timeout_seconds;
@@ -216,6 +229,42 @@ pub fn run_ui(
     // because some Windows event-loop versions normalize the returned code.
     let _ = app.run_return(|_, _| {});
     exit_code.load(Ordering::SeqCst)
+}
+
+/// Makes the native Windows hit-test region match the CSS card's rounded edge.
+/// Pixels outside that region are both transparent and click-through.
+#[cfg(windows)]
+fn apply_rounded_window_region(window: &WebviewWindow) -> Result<(), String> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, SetWindowRgn};
+
+    const CARD_RADIUS_LOGICAL_PX: f64 = 14.0;
+
+    let handle = window.window_handle().map_err(|error| error.to_string())?;
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return Err("window does not expose a Win32 handle".into());
+    };
+    let hwnd = handle.hwnd.get() as HWND;
+    let size = window.outer_size().map_err(|error| error.to_string())?;
+    let scale = window.scale_factor().map_err(|error| error.to_string())?;
+    let radius = (CARD_RADIUS_LOGICAL_PX * scale).round().max(1.0) as i32;
+    let width = i32::try_from(size.width).map_err(|_| "window width is too large")?;
+    let height = i32::try_from(size.height).map_err(|_| "window height is too large")?;
+
+    unsafe {
+        // SetWindowRgn takes ownership on success; on failure we retain it and
+        // must release it ourselves.
+        let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2);
+        if region.is_null() {
+            return Err("CreateRoundRectRgn failed".into());
+        }
+        if SetWindowRgn(hwnd, region, 1) == 0 {
+            let _ = DeleteObject(region);
+            return Err("SetWindowRgn failed".into());
+        }
+    }
+    Ok(())
 }
 
 pub fn handle_window_event<R: Runtime>(window: &tauri::Window<R>, event: &WindowEvent) {

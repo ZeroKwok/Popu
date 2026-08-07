@@ -8,12 +8,38 @@
 
 * { box-sizing: border-box; }
 
+html, body, #app, .popu-shell {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+[data-popu-selectable], [data-popu-selectable] *, input, textarea, select, option {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.popu-title, .popu-icon, .popu-button, .popu-close, .popu-field label, .popu-legend {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 html, body {
   width: 100%;
   height: 100%;
   margin: 0;
   overflow: hidden;
   background: transparent;
+}
+
+/*
+ * Keep the HTML card inside the transparent native WebView. This is also the
+ * only space available for the CSS shadow, so individual templates must not
+ * add their own outer margin.
+ */
+#app {
+  width: 100%;
+  height: 100%;
+  padding: 9px;
 }
 
 button, input, textarea, select { font: inherit; }
@@ -31,7 +57,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   border: 1px solid rgba(0, 0, 0, .12);
   border-radius: 14px;
   background: rgba(255, 255, 255, .98);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, .22);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, .22);
 }
 
 .popu-heading { display: flex; gap: 12px; align-items: flex-start; }
@@ -70,4 +96,3 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .popu-field input[type="text"], .popu-field input[type="number"], .popu-field textarea, .popu-field select { background: #17191e; color: #f1f3f7; border-color: #555d6b; }
   .popu-button-secondary { color: #f1f3f7; background: #4a505c; }
 }
-

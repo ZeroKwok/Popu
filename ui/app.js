@@ -2,6 +2,17 @@ const invoke = window.__TAURI__.core.invoke;
 
 let bootstrap;
 
+const nonDragSelector = [
+  "button",
+  "input",
+  "textarea",
+  "select",
+  "option",
+  "label",
+  "[data-popu-selectable]",
+  "[data-popu-no-drag]",
+].join(", ");
+
 function element(slot) {
   return document.querySelector(`[data-popu-slot="${slot}"]`);
 }
@@ -183,6 +194,17 @@ function renderProgress(progress) {
   root.append(bar);
 }
 
+function installDragRegions() {
+  document.addEventListener("mousedown", (event) => {
+    if (event.button !== 0 || !(event.target instanceof Element)) return;
+    if (!event.target.closest("[data-popu-drag-region]")) return;
+    if (event.target.closest(nonDragSelector)) return;
+    window.__TAURI__.window.getCurrentWindow().startDragging().catch((error) => {
+      console.error("Popu window drag failed", error);
+    });
+  });
+}
+
 async function start() {
   bootstrap = await invoke("get_bootstrap");
   const app = document.getElementById("app");
@@ -203,6 +225,7 @@ async function start() {
   renderForm(bootstrap.request.form);
   renderActions(bootstrap.request.actions);
   renderProgress(bootstrap.request.content.progress);
+  installDragRegions();
 
   document.querySelector("[data-popu-action='close']")?.addEventListener("click", () => invoke("finish", { status: "closed", action: null }));
   document.addEventListener("keydown", (event) => {

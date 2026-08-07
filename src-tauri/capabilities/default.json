@@ -3,6 +3,5 @@
   "identifier": "default",
   "description": "Minimal capability for the trusted Popu renderer.",
   "windows": ["popu"],
-  "permissions": ["core:default"]
+  "permissions": ["core:window:allow-start-dragging"]
 }
-

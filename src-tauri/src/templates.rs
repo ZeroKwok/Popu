@@ -202,6 +202,8 @@ mod tests {
     fn resolves_builtin_template() {
         let assets = resolve(&notification(), None).unwrap();
         assert!(assets.html.contains("data-popu-slot=\"title\""));
+        assert!(assets.html.contains("data-popu-drag-region"));
+        assert!(assets.html.contains("data-popu-selectable"));
         assert!(!assets.external);
     }
 

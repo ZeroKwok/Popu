@@ -11,6 +11,8 @@ Popu 是一个面向自动化脚本和 AI Agent 的轻量本机交互窗口。�
 - 内置 `confirm`、`form`、`notification` 三种模板。
 - 可信本地 HTML/CSS 模板替换；模板不执行自带 JavaScript。
 - 鼠标所在屏幕居中或工作区右下角定位。
+- 无边框透明圆角窗口；Windows 圆角外部区域鼠标穿透到底层窗口。
+- `data-popu-drag-region` 定义拖拽背景，`data-popu-selectable` 定义可复制文本；内置模板默认允许复制正文和详情。
 - Python lifetime pipe：Python 调用方退出时关闭对应 Popu 窗口。
 
 ## 构建
@@ -37,6 +39,8 @@ popu notify --request protocol/examples/notification-success.json
 popu templates list
 popu templates validate --path path/to/my-template
 ```
+
+布局手工验收可使用 `protocol/examples/dialog-short-content.json` 和 `protocol/examples/dialog-long-content.json`；前者验证最小窗口，后者验证长文本、详情和表单。
 
 可替换模板示例位于 `protocol/examples/templates/minimal-notification`。
 
