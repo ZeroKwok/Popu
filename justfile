@@ -6,6 +6,10 @@ build:
 build-release:
     cargo build --release --manifest-path src-tauri/Cargo.toml
 
+# Clean the build artifacts for the debug and release executables.
+clean:
+    cargo clean --manifest-path src-tauri/Cargo.toml
+
 # Build and run a debug executable with a protocol fixture.
 test file="dialog-confirm.json":
     cargo run --manifest-path src-tauri/Cargo.toml -- request protocol/examples/{{file}}
