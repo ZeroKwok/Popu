@@ -3,7 +3,7 @@
     "mode": "notify",
     "template": "minimal-notification",
     "position": "bottom_right",
-    "duration_ms": 3000,
+    "duration_ms": 10000,
     "content": {
         "severity": "info",
         "title": "Custom template",

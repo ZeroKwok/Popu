@@ -10,10 +10,10 @@
     },
     "content": {
         "severity": "info",
-        "title": "Done",
+        "title": "操作完成",
         "blocks": [
             {
-                "text": "Completed.",
+                "text": "所有任务均已成功!",
                 "type": "paragraph"
             }
         ]
