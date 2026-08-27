@@ -1,0 +1,4 @@
+interface:
+  display_name: "Popu"
+  short_description: "Design concise, safe human interactions for Popu."
+  default_prompt: "Use $popu to create a Popu request for this automation step."
