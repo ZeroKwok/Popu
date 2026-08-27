@@ -74,6 +74,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .popu-properties { display:grid; grid-template-columns:minmax(88px,auto) 1fr; gap:6px 14px; }
 .popu-property-label { color:#777e8b; }
 .popu-property-text,.popu-list-item { overflow-wrap:anywhere; white-space:pre-wrap; }
+.popu-property-full { grid-column:1 / -1; }
 .popu-list { margin:0; padding-left:22px; }
 .popu-form { display: grid; gap: 12px; padding: 2px; }
 .popu-field { display: grid; gap: 5px; }

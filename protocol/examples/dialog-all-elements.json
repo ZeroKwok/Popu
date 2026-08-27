@@ -18,7 +18,9 @@
         "items": [
           { "label": "Target", "text": "Production / East Asia" },
           { "label": "Artifacts", "text": "128 files · 2.4 GB" },
-          { "label": "Change ID", "text": "CHG-2026-0827" }
+          { "label": "Change ID", "text": "CHG-2026-0827" },
+          { "label": "Label-only property" },
+          { "text": "Text-only property spanning the complete row" }
         ]
       },
       {
@@ -41,6 +43,11 @@
             "label": "Release note",
             "default": "Routine deployment after package verification.",
             "max_length": 240
+          },
+          {
+            "id": "unlabelled_filter",
+            "type": "text",
+            "placeholder": "Optional field without a visible label"
           },
           {
             "id": "archive_format",

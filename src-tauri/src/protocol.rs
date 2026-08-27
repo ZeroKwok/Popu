@@ -162,7 +162,9 @@ impl WindowOptions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PropertyItem {
+    #[serde(default)]
     pub label: String,
+    #[serde(default)]
     pub text: String,
 }
 
@@ -235,6 +237,7 @@ pub struct Field {
     pub id: String,
     #[serde(rename = "type")]
     pub field_type: FieldType,
+    #[serde(default)]
     pub label: String,
     #[serde(default)]
     pub required: bool,
@@ -388,6 +391,12 @@ impl Request {
         let mut action_ids = HashSet::new();
         for action in &self.actions {
             validate_identifier(&action.id, "action")?;
+            if action.label.trim().is_empty() || action.label.chars().count() > 200 {
+                return Err(ProtocolError::Invalid(format!(
+                    "action {} label must contain 1-200 characters",
+                    action.id
+                )));
+            }
             if !action_ids.insert(action.id.as_str()) {
                 return Err(ProtocolError::Invalid(format!(
                     "duplicate action id: {}",
@@ -522,10 +531,10 @@ fn validate_content_block(block: &ContentBlock) -> Result<(), ProtocolError> {
     };
     if title
         .as_ref()
-        .is_some_and(|value| value.trim().is_empty() || value.chars().count() > 200)
+        .is_some_and(|value| value.chars().count() > 200)
     {
         return Err(ProtocolError::Invalid(
-            "block title must contain 1-200 characters".into(),
+            "block title must contain at most 200 characters".into(),
         ));
     }
     let text_ok = |value: &str| !value.trim().is_empty() && value.chars().count() <= 20_000;
@@ -536,9 +545,9 @@ fn validate_content_block(block: &ContentBlock) -> Result<(), ProtocolError> {
         ContentBlock::Properties { items, .. }
             if items.is_empty()
                 || items.iter().any(|item| {
-                    item.label.trim().is_empty()
-                        || item.label.chars().count() > 200
-                        || !text_ok(&item.text)
+                    item.label.chars().count() > 200
+                        || item.text.chars().count() > 20_000
+                        || (item.label.trim().is_empty() && item.text.trim().is_empty())
                 }) =>
         {
             Err(ProtocolError::Invalid(
@@ -592,9 +601,9 @@ fn validate_identifier(value: &str, kind: &str) -> Result<(), ProtocolError> {
 }
 
 fn validate_field(field: &Field) -> Result<(), ProtocolError> {
-    if field.label.trim().is_empty() {
+    if field.label.chars().count() > 200 {
         return Err(ProtocolError::Invalid(format!(
-            "field {} has an empty label",
+            "field {} label exceeds 200 characters",
             field.id
         )));
     }
@@ -637,6 +646,16 @@ fn validate_field(field: &Field) -> Result<(), ProtocolError> {
                 )));
             }
             let mut values = HashSet::new();
+            if field
+                .options
+                .iter()
+                .any(|option| option.value.trim().is_empty() || option.label.trim().is_empty())
+            {
+                return Err(ProtocolError::Invalid(format!(
+                    "field {} options require non-empty values and labels",
+                    field.id
+                )));
+            }
             if field
                 .options
                 .iter()
@@ -935,7 +954,8 @@ mod tests {
     fn rejects_empty_block_payloads_and_legacy_top_level_form() {
         for block in [
             r#"{"type":"paragraph","text":"   "}"#,
-            r#"{"type":"properties","items":[{"label":"Fact","text":" "} ]}"#,
+            r#"{"type":"properties","items":[{"label":" ","text":" "} ]}"#,
+            r#"{"type":"properties","items":[{}]}"#,
             r#"{"type":"unordered_list","items":[""]}"#,
             r#"{"type":"ordered_list","items":["   "]}"#,
             r#"{"type":"form","fields":[]}"#,
@@ -950,6 +970,38 @@ mod tests {
           "form":{"fields":[]},"actions":[{"id":"ok","label":"OK","submit":true}]
         }"#;
         assert!(Request::parse(legacy).is_err());
+    }
+
+    #[test]
+    fn optional_labels_and_one_sided_properties_are_valid() {
+        Request::parse(
+            r#"{
+              "version":"1.0","mode":"dialog","content":{"title":"Optional labels","blocks":[
+                {"type":"properties","title":" ","items":[
+                  {"label":"Label only"},
+                  {"text":"Text only"},
+                  {"label":"","text":"Visible text"}
+                ]},
+                {"type":"form","fields":[
+                  {"id":"without_label","type":"text"},
+                  {"id":"empty_label","type":"checkbox","label":""}
+                ]}
+              ]},
+              "actions":[{"id":"ok","label":"OK","submit":true}]
+            }"#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn required_display_values_reject_blank_text() {
+        for text in [
+            r#"{"version":"1.0","mode":"dialog","content":{"title":" "},"actions":[{"id":"ok","label":"OK","submit":true}]}"#,
+            r#"{"version":"1.0","mode":"dialog","content":{"title":"Actions"},"actions":[{"id":"ok","label":" ","submit":true}]}"#,
+            r#"{"version":"1.0","mode":"dialog","content":{"title":"Options","blocks":[{"type":"form","fields":[{"id":"choice","type":"select","options":[{"value":"a","label":" "}]}]}]},"actions":[{"id":"ok","label":"OK","submit":true}]}"#,
+        ] {
+            assert!(Request::parse(text).is_err(), "{text} should be invalid");
+        }
     }
 
     #[test]

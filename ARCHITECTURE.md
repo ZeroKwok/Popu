@@ -240,10 +240,10 @@ await invoke("finish", { status: "cancelled", action: "cancel" });
 
 | 分类 | 控件 | 用途 |
 | --- | --- | --- |
-| 展示块 | `paragraph`、`properties` | 简短纯文本和标签化事实。 |
+| 展示块 | `paragraph`、`properties` | 简短纯文本和标签化事实；属性项的 `label/text` 至少一侧有可见内容。 |
 | 展示块 | `unordered_list`、`ordered_list` | 并列事项和有顺序的步骤/阶段。 |
 | 展示块 | `progress`（只读） | 展示 0–100 的完成进度；不支持用户拖动或任务控制。 |
-| 输入块 | `form` | 将一组输入字段放入 blocks 的指定顺序位置；dialog 可包含多个。 |
+| 输入块 | `form` | 将一组输入字段放入 blocks 的指定顺序位置；dialog 可包含多个，字段 `label` 可省略且不产生空 DOM。 |
 | 状态 | `severity`、`icon` | `info`、`success`、`warning`、`error` 四种语义状态及对应内置图标。 |
 | 输入 | `text`、`textarea` | 短文本与多行反馈；支持必填、长度、placeholder 与正则校验。 |
 | 输入 | `checkbox` | 单项确认或“应用到后续项”。 |

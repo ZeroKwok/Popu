@@ -22,8 +22,12 @@ function setText(slot, value) {
   if (target) target.textContent = value ?? "";
 }
 
+function hasVisibleText(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 function appendBlockTitle(section, titleText) {
-  if (!titleText) return;
+  if (!hasVisibleText(titleText)) return;
   const title = document.createElement("h2");
   title.className = "popu-block-title";
   title.textContent = titleText;
@@ -34,15 +38,25 @@ function renderProperties(block, section) {
   const grid = document.createElement("div");
   grid.className = "popu-properties";
   for (const item of block.items) {
-    const label = document.createElement("div");
-    label.className = "popu-property-label";
-    label.textContent = item.label;
-    const text = document.createElement("div");
-    text.className = "popu-property-text";
-    text.textContent = item.text;
-    grid.append(label, text);
+    const hasLabel = hasVisibleText(item.label);
+    const hasText = hasVisibleText(item.text);
+    if (!hasLabel && !hasText) continue;
+    if (hasLabel) {
+      const label = document.createElement("div");
+      label.className = "popu-property-label";
+      if (!hasText) label.classList.add("popu-property-full");
+      label.textContent = item.label;
+      grid.append(label);
+    }
+    if (hasText) {
+      const text = document.createElement("div");
+      text.className = "popu-property-text";
+      if (!hasLabel) text.classList.add("popu-property-full");
+      text.textContent = item.text;
+      grid.append(text);
+    }
   }
-  section.append(grid);
+  if (grid.childElementCount > 0) section.append(grid);
 }
 
 function renderList(block, section) {
@@ -109,8 +123,11 @@ function renderBlocks(blocks = []) {
   const root = element("content");
   if (!root) return;
   root.replaceChildren();
-  root.hidden = blocks.length === 0;
-  for (const block of blocks) root.append(renderBlock(block));
+  for (const block of blocks) {
+    const section = renderBlock(block);
+    if (section.childElementCount > 0) root.append(section);
+  }
+  root.hidden = root.childElementCount === 0;
 }
 function inputId(field) {
   return `popu-field-${field.id}`;
@@ -128,20 +145,22 @@ function renderField(field) {
   wrapper.dataset.fieldId = field.id;
 
   if (field.type === "checkbox") {
-    const row = document.createElement("label");
-    row.className = "popu-field-inline";
     const input = document.createElement("input");
     input.id = inputId(field);
     input.name = field.id;
     input.type = "checkbox";
     input.checked = Boolean(field.default);
     input.required = Boolean(field.required);
-    row.append(input, document.createTextNode(field.label));
-    wrapper.append(row);
+    if (hasVisibleText(field.label)) {
+      const row = document.createElement("label");
+      row.className = "popu-field-inline";
+      row.append(input, document.createTextNode(field.label));
+      wrapper.append(row);
+    } else {
+      input.setAttribute("aria-label", field.id);
+      wrapper.append(input);
+    }
   } else if (field.type === "radio_group") {
-    const legend = document.createElement("div");
-    legend.className = "popu-legend";
-    legend.textContent = field.label;
     const options = document.createElement("div");
     options.className = "popu-options";
     for (const option of field.options ?? []) {
@@ -155,11 +174,16 @@ function renderField(field) {
       label.append(input, document.createTextNode(option.label));
       options.append(label);
     }
-    wrapper.append(legend, options);
+    if (hasVisibleText(field.label)) {
+      const legend = document.createElement("div");
+      legend.className = "popu-legend";
+      legend.textContent = field.label;
+      wrapper.append(legend);
+    } else {
+      options.setAttribute("aria-label", field.id);
+    }
+    wrapper.append(options);
   } else {
-    const label = document.createElement("label");
-    label.htmlFor = inputId(field);
-    label.textContent = field.label;
     let input;
     if (field.type === "textarea") {
       input = document.createElement("textarea");
@@ -182,7 +206,9 @@ function renderField(field) {
     input.id = inputId(field);
     input.name = field.id;
     input.required = Boolean(field.required);
-    if (field.placeholder && field.type !== "select") input.placeholder = field.placeholder;
+    if (hasVisibleText(field.placeholder) && field.type !== "select") {
+      input.placeholder = field.placeholder;
+    }
     if (hasValue(field.default)) input.value = String(field.default);
     if (hasValue(field.min_length)) input.minLength = field.min_length;
     if (hasValue(field.max_length)) input.maxLength = field.max_length;
@@ -190,7 +216,15 @@ function renderField(field) {
     if (hasValue(field.min)) input.min = field.min;
     if (hasValue(field.max)) input.max = field.max;
     if (hasValue(field.step)) input.step = field.step;
-    wrapper.append(label, input);
+    if (hasVisibleText(field.label)) {
+      const label = document.createElement("label");
+      label.htmlFor = inputId(field);
+      label.textContent = field.label;
+      wrapper.append(label);
+    } else {
+      input.setAttribute("aria-label", field.id);
+    }
+    wrapper.append(input);
   }
 
   return wrapper;

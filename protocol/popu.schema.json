@@ -27,7 +27,7 @@
       "required": ["title"],
       "properties": {
         "severity": { "enum": ["info", "success", "warning", "error"] },
-        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
         "blocks": { "type": "array", "default": [], "items": { "$ref": "#/$defs/contentBlock" } }
       }
     },
@@ -62,9 +62,20 @@
     }
   ],
   "$defs": {
-    "blockTitle": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
+    "blockTitle": { "type": "string", "maxLength": 200 },
     "blockText": { "type": "string", "minLength": 1, "maxLength": 20000, "pattern": "\\S" },
-    "propertyItem": { "type": "object", "additionalProperties": false, "required": ["label", "text"], "properties": { "label": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" }, "text": { "$ref": "#/$defs/blockText" } } },
+    "propertyItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "maxLength": 200 },
+        "text": { "type": "string", "maxLength": 20000 }
+      },
+      "anyOf": [
+        { "required": ["label"], "properties": { "label": { "pattern": "\\S" } } },
+        { "required": ["text"], "properties": { "text": { "pattern": "\\S" } } }
+      ]
+    },
     "contentBlock": { "oneOf": [
       { "type": "object", "additionalProperties": false, "required": ["type", "text"], "properties": { "type": { "const": "paragraph" }, "title": { "$ref": "#/$defs/blockTitle" }, "text": { "$ref": "#/$defs/blockText" } } },
       { "type": "object", "additionalProperties": false, "required": ["type", "items"], "properties": { "type": { "const": "properties" }, "title": { "$ref": "#/$defs/blockTitle" }, "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/propertyItem" } } } },
@@ -84,18 +95,18 @@
       "additionalProperties": false,
       "required": ["value", "label"],
       "properties": {
-        "value": { "type": "string" },
-        "label": { "type": "string" }
+        "value": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "label": { "type": "string", "minLength": 1, "pattern": "\\S" }
       }
     },
     "field": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "type", "label"],
+      "required": ["id", "type"],
       "properties": {
         "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
         "type": { "enum": ["text", "textarea", "checkbox", "select", "radio_group", "number"] },
-        "label": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "maxLength": 200 },
         "required": { "type": "boolean" },
         "placeholder": { "type": "string" },
         "default": {},
@@ -114,7 +125,7 @@
       "required": ["id", "label"],
       "properties": {
         "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
-        "label": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
         "style": { "enum": ["primary", "secondary", "danger"] },
         "submit": { "const": true },
         "result_status": { "enum": ["cancelled", "closed"] }

@@ -24,10 +24,11 @@ Write for the person deciding now, not for a debug log.
 
 - **Title:** state the action or question in one short line: `Replace 3 existing files?`, `Backup completed`, `Choose export format`.
 - **Paragraph:** use for a concise outcome, consequence, or next step.
-- **Properties:** use short `label/text` pairs for facts that change the decision: affected count, destination, estimated size/time, conflict policy, error reason, or correlation ID.
+- **Properties:** use short `label/text` items for facts that change the decision: affected count, destination, estimated size/time, conflict policy, error reason, or correlation ID. Either side may be omitted, but every item must have visible content on at least one side.
 - **Unordered list:** use for peer items whose order does not change the meaning.
 - **Ordered list:** use for steps, stages, or priorities.
-- **Progress:** use only for a known 0100 completion percentage.
+- **Progress:** use only for a known 0-100 completion percentage.
+- **Form labels:** omit `label` when a field does not need visible label text; do not emit empty label elements.
 - **Form:** use one or more form blocks for the minimum structured input needed by a dialog.
 - **Omit:** full paths when a meaningful leaf/name suffices, item-by-item dumps, stack traces, repeated metadata, implementation details, verbose AI reasoning, and information that cannot change the choice.
 - **Sensitive data:** never put passwords, tokens, recovery keys, full personal data, or secrets in blocks, fields, or expected stdout responses.
