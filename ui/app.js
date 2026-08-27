@@ -9,7 +9,6 @@ const nonDragSelector = [
   "select",
   "option",
   "label",
-  "[data-popu-scrollable]",
   "[data-popu-selectable]",
   "[data-popu-no-drag]",
 ].join(", ");
@@ -201,12 +200,23 @@ function renderProgress(progress) {
   root.append(bar);
 }
 
+function isScrollableContent(target) {
+  const container = target.closest("[data-popu-scrollable]");
+  if (!container) return false;
+
+  // A short dialog's body still fills the card, but its visual whitespace is
+  // background and should drag. Once content overflows, scrolling takes
+  // priority everywhere in that body, including the scrollbar track.
+  return container.scrollHeight > container.clientHeight;
+}
+
 function installDragRegions() {
   document.addEventListener("mousedown", (event) => {
     if (bootstrap.maximized) return;
     if (event.button !== 0 || !(event.target instanceof Element)) return;
     if (!event.target.closest("[data-popu-drag-region]")) return;
     if (event.target.closest(nonDragSelector)) return;
+    if (isScrollableContent(event.target)) return;
     window.__TAURI__.window.getCurrentWindow().startDragging().catch((error) => {
       console.error("Popu window drag failed", error);
     });
