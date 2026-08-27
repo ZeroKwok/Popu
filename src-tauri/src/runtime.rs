@@ -185,10 +185,10 @@ pub fn run_ui(
                     .build()?;
 
             #[cfg(windows)]
-            if let Err(error) = apply_rounded_window_region(&window) {
+            if let Err(error) = configure_frameless_windows_window(&window) {
                 // Transparency remains useful even if a system policy or an
-                // unexpected platform detail prevents a shaped hit-test area.
-                eprintln!("Popu warning: cannot apply transparent window region: {error}");
+                // unexpected platform detail prevents the native refinements.
+                eprintln!("Popu warning: cannot configure frameless window: {error}");
             }
 
             if state.bootstrap.request.mode == Mode::Dialog {
@@ -231,13 +231,17 @@ pub fn run_ui(
     exit_code.load(Ordering::SeqCst)
 }
 
-/// Makes the native Windows hit-test region match the CSS card's rounded edge.
-/// Pixels outside that region are both transparent and click-through.
+/// Applies the Windows-only parts of Popu's frameless-window contract.
 #[cfg(windows)]
-fn apply_rounded_window_region(window: &WebviewWindow) -> Result<(), String> {
+fn configure_frameless_windows_window(window: &WebviewWindow) -> Result<(), String> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, SetWindowRgn};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_STYLE, HWND_TOP, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_CAPTION, WS_MAXIMIZEBOX,
+        WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME,
+    };
 
     const CARD_RADIUS_LOGICAL_PX: f64 = 14.0;
 
@@ -253,6 +257,19 @@ fn apply_rounded_window_region(window: &WebviewWindow) -> Result<(), String> {
     let height = i32::try_from(size.height).map_err(|_| "window height is too large")?;
 
     unsafe {
+        // Tauri asks for an undecorated window, but Windows may repaint a
+        // retained non-client area after activation. Remove caption/system
+        // styles at the HWND boundary and force a non-client recalculation.
+        let current_style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+        let frameless_style = current_style
+            & !(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+        SetWindowLongPtrW(hwnd, GWL_STYLE, frameless_style as isize);
+        let frame_changed =
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE;
+        if SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, frame_changed) == 0 {
+            return Err("SetWindowPos failed while removing native caption".into());
+        }
+
         // SetWindowRgn takes ownership on success; on failure we retain it and
         // must release it ourselves.
         let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2);
