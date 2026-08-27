@@ -7,6 +7,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 [data-popu-selectable], [data-popu-selectable] *, input, textarea, select, option {
   user-select: text;
@@ -67,10 +68,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .popu-icon[data-severity="error"] { color: #b42318; background: #fee9e7; }
 .popu-title { margin: 1px 0 0; font-size: 18px; line-height: 1.35; font-weight: 650; }
 .popu-body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
-.popu-message { margin: 12px 0; color: #525866; white-space: pre-wrap; overflow-wrap: anywhere; }
-.popu-details { display: grid; grid-template-columns: minmax(88px, auto) 1fr; gap: 6px 14px; margin: 4px 0 14px; }
-.popu-detail-label { color: #777e8b; }
-.popu-detail-value { min-width: 0; overflow-wrap: anywhere; }
+.popu-content { display:grid; gap:14px; margin:12px 0 14px; color:#525866; }
+.popu-block-title { margin:0 0 6px; font-size:13px; }
+.popu-paragraph { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.popu-properties { display:grid; grid-template-columns:minmax(88px,auto) 1fr; gap:6px 14px; }
+.popu-property-label { color:#777e8b; }
+.popu-property-text,.popu-list-item { overflow-wrap:anywhere; white-space:pre-wrap; }
+.popu-list { margin:0; padding-left:22px; }
 .popu-form { display: grid; gap: 12px; padding: 2px; }
 .popu-field { display: grid; gap: 5px; }
 .popu-field-inline { display: flex; align-items: center; gap: 8px; }
@@ -80,7 +84,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 .popu-field textarea { min-height: 78px; resize: vertical; }
 .popu-options { display: flex; flex-wrap: wrap; gap: 10px 16px; }
-.popu-error { min-height: 17px; color: #b42318; font-size: 12px; }
+.popu-error { color: #b42318; font-size: 12px; }
 .popu-actions { display: flex; flex: 0 0 auto; justify-content: flex-end; gap: 8px; padding-top: 18px; }
 .popu-button { border: 0; border-radius: 7px; padding: 8px 17px; cursor: pointer; }
 .popu-button-primary { color: #fff; background: #377dff; }
@@ -92,7 +96,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @media (prefers-color-scheme: dark) {
   :root { color: #f1f3f7; }
   .popu-shell { background: rgba(35, 38, 45, .98); border-color: rgba(255, 255, 255, .14); }
-  .popu-message, .popu-detail-label, .popu-close { color: #abb2bf; }
+  .popu-content, .popu-property-label, .popu-close { color: #abb2bf; }
   .popu-field input[type="text"], .popu-field input[type="number"], .popu-field textarea, .popu-field select { background: #17191e; color: #f1f3f7; border-color: #555d6b; }
   .popu-button-secondary { color: #f1f3f7; background: #4a505c; }
 }

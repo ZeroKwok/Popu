@@ -28,20 +28,7 @@
       "properties": {
         "severity": { "enum": ["info", "success", "warning", "error"] },
         "title": { "type": "string", "minLength": 1, "maxLength": 200 },
-        "message": { "type": "string", "maxLength": 20000 },
-        "details": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["label", "value"],
-            "properties": {
-              "label": { "type": "string" },
-              "value": { "type": "string" }
-            }
-          }
-        },
-        "progress": { "type": "number", "minimum": 0, "maximum": 100 }
+        "blocks": { "type": "array", "default": [], "items": { "$ref": "#/$defs/contentBlock" } }
       }
     },
     "form": {
@@ -74,7 +61,15 @@
     }
   ],
   "$defs": {
-    "windowDimension": {
+    "blockTitle": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "blockText": { "type": "string", "maxLength": 20000 },
+    "propertyItem": { "type": "object", "additionalProperties": false, "required": ["label", "text"], "properties": { "label": { "type": "string", "minLength": 1, "maxLength": 200 }, "text": { "$ref": "#/$defs/blockText" } } },
+    "contentBlock": { "oneOf": [
+      { "type": "object", "additionalProperties": false, "required": ["type", "text"], "properties": { "type": { "const": "paragraph" }, "title": { "$ref": "#/$defs/blockTitle" }, "text": { "$ref": "#/$defs/blockText" } } },
+      { "type": "object", "additionalProperties": false, "required": ["type", "items"], "properties": { "type": { "const": "properties" }, "title": { "$ref": "#/$defs/blockTitle" }, "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/propertyItem" } } } },
+      { "type": "object", "additionalProperties": false, "required": ["type", "items"], "properties": { "type": { "const": "unordered_list" }, "title": { "$ref": "#/$defs/blockTitle" }, "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/blockText" } } } },
+      { "type": "object", "additionalProperties": false, "required": ["type", "items"], "properties": { "type": { "const": "ordered_list" }, "title": { "$ref": "#/$defs/blockTitle" }, "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/blockText" } } } }
+    ] },    "windowDimension": {
       "oneOf": [
         { "type": "number", "exclusiveMinimum": 0 },
         { "type": "string", "pattern": "^(?:0?\\.[0-9]+|[1-9][0-9]?(?:\\.[0-9]+)?|100(?:\\.0+)?)%$" }

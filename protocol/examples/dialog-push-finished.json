@@ -1,0 +1,38 @@
+{
+  "version": "1.0",
+  "mode": "dialog",
+  "template": "confirm",
+  "window": { "always_on_top": true, "width": 600, "height": 350 },
+  "content": {
+    "severity": "success",
+    "title": "Packages pushed",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": "The test and offline installer packages were pushed."
+      },
+      {
+        "type": "properties",
+        "title": "Artifacts",
+        "items": [
+          {
+            "label": "FoneTool",
+            "text": "\\\\192.168.4.230\\共享文件夹\\------------项目------------\\FoneTool\\FoneTool\\PC_4.X(04B)\\01 测试包\\2026-08-26 0945"
+          },
+          {
+            "label": "FoneTool Setup",
+            "text": "\\\\192.168.4.230\\共享文件夹\\------------项目------------\\FoneTool\\FoneTool\\PC_4.X(04B)\\02 离线安装\\2026-08-26 0954\\FoneTool_install.exe"
+          }
+        ]
+      }
+    ]
+  },
+  "actions": [
+    {
+      "id": "close",
+      "label": "Close",
+      "style": "primary",
+      "result_status": "closed"
+    }
+  ]
+}

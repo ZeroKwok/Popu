@@ -1,12 +1,17 @@
 {
-  "version": "1.0",
-  "mode": "notify",
-  "template": "notification",
-  "position": "bottom_right",
-  "duration_ms": 2000,
-  "content": {
-    "severity": "success",
-    "title": "Popu smoke test",
-    "message": "This notification should close automatically."
-  }
+    "version": "1.0",
+    "mode": "notify",
+    "template": "notification",
+    "position": "bottom_right",
+    "duration_ms": 2000,
+    "content": {
+        "severity": "success",
+        "title": "Popu smoke test",
+        "blocks": [
+            {
+                "text": "This notification should close automatically.",
+                "type": "paragraph"
+            }
+        ]
+    }
 }

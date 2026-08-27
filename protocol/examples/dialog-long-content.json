@@ -3,27 +3,71 @@
   "mode": "dialog",
   "template": "confirm",
   "position": "cursor_screen_center",
-  "window": { "always_on_top": true, "width": 560, "height": 680 },
+  "window": {
+    "always_on_top": true,
+    "width": 560,
+    "height": 680
+  },
   "content": {
     "severity": "warning",
     "title": "Review the planned changes before continuing",
-    "message": "This intentionally long message verifies wrapping, selection, and the card's fixed 9px transparent shadow inset. It describes several operations so the message occupies multiple lines at ordinary desktop widths. The action area must remain reachable and the visual edge must stay consistent on every side of the WebView.",
-    "details": [
-      { "label": "Source", "value": "H:\\Automation\\Incoming\\very-long-source-folder-name" },
-      { "label": "Destination", "value": "D:\\Backup\\2026\\August\\validated-output" },
-      { "label": "Items", "value": "1,248 files and 37 folders" },
-      { "label": "Policy", "value": "Existing files will be replaced after confirmation" }
+    "blocks": [
+      {
+        "text": "This intentionally long message verifies wrapping, selection, and the card\u0027s fixed 9px transparent shadow inset. It describes several operations so the message occupies multiple lines at ordinary desktop widths. The action area must remain reachable and the visual edge must stay consistent on every side of the WebView.",
+        "type": "paragraph"
+      },
+      {
+        "items": [
+          {
+            "label": "Source",
+            "text": "H:\\Automation\\Incoming\\very-long-source-folder-name"
+          },
+          {
+            "label": "Destination",
+            "text": "D:\\Backup\\2026\\August\\validated-output"
+          },
+          {
+            "label": "Items",
+            "text": "1,248 files and 37 folders"
+          },
+          {
+            "label": "Policy",
+            "text": "Existing files will be replaced after confirmation"
+          }
+        ],
+        "type": "properties"
+      }
     ]
   },
   "form": {
     "fields": [
-      { "id": "note", "type": "textarea", "label": "Optional note", "placeholder": "Leave an audit note" },
-      { "id": "confirmed", "type": "checkbox", "label": "I understand the replacement operation", "required": true }
+      {
+        "id": "note",
+        "type": "textarea",
+        "label": "Optional note",
+        "placeholder": "Leave an audit note"
+      },
+      {
+        "id": "confirmed",
+        "type": "checkbox",
+        "label": "I understand the replacement operation",
+        "required": true
+      }
     ]
   },
   "actions": [
-    { "id": "continue", "label": "Continue", "style": "danger", "submit": true },
-    { "id": "cancel", "label": "Cancel", "style": "secondary", "result_status": "cancelled" }
+    {
+      "id": "continue",
+      "label": "Continue",
+      "style": "danger",
+      "submit": true
+    },
+    {
+      "id": "cancel",
+      "label": "Cancel",
+      "style": "secondary",
+      "result_status": "cancelled"
+    }
   ],
   "timeout_seconds": 300
 }

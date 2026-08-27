@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "mode": "dialog",
+  "template": "confirm",
+  "content": {
+    "severity": "success",
+    "title": "Packages pushed",
+    "blocks": [
+      { "type": "paragraph", "text": "The test and offline installer packages were pushed." },
+      { "type": "properties", "title": "Artifacts", "items": [
+        { "label": "Test package", "text": "Network share / builds / test" },
+        { "label": "Installer", "text": "Network share / builds / installer" }
+      ] }
+    ]
+  },
+  "actions": [{ "id": "close", "label": "Close", "style": "primary", "result_status": "closed" }]
+}

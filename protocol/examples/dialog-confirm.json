@@ -1,24 +1,55 @@
 {
-  "version": "1.0",
-  "mode": "dialog",
-  "template": "confirm",
-  "position": "cursor_screen_center",
-  "window": { "always_on_top": true, "width": 440, "height": 300 },
-  "content": {
-    "severity": "warning",
-    "title": "Replace files?",
-    "message": "Three existing files will be replaced.",
-    "details": [{ "label": "Destination", "value": "D:\\Backup" }]
-  },
-  "form": {
-    "fields": [
-      { "id": "confirmed", "type": "checkbox", "label": "I understand that existing files will be replaced", "required": true }
-    ]
-  },
-  "actions": [
-    { "id": "confirm", "label": "Replace", "style": "danger", "submit": true },
-    { "id": "cancel", "label": "Cancel", "style": "secondary", "result_status": "cancelled" }
-  ],
-  "timeout_seconds": 300
+    "version": "1.0",
+    "mode": "dialog",
+    "template": "confirm",
+    "position": "cursor_screen_center",
+    "window": {
+        "always_on_top": true,
+        "width": 440,
+        "height": 260
+    },
+    "content": {
+        "severity": "warning",
+        "title": "Replace files?",
+        "blocks": [
+            {
+                "text": "Three existing files will be replaced.",
+                "type": "paragraph"
+            },
+            {
+                "items": [
+                    {
+                        "label": "Destination",
+                        "text": "D:\\Backup"
+                    }
+                ],
+                "type": "properties"
+            }
+        ]
+    },
+    "form": {
+        "fields": [
+            {
+                "id": "confirmed",
+                "type": "checkbox",
+                "label": "I understand that existing files will be replaced",
+                "required": true
+            }
+        ]
+    },
+    "actions": [
+        {
+            "id": "confirm",
+            "label": "Replace",
+            "style": "danger",
+            "submit": true
+        },
+        {
+            "id": "cancel",
+            "label": "Cancel",
+            "style": "secondary",
+            "result_status": "cancelled"
+        }
+    ],
+    "timeout_seconds": 300
 }
-

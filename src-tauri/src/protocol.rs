@@ -161,23 +161,23 @@ impl WindowOptions {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Detail {
-    pub label: String,
-    pub value: String,
+pub struct PropertyItem { pub label: String, pub text: String }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ContentBlock {
+    Paragraph { #[serde(default)] title: Option<String>, text: String },
+    Properties { #[serde(default)] title: Option<String>, items: Vec<PropertyItem> },
+    UnorderedList { #[serde(default)] title: Option<String>, items: Vec<String> },
+    OrderedList { #[serde(default)] title: Option<String>, items: Vec<String> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Content {
-    #[serde(default)]
-    pub severity: Severity,
+    #[serde(default)] pub severity: Severity,
     pub title: String,
-    #[serde(default)]
-    pub message: String,
-    #[serde(default)]
-    pub details: Vec<Detail>,
-    #[serde(default)]
-    pub progress: Option<f64>,
+    #[serde(default)] pub blocks: Vec<ContentBlock>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -308,18 +308,7 @@ impl Request {
                 "title must contain 1-200 characters".into(),
             ));
         }
-        if self.content.message.chars().count() > 20_000 {
-            return Err(ProtocolError::Invalid(
-                "message exceeds 20000 characters".into(),
-            ));
-        }
-        if let Some(progress) = self.content.progress {
-            if !(0.0..=100.0).contains(&progress) {
-                return Err(ProtocolError::Invalid(
-                    "progress must be between 0 and 100".into(),
-                ));
-            }
-        }
+        for block in &self.content.blocks { validate_content_block(block)?; }
 
         if let Some(width) = &self.window.width {
             width.validate("width")?;
@@ -484,6 +473,17 @@ pub enum ProtocolError {
     Invalid(String),
 }
 
+fn validate_content_block(block: &ContentBlock) -> Result<(), ProtocolError> {
+    let title = match block { ContentBlock::Paragraph { title, .. } | ContentBlock::Properties { title, .. } | ContentBlock::UnorderedList { title, .. } | ContentBlock::OrderedList { title, .. } => title };
+    if title.as_ref().is_some_and(|value| value.trim().is_empty() || value.chars().count() > 200) { return Err(ProtocolError::Invalid("block title must contain 1-200 characters".into())); }
+    let text_ok = |value: &str| value.chars().count() <= 20_000;
+    match block {
+        ContentBlock::Paragraph { text, .. } if !text_ok(text) => Err(ProtocolError::Invalid("paragraph text exceeds 20000 characters".into())),
+        ContentBlock::Properties { items, .. } if items.is_empty() || items.iter().any(|item| item.label.trim().is_empty() || item.label.chars().count() > 200 || !text_ok(&item.text)) => Err(ProtocolError::Invalid("properties require non-empty valid items".into())),
+        ContentBlock::UnorderedList { items, .. } | ContentBlock::OrderedList { items, .. } if items.is_empty() || items.iter().any(|item| !text_ok(item)) => Err(ProtocolError::Invalid("lists require non-empty valid items".into())),
+        _ => Ok(()),
+    }
+}
 fn parse_percentage(value: &str) -> Result<f64, &'static str> {
     let Some(number) = value.strip_suffix('%') else {
         return Err("must end with '%' ");
@@ -682,7 +682,7 @@ mod tests {
         Request::parse(
             r#"{
               "version":"1.0","mode":"dialog","template":"confirm",
-              "content":{"title":"Confirm","message":"Continue?"},
+              "content":{"title":"Confirm","blocks":[{"type":"paragraph","text":"Continue?"}]},
               "form":{"fields":[{"id":"confirmed","type":"checkbox","label":"I understand","required":true}]},
               "actions":[
                 {"id":"confirm","label":"Continue","style":"danger","submit":true},

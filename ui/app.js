@@ -22,22 +22,15 @@ function setText(slot, value) {
   if (target) target.textContent = value ?? "";
 }
 
-function renderDetails(details = []) {
-  const root = element("details");
-  if (!root) return;
-  root.replaceChildren();
-  root.hidden = details.length === 0;
-  for (const detail of details) {
-    const label = document.createElement("div");
-    label.className = "popu-detail-label";
-    label.textContent = detail.label;
-    const value = document.createElement("div");
-    value.className = "popu-detail-value";
-    value.textContent = detail.value;
-    root.append(label, value);
-  }
+function renderBlocks(blocks = []) {
+  const root = element("content"); if (!root) return; root.replaceChildren();
+  root.hidden = blocks.length === 0;
+  for (const block of blocks) { const section=document.createElement("section"); section.className="popu-block";
+    if (block.title) { const title=document.createElement("h2"); title.className="popu-block-title"; title.textContent=block.title; section.append(title); }
+    if (block.type === "paragraph") { const p=document.createElement("p"); p.className="popu-paragraph"; p.textContent=block.text; section.append(p); }
+    else if (block.type === "properties") { const grid=document.createElement("div"); grid.className="popu-properties"; for(const item of block.items){const k=document.createElement("div"),v=document.createElement("div");k.className="popu-property-label";v.className="popu-property-text";k.textContent=item.label;v.textContent=item.text;grid.append(k,v)} section.append(grid); }
+    else { const list=document.createElement(block.type === "ordered_list" ? "ol" : "ul"); list.className="popu-list"; for(const item of block.items){const li=document.createElement("li");li.className="popu-list-item";li.textContent=item;list.append(li)} section.append(list); } root.append(section); }
 }
-
 function inputId(field) {
   return `popu-field-${field.id}`;
 }
@@ -119,11 +112,6 @@ function renderField(field) {
     wrapper.append(label, input);
   }
 
-  const error = document.createElement("div");
-  error.className = "popu-error";
-  error.id = `${inputId(field)}-error`;
-  error.setAttribute("aria-live", "polite");
-  wrapper.append(error);
   return wrapper;
 }
 
@@ -131,7 +119,9 @@ function renderForm(form) {
   const root = element("form");
   if (!root) return;
   root.replaceChildren();
-  for (const field of form?.fields ?? []) root.append(renderField(field));
+  const fields = form?.fields ?? [];
+  root.hidden = fields.length === 0;
+  for (const field of fields) root.append(renderField(field));
 }
 
 function collectValues() {
@@ -158,14 +148,23 @@ function collectValues() {
 }
 
 function showValidationError(message) {
-  const first = document.querySelector(".popu-error");
-  if (first) first.textContent = message;
+  const firstField = document.querySelector(".popu-field");
+  if (!firstField) return;
+  let error = firstField.querySelector(".popu-error");
+  if (!error) {
+    error = document.createElement("div");
+    error.className = "popu-error";
+    error.setAttribute("role", "alert");
+    firstField.append(error);
+  }
+  error.textContent = message;
 }
 
 function renderActions(actions) {
   const root = element("actions");
   if (!root) return;
   root.replaceChildren();
+  root.hidden = actions.length === 0;
   for (const action of actions) {
     const button = document.createElement("button");
     button.type = "button";
@@ -187,17 +186,6 @@ function renderActions(actions) {
     });
     root.append(button);
   }
-}
-
-function renderProgress(progress) {
-  const root = element("progress");
-  if (!root || progress === null || progress === undefined) return;
-  const bar = document.createElement("progress");
-  bar.className = "popu-progress";
-  bar.max = 100;
-  bar.value = progress;
-  bar.setAttribute("aria-label", `Progress: ${progress}%`);
-  root.append(bar);
 }
 
 function isScrollableContent(target) {
@@ -239,11 +227,9 @@ async function start() {
     icon.textContent = { info: "i", success: "✓", warning: "!", error: "×" }[severity];
   }
   setText("title", bootstrap.request.content.title);
-  setText("message", bootstrap.request.content.message);
-  renderDetails(bootstrap.request.content.details);
+  renderBlocks(bootstrap.request.content.blocks);
   renderForm(bootstrap.request.form);
   renderActions(bootstrap.request.actions);
-  renderProgress(bootstrap.request.content.progress);
   installDragRegions();
 
   document.querySelector("[data-popu-action='close']")?.addEventListener("click", () => invoke("finish", { status: "closed", action: null }));

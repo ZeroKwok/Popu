@@ -145,7 +145,7 @@ fn read_inside(directory: &Path, relative: &str) -> Result<String, TemplateError
 }
 
 fn validate_slots(html: &str, mode: Mode) -> Result<(), TemplateError> {
-    for slot in ["title", "message"] {
+    for slot in ["title", "content"] {
         if !html.contains(&format!("data-popu-slot=\"{slot}\"")) {
             return Err(TemplateError::MissingSlot(slot));
         }
@@ -227,7 +227,7 @@ mod tests {
         .unwrap();
         fs::write(
             directory.path().join("template.html"),
-            r#"<h1 data-popu-slot="title"></h1><p data-popu-slot="message"></p>"#,
+            r#"<h1 data-popu-slot="title"></h1><p data-popu-slot="content"></p>"#,
         )
         .unwrap();
         fs::write(directory.path().join("template.css"), "h1 { color: red; }").unwrap();
@@ -238,7 +238,7 @@ mod tests {
     fn rejects_missing_required_slot() {
         assert!(matches!(
             validate_slots("<h1 data-popu-slot=\"title\"></h1>", Mode::Notify),
-            Err(TemplateError::MissingSlot("message"))
+            Err(TemplateError::MissingSlot("content"))
         ));
     }
 }

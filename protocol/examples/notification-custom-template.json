@@ -1,12 +1,17 @@
 {
-  "version": "1.0",
-  "mode": "notify",
-  "template": "minimal-notification",
-  "position": "bottom_right",
-  "duration_ms": 3000,
-  "content": {
-    "severity": "info",
-    "title": "Custom template",
-    "message": "Rendered with trusted local HTML and CSS."
-  }
+    "version": "1.0",
+    "mode": "notify",
+    "template": "minimal-notification",
+    "position": "bottom_right",
+    "duration_ms": 3000,
+    "content": {
+        "severity": "info",
+        "title": "Custom template",
+        "blocks": [
+            {
+                "text": "Rendered with trusted local HTML and CSS.",
+                "type": "paragraph"
+            }
+        ]
+    }
 }
