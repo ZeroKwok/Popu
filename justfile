@@ -10,17 +10,37 @@ build-release:
 clean:
     cargo clean --manifest-path src-tauri/Cargo.toml
 
+# Run a fixture with its optional trusted external-template sidecar.
+cli executable request:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    executable="{{executable}}"
+    request="{{request}}"
+    template_sidecar="${request%.json}.template"
+    args=(request "$request")
+    
+    if [[ -f "$template_sidecar" ]]; then
+        IFS= read -r template_dir < "$template_sidecar"
+        template_dir="${template_dir%$'\r'}"
+        if [[ -z "$template_dir" ]]; then
+            echo "Empty template sidecar: $template_sidecar" >&2
+            exit 12
+        fi
+        args+=(--template "$template_dir")
+    fi
+    "$executable" "${args[@]}"
+
 # Build and run a debug executable with a protocol fixture.
-test file="dialog-confirm.json":
-    cargo run --manifest-path src-tauri/Cargo.toml -- request protocol/examples/{{file}}
+test file="dialog-confirm.json": build
+    just --quiet cli "src-tauri/target/debug/popu" "protocol/examples/{{file}}"
 
 # Build the debug executable, then run a protocol fixture.
 build-test file="dialog-confirm.json": build
-    cargo run --manifest-path src-tauri/Cargo.toml -- request protocol/examples/{{file}}
+    just --quiet cli "src-tauri/target/debug/popu" "protocol/examples/{{file}}"
 
 # Build the release executable, then run a protocol fixture.
 build-test-release file="dialog-confirm.json": build-release
-    cargo run --release --manifest-path src-tauri/Cargo.toml -- request protocol/examples/{{file}}
+    just --quiet cli "src-tauri/target/release/popu" "protocol/examples/{{file}}"
 
 # Build the release executable, then run a protocol fixture.
 install: build-release
@@ -42,7 +62,7 @@ build-test-all: build
     fi
     for example in "${examples[@]}"; do
         printf '\n==> %s\n' "$example"
-        if "$executable" request "$example"; then
+        if just --quiet cli "$executable" "$example"; then
             continue
         else
             status=$?
