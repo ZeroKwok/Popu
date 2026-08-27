@@ -263,6 +263,36 @@ function collectValues() {
   return values;
 }
 
+function restoreValues(values) {
+  for (const [id, value] of Object.entries(values)) {
+    const root = document.querySelector(`[data-field-id="${id}"]`);
+    if (!root) continue;
+    for (const input of root.querySelectorAll("input, textarea, select")) {
+      if (input.type === "checkbox") input.checked = Boolean(value);
+      else if (input.type === "radio") input.checked = input.value === value;
+      else input.value = value ?? "";
+    }
+  }
+}
+
+function renderContent(content, preserveForm = false) {
+  const values = preserveForm ? collectValues() : null;
+  const severity = content.severity ?? "info";
+  const icon = element("icon");
+  if (icon) {
+    icon.dataset.severity = severity;
+    icon.textContent = { info: "i", success: "✓", warning: "!", error: "×" }[severity];
+  }
+  setText("title", content.title);
+  renderBlocks(content.blocks, content.vertical_align ?? "center");
+  if (values) restoreValues(values);
+}
+
+window.popuApplyUpdate = (content) => {
+  bootstrap.request.content = content;
+  renderContent(content, bootstrap.request.mode === "dialog");
+};
+
 function showValidationError(message) {
   const firstField = document.querySelector(".popu-field");
   if (!firstField) return;
@@ -336,17 +366,7 @@ async function start() {
   style.textContent = bootstrap.template.css;
   document.head.append(style);
 
-  const severity = bootstrap.request.content.severity ?? "info";
-  const icon = element("icon");
-  if (icon) {
-    icon.dataset.severity = severity;
-    icon.textContent = { info: "i", success: "✓", warning: "!", error: "×" }[severity];
-  }
-  setText("title", bootstrap.request.content.title);
-  renderBlocks(
-    bootstrap.request.content.blocks,
-    bootstrap.request.content.vertical_align ?? "center",
-  );
+  renderContent(bootstrap.request.content);
   renderActions(bootstrap.request.actions);
   installDragRegions();
 

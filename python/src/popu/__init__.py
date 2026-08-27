@@ -1,4 +1,4 @@
-from .client import Client, NotificationReceipt, PopuError, notify, show
+from .client import Client, NotificationReceipt, PopuError, RequestReceipt, notify, show
 from .models import DialogRequest, InteractionResult, Notification, Position, Screen, ScreenArea
 
 __all__ = [
@@ -8,6 +8,7 @@ __all__ = [
     "Notification",
     "NotificationReceipt",
     "PopuError",
+    "RequestReceipt",
     "Position",
     "Screen",
     "ScreenArea",

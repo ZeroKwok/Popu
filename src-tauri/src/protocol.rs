@@ -320,6 +320,9 @@ pub struct Action {
 pub struct Request {
     pub version: String,
     pub mode: Mode,
+    /// Coalesces live requests in the same mode. Identity remains Host-owned.
+    #[serde(default)]
+    pub coalesce_key: Option<String>,
     #[serde(default = "default_template")]
     pub template: String,
     #[serde(default = "default_position")]
@@ -345,6 +348,13 @@ impl Request {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.version != PROTOCOL_VERSION {
             return Err(ProtocolError::UnsupportedVersion(self.version.clone()));
+        }
+        if self.coalesce_key.as_ref().is_some_and(|key| {
+            key.trim().is_empty() || key.chars().count() > 200
+        }) {
+            return Err(ProtocolError::Invalid(
+                "coalesce_key must contain 1-200 characters".into(),
+            ));
         }
         if self.content.title.trim().is_empty() || self.content.title.chars().count() > 200 {
             return Err(ProtocolError::Invalid(

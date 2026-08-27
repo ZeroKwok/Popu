@@ -67,8 +67,11 @@ class DialogRequest:
                 "window": _window_options(
                     screen=screen, area=area, width=width, height=height
                 ),
-                "content": {"severity": "warning" if dangerous else "info", "title": title, "message": message},
-                "form": {"fields": []},
+                "content": {
+                    "severity": "warning" if dangerous else "info",
+                    "title": title,
+                    "blocks": ([{"type": "paragraph", "text": message}] if message else []),
+                },
                 "actions": [
                     {
                         "id": "confirm",
@@ -113,7 +116,11 @@ class Notification:
                     screen=screen, area=area, width=width, height=height
                 ),
                 "duration_ms": duration_ms,
-                "content": {"severity": "success", "title": title, "message": message},
+                "content": {
+                    "severity": "success",
+                    "title": title,
+                    "blocks": ([{"type": "paragraph", "text": message}] if message else []),
+                },
             }
         )
 

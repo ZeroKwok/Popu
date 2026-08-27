@@ -5,6 +5,8 @@ description: Design and invoke concise Popu human-interaction requests for autom
 
 # Popu interaction design
 
+Popu uses a persistent local Host. Read the first JSON line from `popu request` as the accepted receipt (`request_id`, `state`, `revision`, `duplicate`); dialog calls then produce a terminal response. Use `coalesce_key` for one live business slot and update only with the latest revision plus a complete content snapshot.
+
 Use Popu only for a bounded human interaction. It is a local, short-lived window: it does not store tasks, coordinate calls, or render untrusted HTML.
 
 ## Choose the interaction

@@ -1,11 +1,21 @@
 # Popu Python SDK
 
-Popu 的轻量 Python 封装。SDK 负责生成请求、启动 `popu` 可执行文件、解析响应，并通过 lifetime pipe 保证 Python 进程退出时对应窗口一同结束。
+The Python package is a client for the persistent local Popu Host. It invokes the installed `popu` CLI, parses accepted receipts and terminal snapshots, and never manages notification child processes or lifetime pipes.
 
 ```python
-from popu import DialogRequest, show
+from popu import Client, DialogRequest, Notification
 
-result = show(DialogRequest.confirm(title="Continue?"))
+client = Client()
+result = client.show(DialogRequest.confirm(title="Continue?"))
+
+receipt = client.notify(Notification.success(title="Done"))
+snapshot = client.status(receipt.request_id)
+snapshot = client.update(receipt.request_id, receipt.revision, {
+    "severity": "success",
+    "title": "Still done",
+    "blocks": [],
+})
+client.dismiss(receipt.request_id)
 ```
 
-`popu.exe` 默认从 `PATH` 查找，也可使用 `Client(executable=...)` 显式指定。SDK 统一调用 `popu request <REQUEST>`，由请求 JSON 的 `mode` 决定对话框或通知行为。
+`Client.create`, `update`, `dismiss`, `status`, and `wait` expose Host-generated `request_id`, revision, queue state, and duplicate information. `popu` is resolved from `PATH` unless `Client(executable=...)` is supplied.

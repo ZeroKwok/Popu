@@ -1,8 +1,12 @@
 # Popu
 
+> 当前架构：单实例常驻 Tauri Host。CLI 与 Python SDK 通过 `interprocess::local_socket`（Windows Named Pipe / Unix Domain Socket）提交和管理请求；Host 统一拥有 UUID、窗口、FIFO 队列、revision 与终态。
+
+Host 在首次请求时自动启动。notification 被接受后独立存活；dialog 等待终态。管理命令包括 `popu update <id> <update.json>`、`dismiss`、`status`、`wait`、`host status` 和 `host stop`。请求可设置 `coalesce_key`，更新文件必须携带最新 `expected_revision` 和完整 `content`。
+
 Popu 是一个面向自动化脚本和 AI Agent 的轻量本机交互窗口。任务需要人工决定时显示对话框；只需告知结果时显示短暂通知。
 
-当前版本是 Windows 原型：Tauri 2 + WebView2、Rust CLI、Python SDK。它不运行守护进程，不持久化任务，也不做跨调用协调；每次调用拥有独立进程、窗口和结果。
+当前版本使用 Tauri 2 + WebView2 的单实例常驻 Host。Rust CLI 与 Python SDK 通过 `interprocess::local_socket` 连接 Host；Windows 使用 Named Pipe，Unix 使用 Unix Domain Socket。Host 统一拥有窗口、队列、更新和请求终态。
 
 原型阶段默认**不提供向后兼容**：除非需求明确要求，CLI、SDK 和协议接口可以直接重构，调用方应随版本同步更新。
 
@@ -16,7 +20,8 @@ Popu 是一个面向自动化脚本和 AI Agent 的轻量本机交互窗口。�
 - 当宽高均为 `"100%"` 时，窗口不允许拖动，并移除圆角与阴影；超长内容仅在中间内容区滚动。
 - 无边框透明圆角窗口；Windows 圆角外部区域鼠标穿透到底层窗口。
 - `data-popu-drag-region` 定义拖拽背景，`data-popu-selectable` 定义可复制文本；内置模板默认允许复制所有展示内容。
-- Python lifetime pipe：Python 调用方退出时关闭对应 Popu 窗口。
+- Host 生成 UUID `request_id`，支持 `coalesce_key`、revision 冲突检测和完整内容快照更新。
+- dialog 全局 FIFO 单活跃；notification 在主显示器最多显示三个，溢出后 FIFO 排队。
 
 ## 组织展示内容
 
@@ -76,6 +81,12 @@ cargo build --manifest-path src-tauri/Cargo.toml
 popu request protocol/examples/dialog-confirm.json
 popu request protocol/examples/notification-success.json
 popu request protocol/examples/notification-custom-template.json --template .\protocol\examples\templates\minimal-notification
+popu update <request-id> update.json
+popu dismiss <request-id>
+popu status <request-id>
+popu wait <request-id>
+popu host status
+popu host stop
 popu templates list
 popu templates validate --path path/to/my-template
 ```
@@ -84,17 +95,15 @@ popu templates validate --path path/to/my-template
 
 可替换模板示例位于 `protocol/examples/templates/minimal-notification`。
 
-Windows PowerShell 5.1 在直接运行通知请求时可能继续等待其 UI 后代关闭，即使 `popu request` 的父进程已经返回。需要立即恢复 PowerShell 提示符时，可使用 Python SDK，或显式异步启动：
-
-```powershell
-Start-Process popu -ArgumentList @('request', 'notification.json') -WindowStyle Hidden
-```
+Host 在首次请求时自动启动。notification 被 Host 接受后 CLI 立即返回；它不依赖提交进程继续存活。dialog 则保持等待直到终态，并采用终态中的 action 退出码。
 
 默认退出码：`0` 提交、确认成功或通知已显示，`10` 取消/关闭，`11` 超时，`12` 请求、模板或运行时错误。dialog action 可用 `exit_code: 0..255` 覆盖自身默认码；即使与默认码重合，也应结合 stdout response 判断业务结果。stdout 只输出机器可读 JSON，诊断写入 stderr。
 
 ## Python
 
-Python SDK 暂未同步本轮 `content.blocks` 协议调整，将在协议稳定后集中更新。当前请通过 JSON 请求或 CLI 使用六类内容块；现有 SDK 仅保留用于回归检查，不应作为新协议示例。
+新版 `Client` 提供 `create`、`update`、`dismiss`、`status` 和 `wait`，返回 `request_id`、revision、队列状态及 duplicate 信息，不再使用 lifetime pipe。
+
+Python SDK 已同步 Host 协议。`Client` 提供 `create`、`update`、`dismiss`、`status`、`wait`，并返回 `request_id`、`revision`、队列状态和 `duplicate`。
 
 完整协议与设计边界见 [ARCHITECTURE.md](ARCHITECTURE.md)，JSON Schema 见 [protocol/popu.schema.json](protocol/popu.schema.json)。
 

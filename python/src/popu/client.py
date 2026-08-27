@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import atexit
 import json
 import os
 import shutil
 import subprocess
 import tempfile
 import threading
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -20,59 +18,19 @@ class PopuError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class NotificationReceipt:
-    status: str
+class RequestReceipt:
+    request_id: str
+    state: str
+    revision: int
+    duplicate: bool = False
+    status: str = "accepted"
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "RequestReceipt":
+        return cls(str(value["request_id"]), str(value["state"]), int(value["revision"]), bool(value.get("duplicate", False)), str(value.get("status", "accepted")))
 
 
-class _LifetimePipe:
-    def __init__(self) -> None:
-        self.read_fd, self.write_fd = os.pipe()
-        os.set_inheritable(self.read_fd, True)
-
-    @property
-    def inherited_value(self) -> int:
-        if os.name == "nt":
-            import msvcrt
-
-            return int(msvcrt.get_osfhandle(self.read_fd))
-        return self.read_fd
-
-    def popen_kwargs(self) -> dict[str, Any]:
-        if os.name == "nt":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.lpAttributeList = {"handle_list": [self.inherited_value]}
-            return {
-                "startupinfo": startupinfo,
-                "close_fds": True,
-                "creationflags": subprocess.CREATE_NO_WINDOW,
-            }
-        return {"pass_fds": (self.read_fd,), "close_fds": True}
-
-    def close_reader(self) -> None:
-        if self.read_fd >= 0:
-            os.close(self.read_fd)
-            self.read_fd = -1
-
-    def close(self) -> None:
-        self.close_reader()
-        if self.write_fd >= 0:
-            os.close(self.write_fd)
-            self.write_fd = -1
-
-
-_active_lock = threading.Lock()
-_active_lifetimes: set[_LifetimePipe] = set()
-
-
-def _shutdown_notifications() -> None:
-    with _active_lock:
-        lifetimes = tuple(_active_lifetimes)
-        _active_lifetimes.clear()
-    for lifetime in lifetimes:
-        lifetime.close()
-
-
-atexit.register(_shutdown_notifications)
+NotificationReceipt = RequestReceipt
 
 
 class Client:
@@ -86,74 +44,91 @@ class Client:
             self._command = [os.fspath(executable)]
         else:
             self._command = [os.fspath(item) for item in executable]
+        self._owned: dict[str, subprocess.Popen[str]] = {}
+        self._lock = threading.Lock()
+
+    def create(self, request: DialogRequest | Notification | Mapping[str, Any], *, template: str | os.PathLike[str] | None = None) -> RequestReceipt:
+        payload = request.as_dict() if hasattr(request, "as_dict") else dict(request)
+        path = _write_json(payload)
+        command = self._command + ["request", str(path)]
+        if template is not None:
+            command += ["--template", os.fspath(template)]
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        line = process.stdout.readline() if process.stdout else ""
+        path.unlink(missing_ok=True)
+        if not line:
+            stderr = process.stderr.read() if process.stderr else ""
+            process.wait()
+            raise PopuError(stderr.strip() or "popu did not accept the request")
+        value = json.loads(line)
+        # Compatibility with pre-Host test doubles and older executables.
+        if "request_id" not in value:
+            process.wait()
+            receipt = RequestReceipt("", "confirmed", 1, False, str(value.get("status", "accepted")))
+            object.__setattr__(receipt, "_terminal", value)
+            return receipt
+        receipt = RequestReceipt.from_dict(value)
+        if payload.get("mode") == "dialog":
+            with self._lock:
+                self._owned[receipt.request_id] = process
+        else:
+            process.wait()
+        return receipt
 
     def show(self, request: DialogRequest | Mapping[str, Any]) -> InteractionResult:
-        payload = request.as_dict() if isinstance(request, DialogRequest) else dict(request)
-        path = _write_request(payload)
-        lifetime = _LifetimePipe()
-        try:
-            command = self._command + [
-                "request",
-                str(path),
-                "--lifetime-handle",
-                str(lifetime.inherited_value),
-            ]
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **lifetime.popen_kwargs())
-            lifetime.close_reader()
-            stdout, stderr = process.communicate()
-            if process.returncode == 12 or not stdout.strip():
-                raise PopuError(stderr.strip() or f"popu exited with code {process.returncode}")
-            return InteractionResult.from_dict(json.loads(stdout))
-        finally:
-            lifetime.close()
-            path.unlink(missing_ok=True)
+        receipt = self.create(request)
+        terminal = getattr(receipt, "_terminal", None)
+        if terminal is not None:
+            return InteractionResult.from_dict(terminal)
+        snapshot = self.wait(receipt.request_id)
+        response = snapshot.get("response")
+        if not isinstance(response, Mapping):
+            raise PopuError(f"request ended without a response: {snapshot.get('state')}")
+        return InteractionResult.from_dict(response)
 
     def notify(self, notification: Notification | Mapping[str, Any]) -> NotificationReceipt:
-        payload = notification.as_dict() if isinstance(notification, Notification) else dict(notification)
-        path = _write_request(payload)
-        lifetime = _LifetimePipe()
-        command = self._command + [
-            "request",
-            str(path),
-            "--lifetime-handle",
-            str(lifetime.inherited_value),
-        ]
+        return self.create(notification)
+
+    def update(self, request_id: str, expected_revision: int, content: Mapping[str, Any]) -> Mapping[str, Any]:
+        path = _write_json({"expected_revision": expected_revision, "content": dict(content)})
         try:
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **lifetime.popen_kwargs())
-            lifetime.close_reader()
-            line = process.stdout.readline() if process.stdout else ""
-            if not line:
-                stderr = process.stderr.read() if process.stderr else ""
-                process.wait()
-                raise PopuError(stderr.strip() or "popu notification failed before it was shown")
-            receipt = json.loads(line)
-            if receipt.get("status") != "shown":
-                raise PopuError(f"unexpected popu response: {line.strip()}")
+            return self._run_json(["update", request_id, str(path)])
+        finally:
             path.unlink(missing_ok=True)
-            process.wait()
-            with _active_lock:
-                _active_lifetimes.add(lifetime)
-            duration_ms = int(payload.get("duration_ms", 8_000))
-            threading.Thread(
-                target=_release_notification_lifetime,
-                args=(lifetime, duration_ms),
-                daemon=True,
-            ).start()
-            return NotificationReceipt("shown")
-        except Exception:
-            lifetime.close()
-            path.unlink(missing_ok=True)
-            raise
+
+    def dismiss(self, request_id: str) -> Mapping[str, Any]:
+        return self._run_json(["dismiss", request_id])
+
+    def status(self, request_id: str) -> Mapping[str, Any]:
+        return self._run_json(["status", request_id])
+
+    def wait(self, request_id: str) -> Mapping[str, Any]:
+        with self._lock:
+            process = self._owned.pop(request_id, None)
+        if process is None:
+            return self._run_json(["wait", request_id])
+        stdout, stderr = process.communicate()
+        if process.returncode == 12:
+            raise PopuError(stderr.strip() or "Popu Host failed")
+        lines = [line for line in stdout.splitlines() if line.strip()]
+        if not lines:
+            raise PopuError(stderr.strip() or "popu returned no terminal result")
+        # `request` prints the public Response after its accepted receipt.
+        response = json.loads(lines[-1])
+        state = {"submitted": "confirmed", "confirmed": "confirmed", "cancelled": "cancelled", "closed": "closed", "timed_out": "expired"}.get(response.get("status"), response.get("status"))
+        return {"request_id": request_id, "state": state, "response": response, "exit_code": process.returncode}
+
+    def _run_json(self, args: Sequence[str]) -> Mapping[str, Any]:
+        result = subprocess.run(self._command + list(args), capture_output=True, text=True)
+        if result.returncode != 0:
+            raise PopuError(result.stderr.strip() or f"popu exited with code {result.returncode}")
+        try:
+            return json.loads(result.stdout.splitlines()[-1])
+        except (IndexError, json.JSONDecodeError) as error:
+            raise PopuError("popu returned invalid JSON") from error
 
 
-def _release_notification_lifetime(lifetime: _LifetimePipe, duration_ms: int) -> None:
-    time.sleep(max(duration_ms, 0) / 1000 + 1)
-    lifetime.close()
-    with _active_lock:
-        _active_lifetimes.discard(lifetime)
-
-
-def _write_request(payload: Mapping[str, Any]) -> Path:
+def _write_json(payload: Mapping[str, Any]) -> Path:
     descriptor, raw_path = tempfile.mkstemp(prefix="popu-", suffix=".json")
     path = Path(raw_path)
     try:

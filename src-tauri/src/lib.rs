@@ -1,264 +1,149 @@
-mod lifetime;
+pub mod core;
+mod history;
+mod host;
+pub mod ipc;
 pub mod placement;
 pub mod protocol;
 mod runtime;
 pub mod templates;
 
 use std::fs;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
-
 use protocol::{Mode, Request};
 
 #[derive(Debug, Parser)]
-#[command(name = "popu", version, about = "Show a local interaction request")]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
+#[command(name = "popu", version, about = "Show and manage local interaction requests")]
+struct Cli { #[command(subcommand)] command: Commands }
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Show a request; its JSON mode controls dialog or notification behavior.
+    /// Submit a request; dialogs wait for their terminal response.
     Request(RunArgs),
+    /// Replace a live request's complete content snapshot.
+    Update { request_id: uuid::Uuid, update: PathBuf },
+    /// Cancel a queued or shown request.
+    Dismiss { request_id: uuid::Uuid },
+    /// Inspect a request.
+    Status { request_id: uuid::Uuid },
+    /// Wait until a request reaches a terminal state.
+    Wait { request_id: uuid::Uuid },
+    /// Inspect or control the persistent Host.
+    Host { #[command(subcommand)] command: HostCommands },
     /// Inspect and validate templates.
-    Templates {
-        #[command(subcommand)]
-        command: TemplateCommands,
-    },
-    #[command(name = "__notify-child", hide = true)]
-    NotifyChild(RunArgs),
+    Templates { #[command(subcommand)] command: TemplateCommands },
 }
+
+#[derive(Debug, Subcommand)]
+enum HostCommands { Status, Stop, #[command(hide = true)] Run }
 
 #[derive(Debug, Args, Clone)]
 struct RunArgs {
-    /// JSON request file.
+    /// JSON request file, or - for stdin.
     #[arg(value_name = "REQUEST")]
     request: PathBuf,
     /// Trusted local template directory. This is not part of request JSON.
     #[arg(long)]
     template: Option<PathBuf>,
-    /// Inherited lifetime pipe read handle. Intended for SDK use.
-    #[arg(long, hide = true)]
-    lifetime_handle: Option<u64>,
 }
 
 #[derive(Debug, Subcommand)]
 enum TemplateCommands {
-    /// List built-in templates.
     List,
-    /// Validate a trusted local template directory.
-    Validate {
-        #[arg(long)]
-        path: PathBuf,
-    },
+    Validate { #[arg(long)] path: PathBuf },
 }
 
 pub fn run() -> i32 {
     match run_inner() {
         Ok(code) => code,
-        Err(error) => {
-            eprintln!("Popu error: {error}");
-            runtime::EXIT_ERROR
-        }
+        Err(error) => { eprintln!("Popu error: {error}"); runtime::EXIT_ERROR }
     }
 }
 
 fn run_inner() -> Result<i32, Box<dyn std::error::Error>> {
-    let cli = Cli::parse();
-    match cli.command {
+    match Cli::parse().command {
         Commands::Request(args) => {
             let request = load_request(&args.request)?;
-            match request.mode {
-                Mode::Dialog => Ok(runtime::run_ui(
-                    request,
-                    args.template.as_deref(),
-                    args.lifetime_handle,
-                    false,
-                )),
-                Mode::Notify => run_notification_parent(args, request),
-            }
+            let mode = request.mode;
+            let template = args.template.map(|path| path.canonicalize()).transpose()?;
+            let _ = templates::resolve(&request, template.as_deref())?;
+            let created = rpc_with_start("request.create", serde_json::json!({"request":request,"template":template}))?;
+            println!("{}", serde_json::to_string(&created)?);
+            if mode == Mode::Notify { return Ok(runtime::EXIT_OK); }
+            let id = created.get("request_id").and_then(|v| v.as_str()).ok_or("Host response has no request_id")?;
+            let terminal = rpc_with_start("request.wait", serde_json::json!({"request_id":id}))?;
+            if let Some(response) = terminal.get("response") { println!("{}", serde_json::to_string(response)?); }
+            Ok(terminal.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(runtime::EXIT_ERROR as i64) as i32)
         }
-        Commands::NotifyChild(args) => {
-            let request = load_request(&args.request)?;
-            require_mode(&request, Mode::Notify)?;
-            Ok(runtime::run_ui(
-                request,
-                args.template.as_deref(),
-                args.lifetime_handle,
-                true,
-            ))
+        Commands::Update { request_id, update } => {
+            let value: serde_json::Value = serde_json::from_str(&fs::read_to_string(update)?)?;
+            let expected = value.get("expected_revision").cloned().ok_or("update requires expected_revision")?;
+            let content = value.get("content").cloned().ok_or("update requires content")?;
+            print_rpc(rpc_with_start("request.update", serde_json::json!({"request_id":request_id,"expected_revision":expected,"content":content}))?)
         }
-        Commands::Templates { command } => match command {
-            TemplateCommands::List => {
-                println!("{}", serde_json::to_string(templates::builtin_names())?);
-                Ok(runtime::EXIT_OK)
-            }
-            TemplateCommands::Validate { path } => {
-                let name = templates::validate_directory(&path)?;
-                println!(
-                    "{{\"status\":\"valid\",\"template\":{}}}",
-                    serde_json::to_string(&name)?
-                );
-                Ok(runtime::EXIT_OK)
-            }
-        },
+        Commands::Dismiss { request_id } => print_rpc(rpc_with_start("request.dismiss", serde_json::json!({"request_id":request_id}))?),
+        Commands::Status { request_id } => print_rpc(rpc_with_start("request.get", serde_json::json!({"request_id":request_id}))?),
+        Commands::Wait { request_id } => print_rpc(rpc_with_start("request.wait", serde_json::json!({"request_id":request_id}))?),
+        Commands::Host { command: HostCommands::Run } => Ok(host::run()),
+        Commands::Host { command: HostCommands::Status } => print_rpc(rpc_call("host.status", serde_json::json!({}))?),
+        Commands::Host { command: HostCommands::Stop } => print_rpc(rpc_call("host.stop", serde_json::json!({}))?),
+        Commands::Templates { command: TemplateCommands::List } => {
+            println!("{}", serde_json::to_string(templates::builtin_names())?); Ok(runtime::EXIT_OK)
+        }
+        Commands::Templates { command: TemplateCommands::Validate { path } } => {
+            let name = templates::validate_directory(&path)?;
+            println!("{}", serde_json::to_string(&serde_json::json!({"status":"valid","template":name}))?);
+            Ok(runtime::EXIT_OK)
+        }
     }
 }
 
-fn run_notification_parent(
-    args: RunArgs,
-    request: Request,
-) -> Result<i32, Box<dyn std::error::Error>> {
-    let _ = templates::resolve(&request, args.template.as_deref())?;
-
-    let executable = std::env::current_exe()?;
-    let mut command = Command::new(executable);
-    command
-        .arg("__notify-child")
-        .arg(&args.request)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .stdin(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-
-        // Keep the short-lived UI child from opening a second console when
-        // Popu is called by a GUI program or automation runner.
-        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
-    if let Some(template) = args.template {
-        command.arg("--template").arg(template);
-    }
-    if let Some(handle) = args.lifetime_handle {
-        command.arg("--lifetime-handle").arg(handle.to_string());
-    }
-    let (mut child, detached_stdout) = spawn_notification_child(&mut command)?;
-    let mut stdout = io::BufReader::new(
-        child
-            .stdout
-            .take()
-            .ok_or("notification child has no stdout")?,
-    );
-    let mut first = String::new();
-    stdout.read_line(&mut first)?;
-    let first = first.trim_end();
-    if first.is_empty() {
-        let status = child.wait()?;
-        let mut diagnostics = String::new();
-        if let Some(mut stderr) = child.stderr.take() {
-            stderr.read_to_string(&mut diagnostics)?;
-        }
-        let diagnostics = diagnostics.trim();
-        if diagnostics.is_empty() {
-            return Err(format!("notification failed before it was shown: {status}").into());
-        }
-        return Err(format!("notification failed before it was shown: {diagnostics}").into());
-    }
-    let ready: serde_json::Value = serde_json::from_str(first)?;
-    if ready.get("status").and_then(|value| value.as_str()) != Some("shown") {
-        return Err(format!("unexpected notification readiness response: {first}").into());
-    }
-    write_notification_ready(first, detached_stdout)?;
-    Ok(runtime::EXIT_OK)
+fn print_rpc(value: serde_json::Value) -> Result<i32, Box<dyn std::error::Error>> {
+    println!("{}", serde_json::to_string(&value)?); Ok(runtime::EXIT_OK)
 }
 
-#[cfg(windows)]
-fn spawn_notification_child(command: &mut Command) -> io::Result<(Child, Option<fs::File>)> {
-    use std::os::windows::io::FromRawHandle;
-
-    use windows_sys::Win32::Foundation::{
-        DuplicateHandle, GetHandleInformation, SetHandleInformation, DUPLICATE_SAME_ACCESS, HANDLE,
-        HANDLE_FLAG_INHERIT,
-    };
-    use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE};
-    use windows_sys::Win32::System::Threading::GetCurrentProcess;
-
-    let mut output_copy: HANDLE = std::ptr::null_mut();
-    let mut restore = Vec::<(HANDLE, u32)>::new();
-    unsafe {
-        let stdout = GetStdHandle(STD_OUTPUT_HANDLE);
-        let process = GetCurrentProcess();
-        if !stdout.is_null()
-            && DuplicateHandle(
-                process,
-                stdout,
-                process,
-                &mut output_copy,
-                0,
-                0,
-                DUPLICATE_SAME_ACCESS,
-            ) == 0
-        {
-            output_copy = std::ptr::null_mut();
-        }
-
-        // Capturing callers expose inheritable stdout/stderr pipe handles.
-        // The UI child needs only the explicit pipes configured on `Command`.
-        for kind in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
-            let handle = GetStdHandle(kind);
-            let mut flags = 0;
-            if !handle.is_null()
-                && GetHandleInformation(handle, &mut flags) != 0
-                && flags & HANDLE_FLAG_INHERIT != 0
-                && SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) != 0
-            {
-                restore.push((handle, flags));
-            }
-        }
-    }
-
-    let result = command.spawn();
-    unsafe {
-        for (handle, flags) in restore {
-            let _ = SetHandleInformation(handle, HANDLE_FLAG_INHERIT, flags);
-        }
-    }
-    let output = if output_copy.is_null() {
-        None
-    } else {
-        Some(unsafe { fs::File::from_raw_handle(output_copy) })
-    };
-    result.map(|child| (child, output))
+fn rpc_call(method: &str, params: serde_json::Value) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let response = ipc::call(&rpc_request(method, params))?;
+    unwrap_rpc(response)
 }
 
-#[cfg(not(windows))]
-fn spawn_notification_child(command: &mut Command) -> io::Result<(Child, Option<fs::File>)> {
-    command.spawn().map(|child| (child, None))
+fn rpc_request(method: &str, params: serde_json::Value) -> ipc::RpcRequest {
+    ipc::RpcRequest { version: ipc::RPC_VERSION.into(), method: method.into(), params }
 }
 
-fn write_notification_ready(first: &str, detached_stdout: Option<fs::File>) -> io::Result<()> {
-    if let Some(mut stdout) = detached_stdout {
-        writeln!(stdout, "{first}")?;
-        stdout.flush()
-    } else {
-        println!("{first}");
-        io::stdout().flush()
+fn unwrap_rpc(response: ipc::RpcResponse) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    if response.ok { Ok(response.result.unwrap_or(serde_json::Value::Null)) }
+    else { Err(format!("Host RPC failed: {}", response.error.unwrap_or(serde_json::Value::Null)).into()) }
+}
+
+fn rpc_with_start(method: &str, params: serde_json::Value) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    match ipc::call(&rpc_request(method, params.clone())) {
+        Ok(response) => return unwrap_rpc(response),
+        Err(_) => {}
     }
+    let mut command = Command::new(std::env::current_exe()?);
+    command.args(["host", "run"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)] { use std::os::windows::process::CommandExt; command.creation_flags(0x0800_0000); }
+    let _child = command.spawn()?;
+    let mut last = None;
+    for _ in 0..60 {
+        thread::sleep(Duration::from_millis(50));
+        match ipc::call(&rpc_request(method, params.clone())) {
+            Ok(response) => return unwrap_rpc(response),
+            Err(error) => last = Some(error.into()),
+        }
+    }
+    Err(last.unwrap_or_else(|| "Host did not become ready".into()))
 }
 
 fn load_request(path: &Path) -> Result<Request, Box<dyn std::error::Error>> {
     let text = if path == Path::new("-") {
-        let mut text = String::new();
-        io::stdin().read_to_string(&mut text)?;
-        text
-    } else {
-        fs::read_to_string(path)?
-    };
+        let mut text = String::new(); io::stdin().read_to_string(&mut text)?; text
+    } else { fs::read_to_string(path)? };
     Ok(Request::parse(&text)?)
-}
-
-fn require_mode(request: &Request, mode: Mode) -> Result<(), Box<dyn std::error::Error>> {
-    if request.mode != mode {
-        return Err(format!(
-            "request mode {:?} does not match command {:?}",
-            request.mode, mode
-        )
-        .into());
-    }
-    Ok(())
 }
