@@ -17,3 +17,21 @@ build-test file="dialog-confirm.json": build
 # Build the release executable, then run a protocol fixture.
 build-test-release file="dialog-confirm.json": build-release
     cargo run --release --manifest-path src-tauri/Cargo.toml -- request protocol/examples/{{file}}
+
+# Build once, then run every protocol fixture in filename order. Each request
+# waits for Popu to exit before the next fixture starts.
+build-test-all: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    shopt -s nullglob
+    examples=(protocol/examples/*.json)
+    executable=src-tauri/target/debug/popu
+    
+    if (( ${#examples[@]} == 0 )); then
+        echo "No protocol examples found in protocol/examples" >&2
+        exit 1
+    fi
+    for example in "${examples[@]}"; do
+        printf '\n==> %s\n' "$example"
+        "$executable" request "$example" || echo ''
+    done
