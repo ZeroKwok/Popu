@@ -41,6 +41,8 @@ cargo build --manifest-path src-tauri/Cargo.toml
 
 产物位于 `src-tauri/target/debug/popu.exe` 或 `src-tauri/target/release/popu.exe`。
 
+调试 WebView2 时，可在 Debug 构建中设置 `POPU_DEVTOOLS=1` 后运行请求；这会自动打开浏览器开发者工具。该开关在 Release 构建中无效。
+
 ## CLI
 
 ```powershell

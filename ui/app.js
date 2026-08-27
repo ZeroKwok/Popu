@@ -43,6 +43,12 @@ function inputId(field) {
   return `popu-field-${field.id}`;
 }
 
+function hasValue(value) {
+  // serde serializes a missing Rust Option as null. Assigning null to a DOM
+  // constraint such as maxLength coerces it to 0, which blocks all typing.
+  return value !== undefined && value !== null;
+}
+
 function renderField(field) {
   const wrapper = document.createElement("div");
   wrapper.className = "popu-field";
@@ -104,13 +110,13 @@ function renderField(field) {
     input.name = field.id;
     input.required = Boolean(field.required);
     if (field.placeholder && field.type !== "select") input.placeholder = field.placeholder;
-    if (field.default !== undefined && field.default !== null) input.value = String(field.default);
-    if (field.min_length !== undefined) input.minLength = field.min_length;
-    if (field.max_length !== undefined) input.maxLength = field.max_length;
+    if (hasValue(field.default)) input.value = String(field.default);
+    if (hasValue(field.min_length)) input.minLength = field.min_length;
+    if (hasValue(field.max_length)) input.maxLength = field.max_length;
     if (field.pattern) input.pattern = field.pattern;
-    if (field.min !== undefined) input.min = field.min;
-    if (field.max !== undefined) input.max = field.max;
-    if (field.step !== undefined) input.step = field.step;
+    if (hasValue(field.min)) input.min = field.min;
+    if (hasValue(field.max)) input.max = field.max;
+    if (hasValue(field.step)) input.step = field.step;
     wrapper.append(label, input);
   }
 

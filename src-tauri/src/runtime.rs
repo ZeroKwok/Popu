@@ -211,6 +211,11 @@ pub fn run_ui(
                     .shadow(false)
                     .build()?;
 
+            #[cfg(debug_assertions)]
+            if std::env::var_os("POPU_DEVTOOLS").is_some() {
+                window.open_devtools();
+            }
+
             #[cfg(windows)]
             if let Err(error) = configure_frameless_windows_window(&window, state.maximized) {
                 // Transparency remains useful even if a system policy or an
