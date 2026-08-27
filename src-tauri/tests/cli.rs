@@ -31,9 +31,8 @@ fn invalid_notify_request_fails_without_starting_ui() {
 
     assert_eq!(output.status.code(), Some(12));
     assert!(output.stdout.is_empty());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("notify cannot contain form or actions")
-    );
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("notify cannot contain form blocks or actions"));
 }
 
 #[test]
@@ -84,7 +83,6 @@ fn template_flag_is_accepted_by_request() {
     // Schema validation runs after CLI parsing; this proves the new flag was
     // accepted without needing to create a real WebView window in the test.
     assert_eq!(output.status.code(), Some(12));
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("notify cannot contain form or actions")
-    );
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("notify cannot contain form blocks or actions"));
 }

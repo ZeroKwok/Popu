@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "mode": "dialog",
+  "template": "confirm",
+  "position": "cursor_screen_center",
+  "window": { "width": 480, "height": 420 },
+  "content": {
+    "severity": "info",
+    "title": "Unordered list examples",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": "Use an unordered list when the items are peers and their order does not change the meaning."
+      },
+      {
+        "type": "unordered_list",
+        "title": "Included outputs",
+        "items": ["Application package", "Offline installer", "Verification report"]
+      },
+      {
+        "type": "unordered_list",
+        "items": ["Copyable text", "Automatic wrapping", "Original item order"]
+      }
+    ]
+  },
+  "actions": [
+    { "id": "close", "label": "Close", "style": "secondary", "result_status": "closed" }
+  ]
+}

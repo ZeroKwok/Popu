@@ -22,14 +22,95 @@ function setText(slot, value) {
   if (target) target.textContent = value ?? "";
 }
 
+function appendBlockTitle(section, titleText) {
+  if (!titleText) return;
+  const title = document.createElement("h2");
+  title.className = "popu-block-title";
+  title.textContent = titleText;
+  section.append(title);
+}
+
+function renderProperties(block, section) {
+  const grid = document.createElement("div");
+  grid.className = "popu-properties";
+  for (const item of block.items) {
+    const label = document.createElement("div");
+    label.className = "popu-property-label";
+    label.textContent = item.label;
+    const text = document.createElement("div");
+    text.className = "popu-property-text";
+    text.textContent = item.text;
+    grid.append(label, text);
+  }
+  section.append(grid);
+}
+
+function renderList(block, section) {
+  const list = document.createElement(block.type === "ordered_list" ? "ol" : "ul");
+  list.className = "popu-list";
+  for (const text of block.items) {
+    const item = document.createElement("li");
+    item.className = "popu-list-item";
+    item.textContent = text;
+    list.append(item);
+  }
+  section.append(list);
+}
+
+function renderProgress(block, section) {
+  const row = document.createElement("div");
+  row.className = "popu-progress-row";
+  const progress = document.createElement("progress");
+  progress.className = "popu-progress";
+  progress.max = 100;
+  progress.value = block.value;
+  progress.setAttribute("aria-label", block.title ?? `Progress: ${block.value}%`);
+  const value = document.createElement("span");
+  value.className = "popu-progress-value";
+  value.textContent = `${block.value}%`;
+  row.append(progress, value);
+  section.append(row);
+}
+
+function renderFormBlock(block, section) {
+  const form = document.createElement("form");
+  form.className = "popu-form";
+  form.dataset.popuForm = "";
+  form.noValidate = true;
+  for (const field of block.fields) form.append(renderField(field));
+  section.append(form);
+}
+
+function renderBlock(block) {
+  const section = document.createElement("section");
+  section.className = `popu-block popu-block-${block.type}`;
+  appendBlockTitle(section, block.title);
+
+  if (block.type === "paragraph") {
+    const paragraph = document.createElement("p");
+    paragraph.className = "popu-paragraph";
+    paragraph.textContent = block.text;
+    section.append(paragraph);
+  } else if (block.type === "properties") {
+    renderProperties(block, section);
+  } else if (block.type === "unordered_list" || block.type === "ordered_list") {
+    renderList(block, section);
+  } else if (block.type === "progress") {
+    renderProgress(block, section);
+  } else if (block.type === "form") {
+    renderFormBlock(block, section);
+  } else {
+    throw new Error(`Unsupported content block: ${block.type}`);
+  }
+  return section;
+}
+
 function renderBlocks(blocks = []) {
-  const root = element("content"); if (!root) return; root.replaceChildren();
+  const root = element("content");
+  if (!root) return;
+  root.replaceChildren();
   root.hidden = blocks.length === 0;
-  for (const block of blocks) { const section=document.createElement("section"); section.className="popu-block";
-    if (block.title) { const title=document.createElement("h2"); title.className="popu-block-title"; title.textContent=block.title; section.append(title); }
-    if (block.type === "paragraph") { const p=document.createElement("p"); p.className="popu-paragraph"; p.textContent=block.text; section.append(p); }
-    else if (block.type === "properties") { const grid=document.createElement("div"); grid.className="popu-properties"; for(const item of block.items){const k=document.createElement("div"),v=document.createElement("div");k.className="popu-property-label";v.className="popu-property-text";k.textContent=item.label;v.textContent=item.text;grid.append(k,v)} section.append(grid); }
-    else { const list=document.createElement(block.type === "ordered_list" ? "ol" : "ul"); list.className="popu-list"; for(const item of block.items){const li=document.createElement("li");li.className="popu-list-item";li.textContent=item;list.append(li)} section.append(list); } root.append(section); }
+  for (const block of blocks) root.append(renderBlock(block));
 }
 function inputId(field) {
   return `popu-field-${field.id}`;
@@ -115,18 +196,15 @@ function renderField(field) {
   return wrapper;
 }
 
-function renderForm(form) {
-  const root = element("form");
-  if (!root) return;
-  root.replaceChildren();
-  const fields = form?.fields ?? [];
-  root.hidden = fields.length === 0;
-  for (const field of fields) root.append(renderField(field));
+function requestFields() {
+  return bootstrap.request.content.blocks.flatMap((block) =>
+    block.type === "form" ? block.fields : [],
+  );
 }
 
 function collectValues() {
   const values = {};
-  for (const field of bootstrap.request.form?.fields ?? []) {
+  for (const field of requestFields()) {
     const root = document.querySelector(`[data-field-id="${field.id}"]`);
     let value;
     if (field.type === "checkbox") {
@@ -174,8 +252,8 @@ function renderActions(actions) {
     button.addEventListener("click", async () => {
       try {
         if (action.submit) {
-          const form = element("form");
-          if (form && !form.reportValidity()) return;
+          const forms = document.querySelectorAll("[data-popu-form]");
+          if ([...forms].some((form) => !form.reportValidity())) return;
           await invoke("submit", { action: action.id, values: collectValues() });
         } else {
           await invoke("finish", { status: action.result_status, action: action.id });
@@ -228,7 +306,6 @@ async function start() {
   }
   setText("title", bootstrap.request.content.title);
   renderBlocks(bootstrap.request.content.blocks);
-  renderForm(bootstrap.request.form);
   renderActions(bootstrap.request.actions);
   installDragRegions();
 

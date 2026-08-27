@@ -23,10 +23,14 @@ Use one dialog for one decision. Never use a dialog merely to narrate normal pro
 Write for the person deciding now, not for a debug log.
 
 - **Title:** state the action or question in one short line: `Replace 3 existing files?`, `Backup completed`, `Choose export format`.
-- **Message:** state the outcome, consequence, or next step in one to three short sentences.
-- **Details:** include at most the facts that change the decision: affected count, destination, estimated size/time, conflict policy, error reason, or a correlation ID. Use short label/value pairs.
-- **Omit:** full paths when a meaningful leaf/name suffices, item-by-item lists, stack traces, repeated metadata, implementation details, verbose AI reasoning, and information that cannot change the choice.
-- **Sensitive data:** never put passwords, tokens, recovery keys, full personal data, or secrets in requests, details, fields, or expected stdout responses.
+- **Paragraph:** use for a concise outcome, consequence, or next step.
+- **Properties:** use short `label/text` pairs for facts that change the decision: affected count, destination, estimated size/time, conflict policy, error reason, or correlation ID.
+- **Unordered list:** use for peer items whose order does not change the meaning.
+- **Ordered list:** use for steps, stages, or priorities.
+- **Progress:** use only for a known 0100 completion percentage.
+- **Form:** use one or more form blocks for the minimum structured input needed by a dialog.
+- **Omit:** full paths when a meaningful leaf/name suffices, item-by-item dumps, stack traces, repeated metadata, implementation details, verbose AI reasoning, and information that cannot change the choice.
+- **Sensitive data:** never put passwords, tokens, recovery keys, full personal data, or secrets in blocks, fields, or expected stdout responses.
 
 For many affected items, show a count plus representative scope, for example `1,248 files in Documents`, not all 1,248 names. Put the full report in the calling product's normal log/report location.
 
@@ -54,7 +58,7 @@ Use the smallest control that produces an unambiguous result.
 - Use built-in `notification` for notifications and `confirm` for a confirmation, acknowledgement, or small form. Use `form` only when it makes intent clearer.
 - Use `bottom_right` for notifications and `cursor_screen_center` for dialogs unless the workflow has a stronger placement requirement.
 - Leave `window.width` and `window.height` unset unless the content needs a deliberate size. Use percentages only for deliberate large/full-screen experiences, never to compensate for verbose content.
-- Keep long content in `message` or compact `details`; Popu makes the body scroll when needed. Shorten content before increasing the window.
+- Order blocks as the person should read them: conclusion, key facts, implications or steps, progress, then required input. Shorten and structure content before increasing the window.
 - Use an external template only when it is a preinstalled, trusted local asset selected by the caller through `--template`. Do not let AI-generated request data select paths or inject HTML/CSS/JavaScript.
 
 ## Generate the request
@@ -82,8 +86,11 @@ Use the smallest control that produces an unambiguous result.
   "content": {
     "severity": "success",
     "title": "Backup completed",
-    "message": "128 files copied in 3 minutes 21 seconds.",
-    "details": [{ "label": "Size", "value": "2.4 GB" }]
+    "blocks": [
+      { "type": "paragraph", "text": "128 files copied in 3 minutes 21 seconds." },
+      { "type": "properties", "items": [{ "label": "Size", "text": "2.4 GB" }] },
+      { "type": "progress", "title": "Completion", "value": 100 }
+    ]
   }
 }
 ```
@@ -99,16 +106,19 @@ Use the smallest control that produces an unambiguous result.
   "content": {
     "severity": "warning",
     "title": "Replace 3 existing files?",
-    "message": "The destination contains files with the same names.",
-    "details": [{ "label": "Destination", "value": "D:\\Backup" }]
-  },
-  "form": {
-    "fields": [{
-      "id": "confirmed",
-      "type": "checkbox",
-      "label": "I understand existing files will be replaced",
-      "required": true
-    }]
+    "blocks": [
+      { "type": "paragraph", "text": "The destination contains files with the same names." },
+      { "type": "properties", "items": [{ "label": "Destination", "text": "D:\\Backup" }] },
+      {
+        "type": "form",
+        "fields": [{
+          "id": "confirmed",
+          "type": "checkbox",
+          "label": "I understand existing files will be replaced",
+          "required": true
+        }]
+      }
+    ]
   },
   "actions": [
     { "id": "replace", "label": "Replace", "style": "danger", "submit": true },

@@ -1,7 +1,13 @@
 {
   "version": "1.0",
   "mode": "notify",
-  "content": { "title": "Invalid" },
-  "form": { "fields": [] }
+  "content": {
+    "title": "Invalid",
+    "blocks": [
+      {
+        "type": "form",
+        "fields": [{ "id": "name", "type": "text", "label": "Name" }]
+      }
+    ]
+  }
 }
-

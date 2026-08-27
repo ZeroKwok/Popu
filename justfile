@@ -22,6 +22,11 @@ build-test file="dialog-confirm.json": build
 build-test-release file="dialog-confirm.json": build-release
     cargo run --release --manifest-path src-tauri/Cargo.toml -- request protocol/examples/{{file}}
 
+# Build the release executable, then run a protocol fixture.
+install: build-release
+    #!/usr/bin/env bash
+    cp -v ./src-tauri/target/release/popu.exe /g/Local/tools/
+
 # Build once, then run every protocol fixture in filename order. Each request
 # waits for Popu to exit before the next fixture starts.
 build-test-all: build
@@ -37,5 +42,13 @@ build-test-all: build
     fi
     for example in "${examples[@]}"; do
         printf '\n==> %s\n' "$example"
-        "$executable" request "$example" || echo ''
+        if "$executable" request "$example"; then
+            continue
+        else
+            status=$?
+        fi
+        case "$status" in
+            10|11) ;;
+            *) exit "$status" ;;
+        esac
     done

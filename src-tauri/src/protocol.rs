@@ -161,23 +161,54 @@ impl WindowOptions {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PropertyItem { pub label: String, pub text: String }
+pub struct PropertyItem {
+    pub label: String,
+    pub text: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ContentBlock {
-    Paragraph { #[serde(default)] title: Option<String>, text: String },
-    Properties { #[serde(default)] title: Option<String>, items: Vec<PropertyItem> },
-    UnorderedList { #[serde(default)] title: Option<String>, items: Vec<String> },
-    OrderedList { #[serde(default)] title: Option<String>, items: Vec<String> },
+    Paragraph {
+        #[serde(default)]
+        title: Option<String>,
+        text: String,
+    },
+    Properties {
+        #[serde(default)]
+        title: Option<String>,
+        items: Vec<PropertyItem>,
+    },
+    UnorderedList {
+        #[serde(default)]
+        title: Option<String>,
+        items: Vec<String>,
+    },
+    OrderedList {
+        #[serde(default)]
+        title: Option<String>,
+        items: Vec<String>,
+    },
+    Progress {
+        #[serde(default)]
+        title: Option<String>,
+        value: f64,
+    },
+    Form {
+        #[serde(default)]
+        title: Option<String>,
+        fields: Vec<Field>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Content {
-    #[serde(default)] pub severity: Severity,
+    #[serde(default)]
+    pub severity: Severity,
     pub title: String,
-    #[serde(default)] pub blocks: Vec<ContentBlock>,
+    #[serde(default)]
+    pub blocks: Vec<ContentBlock>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -225,13 +256,6 @@ pub struct Field {
     pub step: Option<f64>,
     #[serde(default)]
     pub options: Vec<FieldOption>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Form {
-    #[serde(default)]
-    pub fields: Vec<Field>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -283,8 +307,6 @@ pub struct Request {
     pub window: WindowOptions,
     pub content: Content,
     #[serde(default)]
-    pub form: Option<Form>,
-    #[serde(default)]
     pub actions: Vec<Action>,
     #[serde(default = "default_dialog_timeout")]
     pub timeout_seconds: u64,
@@ -308,7 +330,9 @@ impl Request {
                 "title must contain 1-200 characters".into(),
             ));
         }
-        for block in &self.content.blocks { validate_content_block(block)?; }
+        for block in &self.content.blocks {
+            validate_content_block(block)?;
+        }
 
         if let Some(width) = &self.window.width {
             width.validate("width")?;
@@ -331,9 +355,14 @@ impl Request {
                 }
             }
             Mode::Notify => {
-                if self.form.is_some() || !self.actions.is_empty() {
+                let has_form_block = self
+                    .content
+                    .blocks
+                    .iter()
+                    .any(|block| matches!(block, ContentBlock::Form { .. }));
+                if has_form_block || !self.actions.is_empty() {
                     return Err(ProtocolError::Invalid(
-                        "notify cannot contain form or actions".into(),
+                        "notify cannot contain form blocks or actions".into(),
                     ));
                 }
                 if !(500..=86_400_000).contains(&self.duration_ms) {
@@ -345,7 +374,7 @@ impl Request {
         }
 
         let mut field_ids = HashSet::new();
-        for field in self.form.iter().flat_map(|form| &form.fields) {
+        for field in self.fields() {
             validate_identifier(&field.id, "field")?;
             if !field_ids.insert(field.id.as_str()) {
                 return Err(ProtocolError::Invalid(format!(
@@ -434,9 +463,7 @@ impl Request {
 
     fn validate_values(&self, values: &Map<String, Value>) -> Result<(), ProtocolError> {
         let fields: HashMap<&str, &Field> = self
-            .form
-            .iter()
-            .flat_map(|form| &form.fields)
+            .fields()
             .map(|field| (field.id.as_str(), field))
             .collect();
         for key in values.keys() {
@@ -450,6 +477,17 @@ impl Request {
             validate_value(field, values.get(&field.id))?;
         }
         Ok(())
+    }
+
+    fn fields(&self) -> impl Iterator<Item = &Field> {
+        self.content
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Form { fields, .. } => Some(fields),
+                _ => None,
+            })
+            .flatten()
     }
 }
 
@@ -474,13 +512,56 @@ pub enum ProtocolError {
 }
 
 fn validate_content_block(block: &ContentBlock) -> Result<(), ProtocolError> {
-    let title = match block { ContentBlock::Paragraph { title, .. } | ContentBlock::Properties { title, .. } | ContentBlock::UnorderedList { title, .. } | ContentBlock::OrderedList { title, .. } => title };
-    if title.as_ref().is_some_and(|value| value.trim().is_empty() || value.chars().count() > 200) { return Err(ProtocolError::Invalid("block title must contain 1-200 characters".into())); }
-    let text_ok = |value: &str| value.chars().count() <= 20_000;
+    let title = match block {
+        ContentBlock::Paragraph { title, .. }
+        | ContentBlock::Properties { title, .. }
+        | ContentBlock::UnorderedList { title, .. }
+        | ContentBlock::OrderedList { title, .. }
+        | ContentBlock::Progress { title, .. }
+        | ContentBlock::Form { title, .. } => title,
+    };
+    if title
+        .as_ref()
+        .is_some_and(|value| value.trim().is_empty() || value.chars().count() > 200)
+    {
+        return Err(ProtocolError::Invalid(
+            "block title must contain 1-200 characters".into(),
+        ));
+    }
+    let text_ok = |value: &str| !value.trim().is_empty() && value.chars().count() <= 20_000;
     match block {
-        ContentBlock::Paragraph { text, .. } if !text_ok(text) => Err(ProtocolError::Invalid("paragraph text exceeds 20000 characters".into())),
-        ContentBlock::Properties { items, .. } if items.is_empty() || items.iter().any(|item| item.label.trim().is_empty() || item.label.chars().count() > 200 || !text_ok(&item.text)) => Err(ProtocolError::Invalid("properties require non-empty valid items".into())),
-        ContentBlock::UnorderedList { items, .. } | ContentBlock::OrderedList { items, .. } if items.is_empty() || items.iter().any(|item| !text_ok(item)) => Err(ProtocolError::Invalid("lists require non-empty valid items".into())),
+        ContentBlock::Paragraph { text, .. } if !text_ok(text) => Err(ProtocolError::Invalid(
+            "paragraph text must contain 1-20000 characters".into(),
+        )),
+        ContentBlock::Properties { items, .. }
+            if items.is_empty()
+                || items.iter().any(|item| {
+                    item.label.trim().is_empty()
+                        || item.label.chars().count() > 200
+                        || !text_ok(&item.text)
+                }) =>
+        {
+            Err(ProtocolError::Invalid(
+                "properties require non-empty valid items".into(),
+            ))
+        }
+        ContentBlock::UnorderedList { items, .. } | ContentBlock::OrderedList { items, .. }
+            if items.is_empty() || items.iter().any(|item| !text_ok(item)) =>
+        {
+            Err(ProtocolError::Invalid(
+                "lists require non-empty valid items".into(),
+            ))
+        }
+        ContentBlock::Progress { value, .. }
+            if !value.is_finite() || !(0.0..=100.0).contains(value) =>
+        {
+            Err(ProtocolError::Invalid(
+                "progress value must be between 0 and 100".into(),
+            ))
+        }
+        ContentBlock::Form { fields, .. } if fields.is_empty() => Err(ProtocolError::Invalid(
+            "form blocks require at least one field".into(),
+        )),
         _ => Ok(()),
     }
 }
@@ -682,8 +763,10 @@ mod tests {
         Request::parse(
             r#"{
               "version":"1.0","mode":"dialog","template":"confirm",
-              "content":{"title":"Confirm","blocks":[{"type":"paragraph","text":"Continue?"}]},
-              "form":{"fields":[{"id":"confirmed","type":"checkbox","label":"I understand","required":true}]},
+              "content":{"title":"Confirm","blocks":[
+                {"type":"paragraph","text":"Continue?"},
+                {"type":"form","fields":[{"id":"confirmed","type":"checkbox","label":"I understand","required":true}]}
+              ]},
               "actions":[
                 {"id":"confirm","label":"Continue","style":"danger","submit":true},
                 {"id":"cancel","label":"Cancel","style":"secondary","result_status":"cancelled"}
@@ -771,8 +854,9 @@ mod tests {
     fn notify_rejects_form_and_actions() {
         let error = Request::parse(
             r#"{
-              "version":"1.0","mode":"notify","content":{"title":"Done"},
-              "form":{"fields":[]}
+              "version":"1.0","mode":"notify","content":{"title":"Done","blocks":[
+                {"type":"form","fields":[{"id":"name","type":"text","label":"Name"}]}
+              ]}
             }"#,
         )
         .unwrap_err();
@@ -783,8 +867,9 @@ mod tests {
     fn optional_select_accepts_no_value() {
         let request = Request::parse(
             r#"{
-              "version":"1.0","mode":"dialog","content":{"title":"Choose"},
-              "form":{"fields":[{"id":"choice","type":"select","label":"Choice","options":[{"value":"a","label":"A"}]}]},
+              "version":"1.0","mode":"dialog","content":{"title":"Choose","blocks":[
+                {"type":"form","fields":[{"id":"choice","type":"select","label":"Choice","options":[{"value":"a","label":"A"}]}]}
+              ]},
               "actions":[{"id":"ok","label":"OK","submit":true}]
             }"#,
         )
@@ -798,8 +883,9 @@ mod tests {
     fn number_step_is_revalidated_in_rust() {
         let request = Request::parse(
             r#"{
-              "version":"1.0","mode":"dialog","content":{"title":"Number"},
-              "form":{"fields":[{"id":"count","type":"number","label":"Count","min":1,"step":2}]},
+              "version":"1.0","mode":"dialog","content":{"title":"Number","blocks":[
+                {"type":"form","fields":[{"id":"count","type":"number","label":"Count","min":1,"step":2}]}
+              ]},
               "actions":[{"id":"ok","label":"OK","submit":true}]
             }"#,
         )
@@ -807,6 +893,63 @@ mod tests {
         let mut values = Map::new();
         values.insert("count".into(), json!(2));
         assert!(request.submitted_response("ok", values).is_err());
+    }
+
+    #[test]
+    fn accepts_progress_boundaries_and_rejects_out_of_range_values() {
+        for value in [0, 100] {
+            Request::parse(&format!(
+                r#"{{"version":"1.0","mode":"notify","content":{{"title":"Progress","blocks":[{{"type":"progress","value":{value}}}]}}}}"#
+            ))
+            .unwrap();
+        }
+        for value in [-1, 101] {
+            let error = Request::parse(&format!(
+                r#"{{"version":"1.0","mode":"notify","content":{{"title":"Progress","blocks":[{{"type":"progress","value":{value}}}]}}}}"#
+            ))
+            .unwrap_err();
+            assert!(error.to_string().contains("progress value"));
+        }
+    }
+
+    #[test]
+    fn multiple_form_blocks_share_validation_and_response_values() {
+        let request = Request::parse(
+            r#"{
+              "version":"1.0","mode":"dialog","content":{"title":"Forms","blocks":[
+                {"type":"form","fields":[{"id":"name","type":"text","label":"Name","required":true}]},
+                {"type":"paragraph","text":"Fields may be separated by display content."},
+                {"type":"form","fields":[{"id":"confirmed","type":"checkbox","label":"Confirmed","required":true}]}
+              ]},
+              "actions":[{"id":"ok","label":"OK","submit":true}]
+            }"#,
+        )
+        .unwrap();
+        let mut values = Map::new();
+        values.insert("name".into(), json!("Release"));
+        values.insert("confirmed".into(), json!(true));
+        assert!(request.submitted_response("ok", values).is_ok());
+    }
+
+    #[test]
+    fn rejects_empty_block_payloads_and_legacy_top_level_form() {
+        for block in [
+            r#"{"type":"paragraph","text":"   "}"#,
+            r#"{"type":"properties","items":[{"label":"Fact","text":" "} ]}"#,
+            r#"{"type":"unordered_list","items":[""]}"#,
+            r#"{"type":"ordered_list","items":["   "]}"#,
+            r#"{"type":"form","fields":[]}"#,
+        ] {
+            let text = format!(
+                r#"{{"version":"1.0","mode":"dialog","content":{{"title":"Invalid","blocks":[{block}]}},"actions":[{{"id":"ok","label":"OK","submit":true}}]}}"#
+            );
+            assert!(Request::parse(&text).is_err(), "{block} should be invalid");
+        }
+        let legacy = r#"{
+          "version":"1.0","mode":"dialog","content":{"title":"Legacy"},
+          "form":{"fields":[]},"actions":[{"id":"ok","label":"OK","submit":true}]
+        }"#;
+        assert!(Request::parse(legacy).is_err());
     }
 
     #[test]

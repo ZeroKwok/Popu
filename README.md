@@ -15,8 +15,31 @@ Popu 是一个面向自动化脚本和 AI Agent 的轻量本机交互窗口。�
 - 可选鼠标所在屏幕或主屏；尺寸支持像素与百分比，`"100%" × "100%"` 填满所选工作区或物理屏幕。
 - 当宽高均为 `"100%"` 时，窗口不允许拖动，并移除圆角与阴影；超长内容仅在中间内容区滚动。
 - 无边框透明圆角窗口；Windows 圆角外部区域鼠标穿透到底层窗口。
-- `data-popu-drag-region` 定义拖拽背景，`data-popu-selectable` 定义可复制文本；内置模板默认允许复制正文和详情。
+- `data-popu-drag-region` 定义拖拽背景，`data-popu-selectable` 定义可复制文本；内置模板默认允许复制所有展示内容。
 - Python lifetime pipe：Python 调用方退出时关闭对应 Popu 窗口。
+
+## 组织展示内容
+
+先确定用户完成当前判断或操作必须看到哪些信息，再按阅读顺序组织 `content.blocks`。不要把日志结构原样搬进窗口。
+
+| 要展示的数据 | 选择的 block |
+| --- | --- |
+| 一段结论、影响或简短说明 | `paragraph` |
+| 具有稳定标签的关键事实，如目标、数量、耗时、策略 | `properties` |
+| 没有先后关系的并列事项 | `unordered_list` |
+| 有执行顺序、优先级或阶段关系的事项 | `ordered_list` |
+| 0–100 的完成百分比 | `progress` |
+| 需要用户填写或确认的少量结构化值 | `form`；仅用于 dialog |
+
+建议按“结论 → 关键事实 → 影响或步骤 → 当前进度 → 必要输入”的顺序排列。每个 block 都可使用简短 `title` 分组；没有标题时直接省略，不要重复窗口主标题。
+
+内容较多时应压缩表达，但必须保留会改变判断或操作结果的信息：
+
+- 保留结论、影响对象、范围、数量和单位、下一步，以及必要的错误原因或关联 ID。
+- 将大量重复项压缩为“总数 + 范围 + 少量代表项”，例如“Documents 中的 1,248 个文件”，不要逐项列出。
+- 路径只有在区分目标或避免误操作时才保留；否则使用有意义的目录名或文件名。
+- 省略重复元数据、完整日志、堆栈、实现细节和不影响当前决定的信息。
+- 表格、树、长报告、复杂编辑或完整日志应交给调用方产品界面，Popu 只展示摘要和下一步。
 
 ## 构建
 
@@ -53,7 +76,7 @@ popu templates list
 popu templates validate --path path/to/my-template
 ```
 
-布局手工验收可使用 `protocol/examples/dialog-short-content.json`、`dialog-long-content.json`、`dialog-ultra-long-content.json` 和 `dialog-fullscreen-screen.json`；它们分别验证紧凑短内容、长文本/详情/表单、工作区全屏下的统一内容滚动，以及物理屏幕全屏。
+布局手工验收可使用 `dialog-unordered-list.json`、`dialog-ordered-list.json`、`dialog-all-elements.json`、`notification-success.json`、`dialog-ultra-long-content.json` 和 `dialog-fullscreen-screen.json`；它们分别验证两种列表、六类内容块与全部表单控件、通知进度、长内容滚动，以及物理屏幕全屏。
 
 可替换模板示例位于 `protocol/examples/templates/minimal-notification`。
 
@@ -67,19 +90,7 @@ Start-Process popu -ArgumentList @('request', 'notification.json') -WindowStyle 
 
 ## Python
 
-```powershell
-python -m pip install -e ./python
-```
-
-```python
-from popu import DialogRequest, Notification, notify, show
-
-result = show(DialogRequest.confirm(title="继续执行吗？"))
-if result.status == "submitted" and result.action == "confirm":
-    print("confirmed")
-
-notify(Notification.success(title="任务完成", message="共处理 128 个文件"))
-```
+Python SDK 暂未同步本轮 `content.blocks` 协议调整，将在协议稳定后集中更新。当前请通过 JSON 请求或 CLI 使用六类内容块；现有 SDK 仅保留用于回归检查，不应作为新协议示例。
 
 完整协议与设计边界见 [ARCHITECTURE.md](ARCHITECTURE.md)，JSON Schema 见 [protocol/popu.schema.json](protocol/popu.schema.json)。
 

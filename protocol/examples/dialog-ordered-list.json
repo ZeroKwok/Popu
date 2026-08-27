@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "mode": "dialog",
+  "template": "confirm",
+  "position": "cursor_screen_center",
+  "window": { "width": 480, "height": 440 },
+  "content": {
+    "severity": "info",
+    "title": "Ordered list examples",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": "Use an ordered list when sequence, priority, or stage changes how the items should be understood."
+      },
+      {
+        "type": "ordered_list",
+        "title": "Deployment steps",
+        "items": ["Validate the package", "Upload the artifacts", "Publish the verification result"]
+      },
+      {
+        "type": "ordered_list",
+        "items": ["Review the impact", "Confirm the action", "Record the outcome"]
+      }
+    ]
+  },
+  "actions": [
+    { "id": "close", "label": "Close", "style": "secondary", "result_status": "closed" }
+  ]
+}

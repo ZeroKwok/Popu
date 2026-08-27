@@ -1,0 +1,115 @@
+{
+  "version": "1.0",
+  "mode": "dialog",
+  "template": "form",
+  "position": "cursor_screen_center",
+  "window": { "width": 680, "height": 900 },
+  "content": {
+    "severity": "warning",
+    "title": "Review the complete deployment request",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": "This fixture demonstrates every content block, field control, and action style in their rendered order."
+      },
+      {
+        "type": "properties",
+        "title": "Deployment facts",
+        "items": [
+          { "label": "Target", "text": "Production / East Asia" },
+          { "label": "Artifacts", "text": "128 files · 2.4 GB" },
+          { "label": "Change ID", "text": "CHG-2026-0827" }
+        ]
+      },
+      {
+        "type": "form",
+        "title": "Package settings",
+        "fields": [
+          {
+            "id": "release_name",
+            "type": "text",
+            "label": "Release name",
+            "default": "release-2026.08",
+            "required": true,
+            "min_length": 3,
+            "max_length": 40,
+            "pattern": "^[a-z0-9.-]+$"
+          },
+          {
+            "id": "release_note",
+            "type": "textarea",
+            "label": "Release note",
+            "default": "Routine deployment after package verification.",
+            "max_length": 240
+          },
+          {
+            "id": "archive_format",
+            "type": "select",
+            "label": "Archive format",
+            "default": "zip",
+            "required": true,
+            "options": [
+              { "value": "zip", "label": "ZIP" },
+              { "value": "tar", "label": "TAR" },
+              { "value": "none", "label": "No archive" }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "unordered_list",
+        "title": "Included checks",
+        "items": ["Signature validation", "Free-space verification", "Rollback snapshot"]
+      },
+      {
+        "type": "progress",
+        "title": "Package preparation",
+        "value": 65
+      },
+      {
+        "type": "ordered_list",
+        "title": "Execution order",
+        "items": ["Upload artifacts", "Verify checksums", "Activate the release"]
+      },
+      {
+        "type": "form",
+        "title": "Execution controls",
+        "fields": [
+          {
+            "id": "confirmed",
+            "type": "checkbox",
+            "label": "I reviewed the target and rollback plan",
+            "default": true,
+            "required": true
+          },
+          {
+            "id": "strategy",
+            "type": "radio_group",
+            "label": "Deployment strategy",
+            "default": "safe",
+            "required": true,
+            "options": [
+              { "value": "safe", "label": "Safe rollout" },
+              { "value": "fast", "label": "Fast rollout" }
+            ]
+          },
+          {
+            "id": "retry_count",
+            "type": "number",
+            "label": "Retry count",
+            "default": 3,
+            "min": 1,
+            "max": 9,
+            "step": 2
+          }
+        ]
+      }
+    ]
+  },
+  "actions": [
+    { "id": "apply", "label": "Apply", "style": "primary", "submit": true },
+    { "id": "cancel", "label": "Cancel", "style": "secondary", "result_status": "cancelled" },
+    { "id": "force_apply", "label": "Force apply", "style": "danger", "submit": true }
+  ],
+  "timeout_seconds": 300
+}

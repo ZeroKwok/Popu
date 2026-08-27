@@ -91,7 +91,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .popu-button-secondary { color: #252a34; background: #edf0f5; }
 .popu-button-danger { color: #fff; background: #d92d20; }
 .popu-close { position: absolute; right: 13px; top: 10px; border: 0; background: transparent; color: #777e8b; font-size: 20px; cursor: pointer; }
-.popu-progress { width: 100%; margin-top: 8px; }
+.popu-progress-row { display: flex; align-items: center; gap: 10px; }
+.popu-progress { width: 100%; min-width: 0; }
+.popu-progress-value { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
 
 @media (prefers-color-scheme: dark) {
   :root { color: #f1f3f7; }

@@ -8,8 +8,6 @@ use crate::protocol::{Mode, Request, PROTOCOL_VERSION};
 
 const CONFIRM_HTML: &str = include_str!("../../ui/templates/confirm/template.html");
 const CONFIRM_CSS: &str = include_str!("../../ui/templates/confirm/template.css");
-const FORM_HTML: &str = include_str!("../../ui/templates/form/template.html");
-const FORM_CSS: &str = include_str!("../../ui/templates/form/template.css");
 const NOTIFICATION_HTML: &str = include_str!("../../ui/templates/notification/template.html");
 const NOTIFICATION_CSS: &str = include_str!("../../ui/templates/notification/template.css");
 
@@ -54,7 +52,7 @@ pub fn resolve(
     }
     let (html, css, expected_mode) = match request.template.as_str() {
         "confirm" => (CONFIRM_HTML, CONFIRM_CSS, Mode::Dialog),
-        "form" => (FORM_HTML, FORM_CSS, Mode::Dialog),
+        "form" => (CONFIRM_HTML, CONFIRM_CSS, Mode::Dialog),
         "notification" => (NOTIFICATION_HTML, NOTIFICATION_CSS, Mode::Notify),
         name => return Err(TemplateError::Unknown(name.to_owned())),
     };
@@ -151,7 +149,7 @@ fn validate_slots(html: &str, mode: Mode) -> Result<(), TemplateError> {
         }
     }
     if mode == Mode::Dialog {
-        for slot in ["form", "actions"] {
+        for slot in ["actions"] {
             if !html.contains(&format!("data-popu-slot=\"{slot}\"")) {
                 return Err(TemplateError::MissingSlot(slot));
             }
@@ -205,6 +203,27 @@ mod tests {
         assert!(assets.html.contains("data-popu-drag-region"));
         assert!(assets.html.contains("data-popu-selectable"));
         assert!(!assets.external);
+    }
+
+    #[test]
+    fn dialog_template_names_share_the_content_only_layout() {
+        let mut confirm = Request::parse(
+            r#"{
+              "version":"1.0","mode":"dialog","template":"confirm",
+              "content":{"title":"Form","blocks":[
+                {"type":"form","fields":[{"id":"name","type":"text","label":"Name"}]}
+              ]},
+              "actions":[{"id":"ok","label":"OK","submit":true}]
+            }"#,
+        )
+        .unwrap();
+        let confirm_assets = resolve(&confirm, None).unwrap();
+        confirm.template = "form".into();
+        let form_assets = resolve(&confirm, None).unwrap();
+        assert_eq!(confirm_assets.html, form_assets.html);
+        assert_eq!(confirm_assets.css, form_assets.css);
+        assert!(!confirm_assets.html.contains("popu-form"));
+        assert!(!confirm_assets.html.contains("popu-progress"));
     }
 
     #[test]

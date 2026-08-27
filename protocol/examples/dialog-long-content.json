@@ -36,22 +36,24 @@
           }
         ],
         "type": "properties"
-      }
-    ]
-  },
-  "form": {
-    "fields": [
-      {
-        "id": "note",
-        "type": "textarea",
-        "label": "Optional note",
-        "placeholder": "Leave an audit note"
       },
       {
-        "id": "confirmed",
-        "type": "checkbox",
-        "label": "I understand the replacement operation",
-        "required": true
+        "type": "form",
+        "title": "Confirmation",
+        "fields": [
+          {
+            "id": "note",
+            "type": "textarea",
+            "label": "",
+            "placeholder": "Leave an audit note"
+          },
+          {
+            "id": "confirmed",
+            "type": "checkbox",
+            "label": "I understand the replacement operation",
+            "required": true
+          }
+        ]
       }
     ]
   },

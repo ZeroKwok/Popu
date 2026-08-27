@@ -24,16 +24,17 @@
                     }
                 ],
                 "type": "properties"
-            }
-        ]
-    },
-    "form": {
-        "fields": [
+            },
             {
-                "id": "confirmed",
-                "type": "checkbox",
-                "label": "I understand that existing files will be replaced",
-                "required": true
+                "type": "form",
+                "fields": [
+                    {
+                        "id": "confirmed",
+                        "type": "checkbox",
+                        "label": "I understand that existing files will be replaced",
+                        "required": true
+                    }
+                ]
             }
         ]
     },

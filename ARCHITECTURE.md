@@ -90,7 +90,7 @@ from popu import DialogRequest, Notification, Position, show, notify
 
 result = show(DialogRequest.confirm(
     title="Replace files?",
-    message="3 existing files will be replaced.",
+    blocks=[{"type": "paragraph", "text": "3 existing files will be replaced."}],
     position=Position.CURSOR_SCREEN_CENTER,
 ))
 
@@ -99,7 +99,11 @@ if result.status == "submitted" and result.action == "confirm":
 
 notify(Notification.success(
     title="Backup completed",
-    message="Details: 128 files, 2.4 GB, 03:21.",
+    blocks=[{"type": "properties", "items": [
+        {"label": "Files", "text": "128"},
+        {"label": "Size", "text": "2.4 GB"},
+        {"label": "Duration", "text": "03:21"},
+    ]}],
     position=Position.BOTTOM_RIGHT,
 ))
 ```
@@ -121,12 +125,12 @@ notify(Notification.success(
   "window": { "always_on_top": true, "width": 440, "height": 260 },
   "content": {
     "title": "Confirm replacement",
-    "message": "Three backup files already exist.",
-    "details": [{ "label": "Destination", "value": "D:\\Backup" }]
-  },
-  "form": {
-    "fields": [
-      { "id": "confirmed", "type": "checkbox", "label": "Replace files", "required": true }
+    "blocks": [
+      { "type": "paragraph", "text": "Three backup files already exist." },
+      { "type": "properties", "items": [{ "label": "Destination", "text": "D:\\Backup" }] },
+      { "type": "form", "fields": [
+        { "id": "confirmed", "type": "checkbox", "label": "Replace files", "required": true }
+      ] }
     ]
   },
   "actions": [
@@ -149,7 +153,10 @@ notify(Notification.success(
   "content": {
     "severity": "success",
     "title": "Backup completed",
-    "message": "Details: 128 files, 2.4 GB, 03:21."
+    "blocks": [
+      { "type": "paragraph", "text": "128 files copied in 3 minutes 21 seconds." },
+      { "type": "progress", "title": "Completion", "value": 100 }
+    ]
   }
 }
 ```
@@ -169,7 +176,7 @@ notify(Notification.success(
 
 ### 5.4 表单与 action 语义
 
-- `form.fields[].type` 使用渲染控件名称：`text`、`textarea`、`checkbox`、`select`、`radio_group`、`number`。
+- `content.blocks[type=form].fields[].type` 使用渲染控件名称：`text`、`textarea`、`checkbox`、`select`、`radio_group`、`number`；一个 dialog 可包含多个 form block。
 - 用户输入是 `values` 的唯一来源；action 不得注入、覆盖或隐式修改任何字段。
 - 模板提交的 `values` 不得包含未知字段，且必须满足必填与类型约束；Rust 端重新校验。
 - `submit: true` 表示先校验所有字段，再返回 `status: "submitted"`、当前 `values` 与该 action ID。
@@ -223,7 +230,7 @@ await invoke("submit", { action: "confirm", values: collectFormValues() });
 await invoke("finish", { status: "cancelled", action: "cancel" });
 ```
 
-模板 HTML 本身来自受信任的安装内容，可作为布局载入；所有请求中的 `title/message/details/label/value` 只能通过 `textContent` 或表单属性写入，不得拼接进模板 HTML。应用强制使用 CSP，禁止远程脚本、远程图片和网络请求；同时不开放 Shell、文件系统、任意 Tauri command 或 `eval`。
+模板 HTML 本身来自受信任的安装内容，可作为布局载入；所有请求中的 `title`、块标题、块文本、属性 `label/text` 和字段内容只能通过 `textContent` 或表单属性写入，不得拼接进模板 HTML。应用强制使用 CSP，禁止远程脚本、远程图片和网络请求；同时不开放 Shell、文件系统、任意 Tauri command 或 `eval`。
 
 第三方本地模板在 v1 被视为安装方的可信布局，但仍不执行模板 JavaScript。模板只能改变结构与样式，交互、校验和 IPC 均由随 Popu 打包的通用渲染器完成。
 
@@ -233,21 +240,22 @@ await invoke("finish", { status: "cancelled", action: "cancel" });
 
 | 分类 | 控件 | 用途 |
 | --- | --- | --- |
-| 结构 | `title`、`message`、`details` | 标题、纯文本/受限 Markdown 正文、键值详情列表。 |
+| 展示块 | `paragraph`、`properties` | 简短纯文本和标签化事实。 |
+| 展示块 | `unordered_list`、`ordered_list` | 并列事项和有顺序的步骤/阶段。 |
+| 展示块 | `progress`（只读） | 展示 0–100 的完成进度；不支持用户拖动或任务控制。 |
+| 输入块 | `form` | 将一组输入字段放入 blocks 的指定顺序位置；dialog 可包含多个。 |
 | 状态 | `severity`、`icon` | `info`、`success`、`warning`、`error` 四种语义状态及对应内置图标。 |
 | 输入 | `text`、`textarea` | 短文本与多行反馈；支持必填、长度、placeholder 与正则校验。 |
 | 输入 | `checkbox` | 单项确认或“应用到后续项”。 |
 | 输入 | `select`、`radio_group` | 有限候选项选择；选项只包含稳定 value 与显示 label。 |
 | 输入 | `number` | 数字输入；支持最小值、最大值和步进。 |
 | 操作 | `button` | `primary`、`secondary`、`danger` 三种样式，可提交当前表单或取消。 |
-| 通知 | `progress`（只读） | 仅展示 0–100 的当前进度；v1 不支持用户拖动或任务控制。 |
 | 通知 | `close` | 关闭通知；不会向调用方回传业务结果。 |
 
 内置模板的最小组合为：
 
-- `confirm`：`title + message + details + checkbox? + buttons`
-- `form`：`title + message + text/textarea/checkbox/select/radio_group/number + buttons`
-- `notification`：`severity + icon + title + message + details? + progress? + close`
+- `confirm` / `form`：`severity + title + ordered content blocks + actions`；两个名称共享同一 dialog 布局。
+- `notification`：`severity + title + ordered display/progress blocks + close`，禁止 form block。
 
 v1 暂不支持日期选择器、文件选择器、富文本编辑器、表格编辑、树控件、代码编辑器、图片上传、远程图片、超链接跳转和内嵌网页。确有需求时，应先新增正式 schema 控件类型和跨模板测试，而不是由模板私自解释未知字段。
 
@@ -362,8 +370,7 @@ popu/
 ├── src-tauri/                 # Rust: CLI、校验、窗口、模板、位置策略
 ├── ui/                        # 内置模板和共享样式
 │   └── templates/
-│       ├── confirm/
-│       ├── form/
+│       ├── confirm/          # confirm/form 共享
 │       └── notification/
 ├── python/                    # Python SDK
 └── src-tauri/tests/         # CLI 与协议 fixture 集成测试
@@ -382,7 +389,7 @@ popu/
 | 缺少 `version`、未知 mode/字段类型 | 拒绝请求，退出码 `12`，不得创建窗口。 |
 | required `checkbox` 未勾选后提交 | 拒绝提交；不得由 action 写入 `values` 绕过校验。 |
 | Cancel action、标题栏关闭、超时 | 分别返回 `cancelled`、`closed`、`timed_out`。 |
-| `notify` 包含 form 或等待响应 action | 拒绝请求。 |
+| `notify` 包含 form block 或等待响应 action | 拒绝请求。 |
 | 关闭/取消/超时 | stdout 分别只输出 `closed`、`cancelled`、`timed_out` JSON，退出码符合 CLI 合约。 |
 | stdout/stderr 分离 | stdout 可被 `json.loads()` 直接解析；诊断与日志绝不污染 stdout。 |
 | 同一 schema fixture 经 CLI 和 Python SDK | 请求与响应 JSON 完全一致。 |
@@ -394,7 +401,7 @@ popu/
 | 内置 `confirm/form/notification` | 每种白名单控件都能正确渲染、提交和校验。 |
 | 合法外部模板 manifest | 模式、schema 版本、允许字段匹配时才可加载。 |
 | 缺 manifest、未知模板、版本不匹配 | 明确失败，不静默回退。 |
-| `title/message/details` 中包含 `<script>`、`<img onerror>`、`javascript:` | 仅作为文本显示；不执行脚本、不发起网络请求。 |
+| 标题或 block 文本中包含 `<script>`、`<img onerror>`、`javascript:` | 仅作为文本显示；不执行脚本、不发起网络请求。 |
 | 模板请求未知 bridge command | Rust 端拒绝，前端不能取得文件系统/Shell/网络权限。 |
 | 内置模板尝试 `fetch`、跳转或加载远程图片 | CSP/导航拦截拒绝请求。 |
 | 模板目录路径穿越 | `..`、符号链接越界和请求中动态指定模板路径均被拒绝。 |
