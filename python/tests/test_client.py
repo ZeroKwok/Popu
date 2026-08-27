@@ -12,9 +12,10 @@ def _stub(tmp_path: Path) -> Path:
     path.write_text(
         """
 import json, sys, time
-if sys.argv[1] == 'dialog':
+request = json.load(open(sys.argv[2], encoding='utf-8'))
+if sys.argv[1] == 'request' and request['mode'] == 'dialog':
     print(json.dumps({'version':'1.0','status':'submitted','action':'confirm','values':{}}), flush=True)
-elif sys.argv[1] == '__notify-child':
+elif sys.argv[1] == 'request' and request['mode'] == 'notify':
     print(json.dumps({'status':'shown'}), flush=True)
     time.sleep(0.05)
 """,
@@ -43,4 +44,3 @@ def test_builders_emit_protocol_1() -> None:
     assert request["mode"] == "dialog"
     assert notification["mode"] == "notify"
     json.dumps(request)
-

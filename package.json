@@ -6,8 +6,10 @@
   "scripts": {
     "build": "cargo build --release --manifest-path src-tauri/Cargo.toml",
     "check:ui": "node --check ui\\app.js",
-    "test-dialog": "src-tauri\\target\\release\\popu.exe dialog --request protocol\\examples\\dialog-confirm.json --wait",
-    "test-notify": "src-tauri\\target\\release\\popu.exe notify --request protocol\\examples\\notification-success.json",
-    "test-long": "src-tauri\\target\\release\\popu.exe notify --request protocol\\examples\\dialog-long-content.json"
+    "test-dialog": ".\\src-tauri\\target\\release\\popu.exe request protocol\\examples\\dialog-confirm.json",
+    "test-notify": ".\\src-tauri\\target\\release\\popu.exe request protocol\\examples\\notification-success.json",
+    "test-short": ".\\src-tauri\\target\\release\\popu.exe request protocol\\examples\\dialog-short-content.json",
+    "test-long": ".\\src-tauri\\target\\release\\popu.exe request protocol\\examples\\dialog-long-content.json",
+    "test-ultra-long": ".\\src-tauri\\target\\release\\popu.exe request protocol\\examples\\dialog-ultra-long-content.json"
   }
 }

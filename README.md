@@ -4,10 +4,12 @@ Popu 是一个面向自动化脚本和 AI Agent 的轻量本机交互窗口。�
 
 当前版本是 Windows 原型：Tauri 2 + WebView2、Rust CLI、Python SDK。它不运行守护进程，不持久化任务，也不做跨调用协调；每次调用拥有独立进程、窗口和结果。
 
+原型阶段默认**不提供向后兼容**：除非需求明确要求，CLI、SDK 和协议接口可以直接重构，调用方应随版本同步更新。
+
 ## 功能
 
-- `dialog`：等待用户提交、取消、关闭或超时，向 stdout 返回 JSON。
-- `notify`：窗口创建后返回，通知到期自动退出。
+- JSON 的 `mode: "dialog"`：等待用户提交、取消、关闭或超时，向 stdout 返回 JSON。
+- JSON 的 `mode: "notify"`：窗口创建后返回，通知到期自动退出。
 - 内置 `confirm`、`form`、`notification` 三种模板。
 - 可信本地 HTML/CSS 模板替换；模板不执行自带 JavaScript。
 - 鼠标所在屏幕居中或工作区右下角定位。
@@ -34,20 +36,21 @@ cargo build --manifest-path src-tauri/Cargo.toml
 ## CLI
 
 ```powershell
-popu dialog --request protocol/examples/dialog-confirm.json --wait
-popu notify --request protocol/examples/notification-success.json
+popu request protocol/examples/dialog-confirm.json
+popu request protocol/examples/notification-success.json
+popu request protocol/examples/notification-custom-template.json --template .\protocol\examples\templates\minimal-notification
 popu templates list
 popu templates validate --path path/to/my-template
 ```
 
-布局手工验收可使用 `protocol/examples/dialog-short-content.json` 和 `protocol/examples/dialog-long-content.json`；前者验证最小窗口，后者验证长文本、详情和表单。
+布局手工验收可使用 `protocol/examples/dialog-short-content.json`、`dialog-long-content.json` 和 `dialog-ultra-long-content.json`；它们分别验证紧凑短内容、长文本/详情/表单，以及当前 2000px 高度上限下的内容溢出与滚动行为。
 
 可替换模板示例位于 `protocol/examples/templates/minimal-notification`。
 
-Windows PowerShell 5.1 在直接运行 native command 时可能继续等待其 UI 后代关闭，即使 `popu notify` 的父进程已经返回。需要立即恢复 PowerShell 提示符时，可使用 Python SDK，或显式异步启动：
+Windows PowerShell 5.1 在直接运行通知请求时可能继续等待其 UI 后代关闭，即使 `popu request` 的父进程已经返回。需要立即恢复 PowerShell 提示符时，可使用 Python SDK，或显式异步启动：
 
 ```powershell
-Start-Process popu -ArgumentList @('notify', '--request', 'notification.json') -WindowStyle Hidden
+Start-Process popu -ArgumentList @('request', 'notification.json') -WindowStyle Hidden
 ```
 
 退出码：`0` 成功或已显示，`10` 取消/关闭，`11` 超时，`12` 请求、模板或运行时错误。stdout 只输出机器可读 JSON，诊断写入 stderr。

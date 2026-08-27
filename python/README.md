@@ -8,4 +8,4 @@ from popu import DialogRequest, show
 result = show(DialogRequest.confirm(title="Continue?"))
 ```
 
-`popu.exe` 默认从 `PATH` 查找，也可使用 `Client(executable=...)` 显式指定。
+`popu.exe` 默认从 `PATH` 查找，也可使用 `Client(executable=...)` 显式指定。SDK 统一调用 `popu request <REQUEST>`，由请求 JSON 的 `mode` 决定对话框或通知行为。

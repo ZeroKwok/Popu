@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -60,14 +61,14 @@ class _LifetimePipe:
 
 
 _active_lock = threading.Lock()
-_active_notifications: set[tuple[subprocess.Popen[str], _LifetimePipe]] = set()
+_active_lifetimes: set[_LifetimePipe] = set()
 
 
 def _shutdown_notifications() -> None:
     with _active_lock:
-        sessions = tuple(_active_notifications)
-        _active_notifications.clear()
-    for _, lifetime in sessions:
+        lifetimes = tuple(_active_lifetimes)
+        _active_lifetimes.clear()
+    for lifetime in lifetimes:
         lifetime.close()
 
 
@@ -92,10 +93,8 @@ class Client:
         lifetime = _LifetimePipe()
         try:
             command = self._command + [
-                "dialog",
-                "--request",
+                "request",
                 str(path),
-                "--wait",
                 "--lifetime-handle",
                 str(lifetime.inherited_value),
             ]
@@ -114,8 +113,7 @@ class Client:
         path = _write_request(payload)
         lifetime = _LifetimePipe()
         command = self._command + [
-            "__notify-child",
-            "--request",
+            "request",
             str(path),
             "--lifetime-handle",
             str(lifetime.inherited_value),
@@ -132,10 +130,15 @@ class Client:
             if receipt.get("status") != "shown":
                 raise PopuError(f"unexpected popu response: {line.strip()}")
             path.unlink(missing_ok=True)
-            session = (process, lifetime)
+            process.wait()
             with _active_lock:
-                _active_notifications.add(session)
-            threading.Thread(target=_reap_notification, args=(session,), daemon=True).start()
+                _active_lifetimes.add(lifetime)
+            duration_ms = int(payload.get("duration_ms", 8_000))
+            threading.Thread(
+                target=_release_notification_lifetime,
+                args=(lifetime, duration_ms),
+                daemon=True,
+            ).start()
             return NotificationReceipt("shown")
         except Exception:
             lifetime.close()
@@ -143,16 +146,11 @@ class Client:
             raise
 
 
-def _reap_notification(session: tuple[subprocess.Popen[str], _LifetimePipe]) -> None:
-    process, lifetime = session
-    process.wait()
-    if process.stdout:
-        process.stdout.close()
-    if process.stderr:
-        process.stderr.close()
+def _release_notification_lifetime(lifetime: _LifetimePipe, duration_ms: int) -> None:
+    time.sleep(max(duration_ms, 0) / 1000 + 1)
     lifetime.close()
     with _active_lock:
-        _active_notifications.discard(session)
+        _active_lifetimes.discard(lifetime)
 
 
 def _write_request(payload: Mapping[str, Any]) -> Path:

@@ -680,10 +680,11 @@ mod tests {
     }
 
     #[test]
-    fn parses_short_and_long_content_layout_examples() {
+    fn parses_content_length_layout_examples() {
         for example in [
             include_str!("../../protocol/examples/dialog-short-content.json"),
             include_str!("../../protocol/examples/dialog-long-content.json"),
+            include_str!("../../protocol/examples/dialog-ultra-long-content.json"),
         ] {
             Request::parse(example).unwrap();
         }

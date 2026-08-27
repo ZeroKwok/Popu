@@ -3,7 +3,7 @@
   "mode": "dialog",
   "template": "confirm",
   "position": "cursor_screen_center",
-  "window": { "always_on_top": true, "width": 320, "height": 160 },
+  "window": { "always_on_top": true, "width": 320, "height": 220 },
   "content": {
     "severity": "info",
     "title": "Done",

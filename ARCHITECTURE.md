@@ -10,6 +10,8 @@
 
 它不是任务系统、工作流引擎、通知中心或远程审批平台。v1 的边界刻意保持很小：一个调用对应一次 UI 会话；调用结束后不保存任务、不支持稍后恢复，也不连接 Slack、邮件、网页或其他设备。
 
+**原型兼容性原则：** 除非需求明确要求，不维护 CLI、SDK 或协议的向后兼容。接口可直接收敛和重构，调用方与样例必须同步更新。
+
 ```text
 Python / Shell / automation
           │ request JSON
@@ -46,7 +48,7 @@ Python / Shell / automation
 `dialog` 用于确认、选择、表单输入和人工反馈。调用方启动 Popu 并等待，用户提交、取消、关闭窗口或超时后，Popu 通过 stdout 返回一个 JSON 响应并退出。
 
 ```text
-caller ── spawn popu dialog --wait ──► user action ──► JSON response ──► caller
+caller ── spawn popu request request.json ──► user action ──► JSON response ──► caller
 ```
 
 这是短生命周期同步会话：调用方退出时，Popu 应结束该会话并关闭窗口；Popu 崩溃则调用方得到运行错误。业务端必须把 `cancelled`、`closed` 和 `timed_out` 当作正常且安全的结果处理。
@@ -56,7 +58,7 @@ caller ── spawn popu dialog --wait ──► user action ──► JSON resp
 `notify` 用于“任务执行完成”“操作失败”“发现可处理事项”等只需传达、不等待决定的场景。
 
 ```text
-caller ── popu notify ──► Popu 确认窗口已创建 ──► caller 立即继续
+caller ── popu request notification.json ──► Popu 确认窗口已创建 ──► caller 立即继续
                               │
                               └── 用户关闭 / duration 到期后退出
 ```
@@ -68,17 +70,16 @@ CLI 启动一个短生命周期 UI 子进程；父进程只等待“窗口创建
 ### 4.1 CLI
 
 ```text
-popu dialog --request request.json --wait
-popu notify --request notification.json
+popu request request.json
+popu request notification.json --template .\templates\my-template
 popu templates list
 popu templates validate --path .\templates\my-template
 ```
 
-- `dialog --wait`：stdout 仅输出一个 `InteractionResponse` JSON；stderr 输出诊断日志。
-- `notify`：窗口成功创建后立即返回；stdout 输出 `{ "status": "shown" }`。`shown` 仅表示窗口已创建，不表示通知在后续展示期间不会崩溃、被系统关闭或被用户关闭。
+- `request`：读取 JSON 后由 `mode` 决定行为。`dialog` 的 stdout 仅输出一个 `InteractionResponse` JSON；`notify` 在窗口创建后输出 `{ "status": "shown" }` 并立即返回。`shown` 仅表示窗口已创建，不表示通知在后续展示期间不会崩溃、被系统关闭或被用户关闭。
 - 退出码：`0` 请求已正常完成/显示；`10` 用户取消或关闭；`11` 对话框超时；`12` 请求、模板或运行时错误。
 
-这里的“返回”指 `popu notify` 父进程退出。Windows PowerShell 5.1 的 native pipeline 可能继续跟踪仍在显示的 UI 后代；要求提示符也立即恢复时应使用 `Start-Process` 或 Python SDK。
+这里的“返回”指通知 `popu request` 父进程退出。Windows PowerShell 5.1 的 native pipeline 可能继续跟踪仍在显示的 UI 后代；要求提示符也立即恢复时应使用 `Start-Process` 或 Python SDK。
 
 ### 4.2 Python SDK
 
@@ -193,7 +194,7 @@ v1 只保证以下两种位置，其余位置留给后续版本：
 ### 7.1 模板来源
 
 1. **内置模板**：随 `popu.exe` 打包，例如 `confirm`、`form`、`notification`。
-2. **本地模板目录**：启动方通过 `--template-dir` 的受信任配置启用；目录由集成方安装和管理，不能由 AI 返回的请求指定任意路径。该参数不是请求 JSON 的一部分。
+2. **本地模板目录**：启动方通过 `--template` 的受信任配置启用；目录由集成方安装和管理，不能由 AI 返回的请求指定任意路径。该参数不是请求 JSON 的一部分。
 
 每个模板目录包含：
 
@@ -251,8 +252,9 @@ v1 暂不支持日期选择器、文件选择器、富文本编辑器、表格�
 ```text
 ┌──────────────────────── popu.exe ────────────────────────┐
 │ CLI parser                                                 │
-│  ├─ dialog：读取 JSON → 校验 → 启动 Tauri window → stdout │
-│  └─ notify：启动 detached UI child → 等待 ready → 返回     │
+│  ├─ request：读取 JSON → 校验 → 按 mode 分派              │
+│  ├─ dialog mode：启动 Tauri window → stdout               │
+│  └─ notify mode：启动 detached UI child → 等待 ready → 返回│
 ├───────────────────────────────────────────────────────────┤
 │ Rust core: schema validation · template resolution         │
 │            placement · timeout · response validation       │
@@ -261,18 +263,18 @@ v1 暂不支持日期选择器、文件选择器、富文本编辑器、表格�
 └───────────────────────────────────────────────────────────┘
 ```
 
-不需要 Host daemon、SQLite、Named Pipe 或 HTTP server。`dialog` 进程自身拥有 Tauri 窗口并通过 stdout 返回响应。`notify` 的 CLI 进程启动一个短生命周期 UI 子进程，在收到 `ready` 后返回；该 UI 子进程继承请求数据和可选 lifetime pipe，随后不保留任何业务数据。
+不需要 Host daemon、SQLite、Named Pipe 或 HTTP server。`request` 的 dialog mode 进程自身拥有 Tauri 窗口并通过 stdout 返回响应；notify mode 的 CLI 进程启动一个短生命周期 UI 子进程，在收到 `ready` 后返回。该 UI 子进程继承请求数据和可选 lifetime pipe，随后不保留任何业务数据。
 
 ### 8.1 调用方生命周期绑定（Windows）
 
-“调用方退出，Popu 也退出”需要调用方协作，不能仅靠 `parent_pid`：PID 可以复用；更重要的是 `popu notify` 为了立即返回会派生 UI 子进程，此时 UI 的直接父进程很快退出。v1 使用 **lifetime pipe** 作为唯一可靠的通用机制。
+“调用方退出，Popu 也退出”需要调用方协作，不能仅靠 `parent_pid`：PID 可以复用；更重要的是 notify mode 为了立即返回会派生 UI 子进程，此时 UI 的直接父进程很快退出。v1 使用 **lifetime pipe** 作为唯一可靠的通用机制。
 
 1. Python SDK 创建匿名管道，将写端保留在 Python 进程，将只读端以受控继承方式传给 Popu（`--lifetime-handle`）。
 2. Popu 在 UI 生命周期中异步等待该读端：读端收到 EOF 代表调用方已经关闭管道或进程已退出；此时 Popu 关闭所有窗口并退出，不生成成功响应。
 3. `dialog` 通常无需额外 pipe，因为 Python 会等待其子进程；但 SDK 仍传递 pipe，使调用方被强制终止时也能关闭窗口。
 4. `notify` 创建窗口并完成 ready 握手后可立即返回给 Python；Python 继续持有写端，因此 UI 能存活到时限、被用户关闭或 Python 退出。
 
-Python 进程崩溃、被结束或正常退出时，操作系统会关闭其管道写端，Popu 将可靠地得到 EOF。该方案也能自然迁移到 Unix。纯 CLI 的 `popu notify` 没有可由其自动继承的“祖先进程存活句柄”，因此默认不承诺绑定；需要严格绑定时由自动化调用方使用 Python SDK，或未来显式传入受控的 `--lifetime-handle`。
+Python 进程崩溃、被结束或正常退出时，操作系统会关闭其管道写端，Popu 将可靠地得到 EOF。该方案也能自然迁移到 Unix。纯 CLI 的 notify request 没有可由其自动继承的“祖先进程存活句柄”，因此默认不承诺绑定；需要严格绑定时由自动化调用方使用 Python SDK，或未来显式传入受控的 `--lifetime-handle`。
 
 **句柄所有权规则：** Python 仅保留 pipe 写端；CLI 和 `notify` UI 子进程仅继承读端。CLI 在派生 UI 后必须关闭自己的读端副本；UI 绝不能继承任何写端。否则即使 Python 退出，仍有写端存活，UI 也不会收到 EOF。
 
@@ -424,7 +426,7 @@ popu/
 
 Windows 端到端测试至少覆盖：右下角窗口不遮挡任务栏；鼠标所在屏幕中心定位正确；Tab 顺序、Enter 默认动作、Esc 取消、可见焦点与屏幕阅读器名称；亮/暗主题、最小与高 DPI；以及 WebView2 缺失时显示可诊断错误而不是崩溃。
 
-透明窗口测试还必须覆盖：圆角外部点击穿透至底层测试窗口、卡片内部可正常点击；WebView 四边保留固定 9px 透明阴影区，卡片和阴影均不得溢出该区域；拖动 `data-popu-drag-region` 的空白区域会移动窗口；正文/详情可选择复制但不触发拖动；标题、背景和按钮文字不可选择。`dialog-short-content.json` 验证最小高度的短内容，`dialog-long-content.json` 验证换行、详情、表单滚动和操作区可达性。
+透明窗口测试还必须覆盖：圆角外部点击穿透至底层测试窗口、卡片内部可正常点击；WebView 四边保留固定 9px 透明阴影区，卡片和阴影均不得溢出该区域；拖动 `data-popu-drag-region` 的空白区域会移动窗口；正文/详情可选择复制但不触发拖动；标题、背景和按钮文字不可选择。`dialog-short-content.json` 验证紧凑短内容，`dialog-long-content.json` 验证换行、详情、表单滚动和操作区可达性，`dialog-ultra-long-content.json` 验证 2000px 高度上限下的内容溢出和统一滚动策略。
 
 多显示器与真实 DPI 组合很难在普通 CI 完整模拟：CI 运行纯位置函数和单屏 UI smoke test，发布前在物理双屏 Windows 机器执行手工验收矩阵。
 
@@ -438,8 +440,8 @@ Windows 端到端测试至少覆盖：右下角窗口不遮挡任务栏；鼠标
 
 ## 14. 原型里程碑
 
-1. **CLI 核心**：实现 schema、`dialog --wait`、stdout 响应及 `confirm` 内置模板。
-2. **通知与定位**：实现 `notify`、`bottom_right`、`cursor_screen_center`、多窗口独立生命周期和多屏 DPI 测试。
-3. **可替换模板**：实现 manifest、`--template-dir`、模板验证及桥接 API。
+1. **CLI 核心**：实现 schema、`request <REQUEST>`、stdout 响应及 `confirm` 内置模板。
+2. **通知与定位**：实现 notify mode、`bottom_right`、`cursor_screen_center`、多窗口独立生命周期和多屏 DPI 测试。
+3. **可替换模板**：实现 manifest、`--template`、模板验证及桥接 API。
 4. **Python SDK 与发布**：提供同步 API、lifetime pipe、Windows 安装包、WebView2 Runtime 检测、示例与端到端测试。
 5. **再评估**：基于 Windows 原型的真实使用，再决定存储/恢复、其他平台、远程通道或其他语言 SDK 是否值得增加。

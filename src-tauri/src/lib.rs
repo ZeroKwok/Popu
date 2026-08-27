@@ -14,11 +14,7 @@ use clap::{Args, Parser, Subcommand};
 use protocol::{Mode, Request};
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "popu",
-    version,
-    about = "Show a local interaction dialog or notification"
-)]
+#[command(name = "popu", version, about = "Show a local interaction request")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -26,10 +22,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Show a dialog and write its response JSON to stdout.
-    Dialog(RunArgs),
-    /// Show a fire-and-forget notification.
-    Notify(RunArgs),
+    /// Show a request; its JSON mode controls dialog or notification behavior.
+    Request(RunArgs),
     /// Inspect and validate templates.
     Templates {
         #[command(subcommand)]
@@ -41,18 +35,15 @@ enum Commands {
 
 #[derive(Debug, Args, Clone)]
 struct RunArgs {
-    /// JSON request file. Use '-' to read a dialog request from stdin.
-    #[arg(long)]
+    /// JSON request file.
+    #[arg(value_name = "REQUEST")]
     request: PathBuf,
     /// Trusted local template directory. This is not part of request JSON.
     #[arg(long)]
-    template_dir: Option<PathBuf>,
+    template: Option<PathBuf>,
     /// Inherited lifetime pipe read handle. Intended for SDK use.
     #[arg(long, hide = true)]
     lifetime_handle: Option<u64>,
-    /// Retained for a readable CLI contract; dialogs always wait.
-    #[arg(long, default_value_t = false)]
-    wait: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -79,23 +70,24 @@ pub fn run() -> i32 {
 fn run_inner() -> Result<i32, Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Dialog(args) => {
+        Commands::Request(args) => {
             let request = load_request(&args.request)?;
-            require_mode(&request, Mode::Dialog)?;
-            Ok(runtime::run_ui(
-                request,
-                args.template_dir.as_deref(),
-                args.lifetime_handle,
-                false,
-            ))
+            match request.mode {
+                Mode::Dialog => Ok(runtime::run_ui(
+                    request,
+                    args.template.as_deref(),
+                    args.lifetime_handle,
+                    false,
+                )),
+                Mode::Notify => run_notification_parent(args, request),
+            }
         }
-        Commands::Notify(args) => run_notification_parent(args),
         Commands::NotifyChild(args) => {
             let request = load_request(&args.request)?;
             require_mode(&request, Mode::Notify)?;
             Ok(runtime::run_ui(
                 request,
-                args.template_dir.as_deref(),
+                args.template.as_deref(),
                 args.lifetime_handle,
                 true,
             ))
@@ -117,21 +109,16 @@ fn run_inner() -> Result<i32, Box<dyn std::error::Error>> {
     }
 }
 
-fn run_notification_parent(args: RunArgs) -> Result<i32, Box<dyn std::error::Error>> {
-    if args.request == Path::new("-") {
-        return Err(
-            "notify requires a request file because its UI outlives the CLI process".into(),
-        );
-    }
-    let request = load_request(&args.request)?;
-    require_mode(&request, Mode::Notify)?;
-    let _ = templates::resolve(&request, args.template_dir.as_deref())?;
+fn run_notification_parent(
+    args: RunArgs,
+    request: Request,
+) -> Result<i32, Box<dyn std::error::Error>> {
+    let _ = templates::resolve(&request, args.template.as_deref())?;
 
     let executable = std::env::current_exe()?;
     let mut command = Command::new(executable);
     command
         .arg("__notify-child")
-        .arg("--request")
         .arg(&args.request)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -144,8 +131,8 @@ fn run_notification_parent(args: RunArgs) -> Result<i32, Box<dyn std::error::Err
         // Popu is called by a GUI program or automation runner.
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    if let Some(template_dir) = args.template_dir {
-        command.arg("--template-dir").arg(template_dir);
+    if let Some(template) = args.template {
+        command.arg("--template").arg(template);
     }
     if let Some(handle) = args.lifetime_handle {
         command.arg("--lifetime-handle").arg(handle.to_string());
