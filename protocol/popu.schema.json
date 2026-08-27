@@ -28,6 +28,7 @@
       "properties": {
         "severity": { "enum": ["info", "success", "warning", "error"] },
         "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
+        "vertical_align": { "enum": ["start", "center"], "default": "center" },
         "blocks": { "type": "array", "default": [], "items": { "$ref": "#/$defs/contentBlock" } }
       }
     },
@@ -128,7 +129,8 @@
         "label": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
         "style": { "enum": ["primary", "secondary", "danger"] },
         "submit": { "const": true },
-        "result_status": { "enum": ["cancelled", "closed"] }
+        "result_status": { "enum": ["confirmed", "cancelled", "closed"] },
+        "exit_code": { "type": "integer", "minimum": 0, "maximum": 255 }
       },
       "oneOf": [
         { "required": ["submit"], "not": { "required": ["result_status"] } },

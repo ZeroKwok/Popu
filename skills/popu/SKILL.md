@@ -50,7 +50,8 @@ Use the smallest control that produces an unambiguous result.
 
 - Prefer two actions: a clear proceed action and a safe cancel action.
 - Use `style: "danger"` only for destructive or hard-to-reverse actions; use `primary` for normal confirmation and `secondary` for cancel/back.
-- A submit action must have `submit: true`; a non-submit exit action must have `result_status: "cancelled"` or `"closed"`.
+- A submit action must have `submit: true`. Use `result_status: "confirmed"` for an affirmative exit that does not validate or return form values; use `"cancelled"` or `"closed"` for safe negative exits.
+- Add action `exit_code` only when the caller explicitly requires a process-level business code; it must be 0-255 and callers must still parse stdout.
 - Do not create a separate button for every implementation branch. Ask for the user-level decision and let the caller map that response to execution.
 - Treat `cancelled`, `closed`, and `timed_out` as expected safe outcomes. Do not continue a destructive action after any of them.
 
@@ -60,6 +61,7 @@ Use the smallest control that produces an unambiguous result.
 - Use `bottom_right` for notifications and `cursor_screen_center` for dialogs unless the workflow has a stronger placement requirement.
 - Leave `window.width` and `window.height` unset unless the content needs a deliberate size. Use percentages only for deliberate large/full-screen experiences, never to compensate for verbose content.
 - Order blocks as the person should read them: conclusion, key facts, implications or steps, progress, then required input. Shorten and structure content before increasing the window.
+- Leave `content.vertical_align` at its default `center` for ordinary short content; use `start` for dense forms, reports, or layouts that should begin below the heading.
 - Use an external template only when it is a preinstalled, trusted local asset selected by the caller through `--template`. Do not let AI-generated request data select paths or inject HTML/CSS/JavaScript.
 
 ## Generate the request

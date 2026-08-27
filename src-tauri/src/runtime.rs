@@ -78,7 +78,8 @@ fn submit(
         .request
         .submitted_response(&action, values)
         .map_err(|error| error.to_string())?;
-    complete(&app, &state, response, EXIT_OK);
+    let exit_code = action_exit_code(&state.bootstrap.request, &action, ResponseStatus::Submitted);
+    complete(&app, &state, response, exit_code);
     Ok(())
 }
 
@@ -96,22 +97,13 @@ fn finish(
         }
         return Err("notifications can only be closed without an action".into());
     }
-    if status == ResponseStatus::Submitted || status == ResponseStatus::TimedOut {
-        return Err("the requested status cannot be submitted by the renderer".into());
-    }
-    if let Some(action_id) = action.as_deref() {
-        let valid =
-            state.bootstrap.request.actions.iter().any(|candidate| {
-                candidate.id == action_id && candidate.result_status == Some(status)
-            });
-        if !valid {
-            return Err(format!(
-                "action {action_id} cannot produce status {status:?}"
-            ));
-        }
-    }
+    validate_finish_action(&state.bootstrap.request, status, action.as_deref())?;
+    let exit_code = action.as_deref().map_or_else(
+        || exit_code_for(status),
+        |action_id| action_exit_code(&state.bootstrap.request, action_id, status),
+    );
     let response = state.bootstrap.request.terminal_response(status, action);
-    complete(&app, &state, response, exit_code_for(status));
+    complete(&app, &state, response, exit_code);
     Ok(())
 }
 
@@ -383,9 +375,85 @@ fn shutdown<R: Runtime>(app: &AppHandle<R>, code: i32) {
 
 fn exit_code_for(status: ResponseStatus) -> i32 {
     match status {
-        ResponseStatus::Submitted => EXIT_OK,
+        ResponseStatus::Submitted | ResponseStatus::Confirmed => EXIT_OK,
         ResponseStatus::Cancelled | ResponseStatus::Closed => EXIT_CANCELLED,
         ResponseStatus::TimedOut => EXIT_TIMED_OUT,
+    }
+}
+
+fn action_exit_code(request: &Request, action_id: &str, status: ResponseStatus) -> i32 {
+    request
+        .actions
+        .iter()
+        .find(|action| action.id == action_id)
+        .and_then(|action| action.exit_code)
+        .map(i32::from)
+        .unwrap_or_else(|| exit_code_for(status))
+}
+
+fn validate_finish_action(
+    request: &Request,
+    status: ResponseStatus,
+    action_id: Option<&str>,
+) -> Result<(), String> {
+    if matches!(status, ResponseStatus::Submitted | ResponseStatus::TimedOut) {
+        return Err("the requested status cannot be submitted by the renderer".into());
+    }
+    if status == ResponseStatus::Confirmed && action_id.is_none() {
+        return Err("confirmed status requires an action".into());
+    }
+    if let Some(action_id) = action_id {
+        let valid = request
+            .actions
+            .iter()
+            .any(|candidate| candidate.id == action_id && candidate.result_status == Some(status));
+        if !valid {
+            return Err(format!(
+                "action {action_id} cannot produce status {status:?}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_exit_code_overrides_status_default() {
+        let request = Request::parse(
+            r#"{
+              "version":"1.0","mode":"dialog","content":{"title":"Codes"},
+              "actions":[
+                {"id":"submit","label":"Submit","submit":true,"exit_code":255},
+                {"id":"confirm","label":"Confirm","result_status":"confirmed","exit_code":12},
+                {"id":"cancel","label":"Cancel","result_status":"cancelled"}
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            action_exit_code(&request, "submit", ResponseStatus::Submitted),
+            255
+        );
+        assert_eq!(
+            action_exit_code(&request, "confirm", ResponseStatus::Confirmed),
+            12
+        );
+        assert_eq!(
+            action_exit_code(&request, "cancel", ResponseStatus::Cancelled),
+            EXIT_CANCELLED
+        );
+        assert_eq!(exit_code_for(ResponseStatus::TimedOut), EXIT_TIMED_OUT);
+        assert!(
+            validate_finish_action(&request, ResponseStatus::Confirmed, Some("confirm")).is_ok()
+        );
+        assert!(validate_finish_action(&request, ResponseStatus::Confirmed, None).is_err());
+        assert!(
+            validate_finish_action(&request, ResponseStatus::Cancelled, Some("confirm")).is_err()
+        );
     }
 }
 

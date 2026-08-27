@@ -33,7 +33,9 @@ Popu 是一个面向自动化脚本和 AI Agent 的轻量本机交互窗口。�
 
 建议按“结论 → 关键事实 → 影响或步骤 → 当前进度 → 必要输入”的顺序排列。每个 block 都可使用简短 `title` 分组；没有标题时直接省略，不要重复窗口主标题。
 
-`properties.items` 的 `label` 与 `text` 都可省略或留空，但每项至少一侧必须有可见内容；单侧有值时按整行展示。`form.fields[].label` 是可选展示信息，省略或留空时不会创建标签元素，字段的 `id` 与 `type` 仍是必填关键字段。
+`properties.items` 的 `label` 与 `text` 都可省略或留空，但每项至少一侧必须有可见内容；仅有 `label` 时跨两列展示，仅有 `text` 时仍从 text 列左对齐。`form.fields[].label` 是可选展示信息，省略或留空时不会创建标签元素，字段的 `id` 与 `type` 仍是必填关键字段。
+
+`content.vertical_align` 可设为 `center`（默认）或 `start`。居中模式只在正文短于可用区域时生效；内容溢出后仍从顶部开始并正常滚动。
 
 内容较多时应压缩表达，但必须保留会改变判断或操作结果的信息：
 
@@ -88,7 +90,7 @@ Windows PowerShell 5.1 在直接运行通知请求时可能继续等待其 UI �
 Start-Process popu -ArgumentList @('request', 'notification.json') -WindowStyle Hidden
 ```
 
-退出码：`0` 成功或已显示，`10` 取消/关闭，`11` 超时，`12` 请求、模板或运行时错误。stdout 只输出机器可读 JSON，诊断写入 stderr。
+默认退出码：`0` 提交、确认成功或通知已显示，`10` 取消/关闭，`11` 超时，`12` 请求、模板或运行时错误。dialog action 可用 `exit_code: 0..255` 覆盖自身默认码；即使与默认码重合，也应结合 stdout response 判断业务结果。stdout 只输出机器可读 JSON，诊断写入 stderr。
 
 ## Python
 

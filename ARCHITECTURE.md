@@ -77,7 +77,7 @@ popu templates validate --path .\templates\my-template
 ```
 
 - `request`：读取 JSON 后由 `mode` 决定行为。`dialog` 的 stdout 仅输出一个 `InteractionResponse` JSON；`notify` 在窗口创建后输出 `{ "status": "shown" }` 并立即返回。`shown` 仅表示窗口已创建，不表示通知在后续展示期间不会崩溃、被系统关闭或被用户关闭。
-- 退出码：`0` 请求已正常完成/显示；`10` 用户取消或关闭；`11` 对话框超时；`12` 请求、模板或运行时错误。
+- 默认退出码：`0` 请求已提交、确认或显示；`10` 用户取消或关闭；`11` 对话框超时；`12` 请求、模板或运行时错误。action 可用 0–255 的 `exit_code` 覆盖自身默认码。
 
 这里的“返回”指通知 `popu request` 父进程退出。Windows PowerShell 5.1 的 native pipeline 可能继续跟踪仍在显示的 UI 后代；要求提示符也立即恢复时应使用 `Start-Process` 或 Python SDK。
 
@@ -172,15 +172,17 @@ notify(Notification.success(
 }
 ```
 
-`status` 只能是 `submitted`、`cancelled`、`closed` 或 `timed_out`。`notify` 不产生业务响应；调用方仅接收 `shown` 或错误。
+`status` 只能是 `submitted`、`confirmed`、`cancelled`、`closed` 或 `timed_out`。`notify` 不产生业务响应；调用方仅接收 `shown` 或错误。
 
 ### 5.4 表单与 action 语义
 
+- `content.vertical_align` 使用 `center`（默认）或 `start`；center 仅在正文未溢出时居中，溢出时必须保持顶部可达并滚动。
 - `content.blocks[type=form].fields[].type` 使用渲染控件名称：`text`、`textarea`、`checkbox`、`select`、`radio_group`、`number`；一个 dialog 可包含多个 form block。
 - 用户输入是 `values` 的唯一来源；action 不得注入、覆盖或隐式修改任何字段。
 - 模板提交的 `values` 不得包含未知字段，且必须满足必填与类型约束；Rust 端重新校验。
 - `submit: true` 表示先校验所有字段，再返回 `status: "submitted"`、当前 `values` 与该 action ID。
-- `result_status: "cancelled"` 表示立即返回取消；标题栏关闭和 Alt+F4 返回 `closed`；超时返回 `timed_out`。
+- `result_status: "confirmed"` 表示无需提交或校验表单的肯定结束，返回空 `values`；`cancelled` 和 `closed` 表示对应的立即结束，标题栏关闭和 Alt+F4 返回 `closed`，超时返回 `timed_out`。
+- action 可设置 `exit_code`（0–255）覆盖自身默认进程退出码；renderer 只传 action ID，Rust 从已校验请求中读取退出码。无 action 的关闭、Esc、超时和运行错误不受覆盖。
 - v1 不支持 action 携带固定业务字段。需要固定业务选择时，使用 `select` 或 `radio_group` 字段显式呈现给用户。
 
 ## 6. 位置与窗口策略
@@ -234,13 +236,15 @@ await invoke("finish", { status: "cancelled", action: "cancel" });
 
 第三方本地模板在 v1 被视为安装方的可信布局，但仍不执行模板 JavaScript。模板只能改变结构与样式，交互、校验和 IPC 均由随 Popu 打包的通用渲染器完成。
 
+renderer 会把最终的 `vertical_align` 写入 content slot 的 `data-popu-vertical-align`；外部模板应在自己的布局 CSS 中消费该属性，内置模板则由 `base.css` 提供安全居中与溢出回退。
+
 ### 7.3 v1 渲染控件白名单
 
 所有内置模板和可替换模板都应基于下面的稳定控件契约渲染。AI/调用方可以组合这些控件，但不能请求任意 DOM、脚本或自定义控件类型。
 
 | 分类 | 控件 | 用途 |
 | --- | --- | --- |
-| 展示块 | `paragraph`、`properties` | 简短纯文本和标签化事实；属性项的 `label/text` 至少一侧有可见内容。 |
+| 展示块 | `paragraph`、`properties` | 简短纯文本和标签化事实；属性项的 `label/text` 至少一侧有可见内容，label-only 跨列而 text-only 保持 value 列。 |
 | 展示块 | `unordered_list`、`ordered_list` | 并列事项和有顺序的步骤/阶段。 |
 | 展示块 | `progress`（只读） | 展示 0–100 的完成进度；不支持用户拖动或任务控制。 |
 | 输入块 | `form` | 将一组输入字段放入 blocks 的指定顺序位置；dialog 可包含多个，字段 `label` 可省略且不产生空 DOM。 |
@@ -388,7 +392,8 @@ popu/
 | 最小 `notify` 请求 | 校验成功，`duration_ms` 使用默认值。 |
 | 缺少 `version`、未知 mode/字段类型 | 拒绝请求，退出码 `12`，不得创建窗口。 |
 | required `checkbox` 未勾选后提交 | 拒绝提交；不得由 action 写入 `values` 绕过校验。 |
-| Cancel action、标题栏关闭、超时 | 分别返回 `cancelled`、`closed`、`timed_out`。 |
+| Confirm、Cancel action、标题栏关闭、超时 | 分别返回 `confirmed`、`cancelled`、`closed`、`timed_out`。 |
+| action 自定义退出码 0、255、12 | 覆盖该 action 的默认退出码；stdout 仍提供可区分的业务 response。 |
 | `notify` 包含 form block 或等待响应 action | 拒绝请求。 |
 | 关闭/取消/超时 | stdout 分别只输出 `closed`、`cancelled`、`timed_out` JSON，退出码符合 CLI 合约。 |
 | stdout/stderr 分离 | stdout 可被 `json.loads()` 直接解析；诊断与日志绝不污染 stdout。 |

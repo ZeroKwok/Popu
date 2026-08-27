@@ -64,6 +64,19 @@ impl Default for Severity {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerticalAlign {
+    Start,
+    Center,
+}
+
+impl Default for VerticalAlign {
+    fn default() -> Self {
+        Self::Center
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WindowOptions {
@@ -210,6 +223,8 @@ pub struct Content {
     pub severity: Severity,
     pub title: String,
     #[serde(default)]
+    pub vertical_align: VerticalAlign,
+    #[serde(default)]
     pub blocks: Vec<ContentBlock>,
 }
 
@@ -279,6 +294,7 @@ impl Default for ActionStyle {
 #[serde(rename_all = "snake_case")]
 pub enum ResponseStatus {
     Submitted,
+    Confirmed,
     Cancelled,
     Closed,
     TimedOut,
@@ -295,6 +311,8 @@ pub struct Action {
     pub submit: bool,
     #[serde(default)]
     pub result_status: Option<ResponseStatus>,
+    #[serde(default)]
+    pub exit_code: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -411,9 +429,12 @@ impl Request {
                     action.id
                 )));
             }
-            if matches!(action.result_status, Some(ResponseStatus::Submitted)) {
+            if matches!(
+                action.result_status,
+                Some(ResponseStatus::Submitted | ResponseStatus::TimedOut)
+            ) {
                 return Err(ProtocolError::Invalid(
-                    "submitted actions must use submit: true".into(),
+                    "result_status must be confirmed, cancelled, or closed".into(),
                 ));
             }
         }
@@ -801,7 +822,40 @@ mod tests {
         assert_eq!(request.position, Position::CursorScreenCenter);
         assert_eq!(request.window.screen, Screen::Cursor);
         assert_eq!(request.window.area, ScreenArea::WorkArea);
+        assert_eq!(request.content.vertical_align, VerticalAlign::Center);
         assert_eq!(request.window_size((1920, 1040)), (440, 300));
+    }
+
+    #[test]
+    fn accepts_action_outcomes_alignment_and_exit_code_boundaries() {
+        for exit_code in [0, 255] {
+            let request = Request::parse(&format!(
+                r#"{{"version":"1.0","mode":"dialog","content":{{"title":"Outcome","vertical_align":"start"}},"actions":[{{"id":"ok","label":"OK","result_status":"confirmed","exit_code":{exit_code}}}]}}"#
+            ))
+            .unwrap();
+            assert_eq!(request.content.vertical_align, VerticalAlign::Start);
+            assert_eq!(
+                request.actions[0].result_status,
+                Some(ResponseStatus::Confirmed)
+            );
+            assert_eq!(request.actions[0].exit_code, Some(exit_code));
+            let response = request.terminal_response(ResponseStatus::Confirmed, Some("ok".into()));
+            assert_eq!(response.status, ResponseStatus::Confirmed);
+            assert!(response.values.is_empty());
+        }
+
+        for invalid in [
+            r#"{"version":"1.0","mode":"dialog","content":{"title":"Invalid","vertical_align":"middle"},"actions":[{"id":"ok","label":"OK","result_status":"confirmed"}]}"#,
+            r#"{"version":"1.0","mode":"dialog","content":{"title":"Invalid"},"actions":[{"id":"ok","label":"OK","result_status":"confirmed","exit_code":-1}]}"#,
+            r#"{"version":"1.0","mode":"dialog","content":{"title":"Invalid"},"actions":[{"id":"ok","label":"OK","result_status":"confirmed","exit_code":256}]}"#,
+            r#"{"version":"1.0","mode":"dialog","content":{"title":"Invalid"},"actions":[{"id":"ok","label":"OK","result_status":"confirmed","exit_code":1.5}]}"#,
+            r#"{"version":"1.0","mode":"dialog","content":{"title":"Invalid"},"actions":[{"id":"ok","label":"OK","result_status":"timed_out"}]}"#,
+        ] {
+            assert!(
+                Request::parse(invalid).is_err(),
+                "{invalid} should be invalid"
+            );
+        }
     }
 
     #[test]

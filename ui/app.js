@@ -37,6 +37,7 @@ function appendBlockTitle(section, titleText) {
 function renderProperties(block, section) {
   const grid = document.createElement("div");
   grid.className = "popu-properties";
+  let row = 1;
   for (const item of block.items) {
     const hasLabel = hasVisibleText(item.label);
     const hasText = hasVisibleText(item.text);
@@ -44,6 +45,7 @@ function renderProperties(block, section) {
     if (hasLabel) {
       const label = document.createElement("div");
       label.className = "popu-property-label";
+      label.style.gridRow = String(row);
       if (!hasText) label.classList.add("popu-property-full");
       label.textContent = item.label;
       grid.append(label);
@@ -51,10 +53,11 @@ function renderProperties(block, section) {
     if (hasText) {
       const text = document.createElement("div");
       text.className = "popu-property-text";
-      if (!hasLabel) text.classList.add("popu-property-full");
+      text.style.gridRow = String(row);
       text.textContent = item.text;
       grid.append(text);
     }
+    row += 1;
   }
   if (grid.childElementCount > 0) section.append(grid);
 }
@@ -119,9 +122,10 @@ function renderBlock(block) {
   return section;
 }
 
-function renderBlocks(blocks = []) {
+function renderBlocks(blocks = [], verticalAlign = "center") {
   const root = element("content");
   if (!root) return;
+  root.dataset.popuVerticalAlign = verticalAlign;
   root.replaceChildren();
   for (const block of blocks) {
     const section = renderBlock(block);
@@ -339,7 +343,10 @@ async function start() {
     icon.textContent = { info: "i", success: "✓", warning: "!", error: "×" }[severity];
   }
   setText("title", bootstrap.request.content.title);
-  renderBlocks(bootstrap.request.content.blocks);
+  renderBlocks(
+    bootstrap.request.content.blocks,
+    bootstrap.request.content.vertical_align ?? "center",
+  );
   renderActions(bootstrap.request.actions);
   installDragRegions();
 

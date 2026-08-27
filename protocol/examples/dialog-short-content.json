@@ -23,7 +23,7 @@
             "id": "ok",
             "label": "OK",
             "style": "primary",
-            "result_status": "closed"
+            "result_status": "confirmed"
         }
     ],
     "timeout_seconds": 300

@@ -10,6 +10,7 @@
   },
   "content": {
     "severity": "warning",
+    "vertical_align": "start",
     "title": "Review the planned changes before continuing",
     "blocks": [
       {

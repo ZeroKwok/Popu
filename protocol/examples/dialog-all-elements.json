@@ -7,6 +7,7 @@
   "content": {
     "severity": "warning",
     "title": "Review the complete deployment request",
+    "vertical_align": "start",
     "blocks": [
       {
         "type": "paragraph",
@@ -19,8 +20,8 @@
           { "label": "Target", "text": "Production / East Asia" },
           { "label": "Artifacts", "text": "128 files · 2.4 GB" },
           { "label": "Change ID", "text": "CHG-2026-0827" },
-          { "label": "Label-only property" },
-          { "text": "Text-only property spanning the complete row" }
+          { "text": "Text-only property spanning the complete row" },
+          { "label": "Label-only property, that is very long long long long long long long long long long long long long long long long long long long long long" }
         ]
       },
       {
