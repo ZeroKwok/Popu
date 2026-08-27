@@ -10,6 +10,34 @@ class Position(str, Enum):
     CURSOR_SCREEN_CENTER = "cursor_screen_center"
 
 
+class Screen(str, Enum):
+    CURSOR = "cursor"
+    PRIMARY = "primary"
+
+
+class ScreenArea(str, Enum):
+    WORK_AREA = "work_area"
+    SCREEN = "screen"
+
+
+WindowDimension = int | float | str
+
+
+def _window_options(
+    *,
+    screen: Screen,
+    area: ScreenArea,
+    width: WindowDimension | None,
+    height: WindowDimension | None,
+) -> dict[str, Any]:
+    options: dict[str, Any] = {"screen": screen.value, "area": area.value}
+    if width is not None:
+        options["width"] = width
+    if height is not None:
+        options["height"] = height
+    return options
+
+
 @dataclass(frozen=True)
 class DialogRequest:
     data: Mapping[str, Any]
@@ -25,6 +53,10 @@ class DialogRequest:
         cancel_label: str = "Cancel",
         dangerous: bool = False,
         timeout_seconds: int = 300,
+        screen: Screen = Screen.CURSOR,
+        area: ScreenArea = ScreenArea.WORK_AREA,
+        width: WindowDimension | None = None,
+        height: WindowDimension | None = None,
     ) -> "DialogRequest":
         return cls(
             {
@@ -32,6 +64,9 @@ class DialogRequest:
                 "mode": "dialog",
                 "template": "confirm",
                 "position": position.value,
+                "window": _window_options(
+                    screen=screen, area=area, width=width, height=height
+                ),
                 "content": {"severity": "warning" if dangerous else "info", "title": title, "message": message},
                 "form": {"fields": []},
                 "actions": [
@@ -63,6 +98,10 @@ class Notification:
         message: str = "",
         position: Position = Position.BOTTOM_RIGHT,
         duration_ms: int = 8_000,
+        screen: Screen = Screen.CURSOR,
+        area: ScreenArea = ScreenArea.WORK_AREA,
+        width: WindowDimension | None = None,
+        height: WindowDimension | None = None,
     ) -> "Notification":
         return cls(
             {
@@ -70,6 +109,9 @@ class Notification:
                 "mode": "notify",
                 "template": "notification",
                 "position": position.value,
+                "window": _window_options(
+                    screen=screen, area=area, width=width, height=height
+                ),
                 "duration_ms": duration_ms,
                 "content": {"severity": "success", "title": title, "message": message},
             }
@@ -88,4 +130,3 @@ class InteractionResult:
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "InteractionResult":
         return cls(str(value["status"]), value.get("action"), dict(value.get("values", {})))
-

@@ -12,7 +12,8 @@ Popu 是一个面向自动化脚本和 AI Agent 的轻量本机交互窗口。�
 - JSON 的 `mode: "notify"`：窗口创建后返回，通知到期自动退出。
 - 内置 `confirm`、`form`、`notification` 三种模板。
 - 可信本地 HTML/CSS 模板替换；模板不执行自带 JavaScript。
-- 鼠标所在屏幕居中或工作区右下角定位。
+- 可选鼠标所在屏幕或主屏；尺寸支持像素与百分比，`"100%" × "100%"` 填满所选工作区或物理屏幕。
+- 当宽高均为 `"100%"` 时，窗口不允许拖动，并移除圆角与阴影；超长内容仅在中间内容区滚动。
 - 无边框透明圆角窗口；Windows 圆角外部区域鼠标穿透到底层窗口。
 - `data-popu-drag-region` 定义拖拽背景，`data-popu-selectable` 定义可复制文本；内置模板默认允许复制正文和详情。
 - Python lifetime pipe：Python 调用方退出时关闭对应 Popu 窗口。
@@ -23,6 +24,13 @@ Popu 是一个面向自动化脚本和 AI Agent 的轻量本机交互窗口。�
 
 ```powershell
 npm run build
+```
+
+也可在安装了 Rust 与 `just` 的 Windows、macOS 或 Linux 环境中运行：
+
+```powershell
+just build-test dialog-long-content.json
+just build-test dialog-ultra-long-content.json
 ```
 
 开发期也可直接生成未打包的可执行文件：
@@ -43,7 +51,7 @@ popu templates list
 popu templates validate --path path/to/my-template
 ```
 
-布局手工验收可使用 `protocol/examples/dialog-short-content.json`、`dialog-long-content.json` 和 `dialog-ultra-long-content.json`；它们分别验证紧凑短内容、长文本/详情/表单，以及当前 2000px 高度上限下的内容溢出与滚动行为。
+布局手工验收可使用 `protocol/examples/dialog-short-content.json`、`dialog-long-content.json`、`dialog-ultra-long-content.json` 和 `dialog-fullscreen-screen.json`；它们分别验证紧凑短内容、长文本/详情/表单、工作区全屏下的统一内容滚动，以及物理屏幕全屏。
 
 可替换模板示例位于 `protocol/examples/templates/minimal-notification`。
 

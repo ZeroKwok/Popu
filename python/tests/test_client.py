@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-from popu import Client, DialogRequest, Notification
+from popu import Client, DialogRequest, Notification, Screen, ScreenArea
 
 
 def _stub(tmp_path: Path) -> Path:
@@ -44,3 +44,19 @@ def test_builders_emit_protocol_1() -> None:
     assert request["mode"] == "dialog"
     assert notification["mode"] == "notify"
     json.dumps(request)
+
+
+def test_builder_supports_percentage_screen_dimensions() -> None:
+    request = DialogRequest.confirm(
+        title="Fullscreen",
+        screen=Screen.PRIMARY,
+        area=ScreenArea.SCREEN,
+        width="100%",
+        height="80%",
+    ).as_dict()
+    assert request["window"] == {
+        "screen": "primary",
+        "area": "screen",
+        "width": "100%",
+        "height": "80%",
+    }

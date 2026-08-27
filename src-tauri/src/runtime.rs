@@ -12,7 +12,8 @@ use tauri::{
 };
 
 use crate::lifetime;
-use crate::protocol::{Mode, Request, Response, ResponseStatus};
+use crate::placement::WindowPlacement;
+use crate::protocol::{Mode, Request, Response, ResponseStatus, Screen, ScreenArea};
 use crate::templates::{self, TemplateAssets};
 
 pub const EXIT_OK: i32 = 0;
@@ -24,6 +25,7 @@ pub const EXIT_ERROR: i32 = 12;
 pub struct Bootstrap {
     pub request: Request,
     pub template: TemplateAssets,
+    pub maximized: bool,
 }
 
 pub struct RuntimeState {
@@ -31,6 +33,8 @@ pub struct RuntimeState {
     done: AtomicBool,
     exit_code: Arc<AtomicI32>,
     print_ready: bool,
+    placement: WindowPlacement,
+    maximized: bool,
 }
 
 impl RuntimeState {
@@ -39,12 +43,20 @@ impl RuntimeState {
         template: TemplateAssets,
         print_ready: bool,
         exit_code: Arc<AtomicI32>,
+        placement: WindowPlacement,
+        maximized: bool,
     ) -> Self {
         Self {
-            bootstrap: Bootstrap { request, template },
+            bootstrap: Bootstrap {
+                request,
+                template,
+                maximized,
+            },
             done: AtomicBool::new(false),
             exit_code,
             print_ready,
+            placement,
+            maximized,
         }
     }
 }
@@ -114,7 +126,7 @@ fn ui_ready(
     app: AppHandle,
     state: State<'_, RuntimeState>,
 ) -> Result<(), String> {
-    position_window(&window, state.bootstrap.request.position)?;
+    position_window(&window, state.placement)?;
     window.show().map_err(|error| error.to_string())?;
     if state.bootstrap.request.mode == Mode::Dialog {
         window.set_focus().map_err(|error| error.to_string())?;
@@ -149,7 +161,22 @@ pub fn run_ui(
         }
     };
     let exit_code = Arc::new(AtomicI32::new(EXIT_OK));
-    let state = RuntimeState::new(request, template, print_ready, Arc::clone(&exit_code));
+    let placement = match resolve_window_placement(&request) {
+        Ok(placement) => placement,
+        Err(error) => {
+            eprintln!("Popu display error: {error}");
+            return EXIT_ERROR;
+        }
+    };
+    let maximized = request.window.is_maximized();
+    let state = RuntimeState::new(
+        request,
+        template,
+        print_ready,
+        Arc::clone(&exit_code),
+        placement,
+        maximized,
+    );
 
     let builder = tauri::Builder::default()
         .manage(state)
@@ -163,13 +190,13 @@ pub fn run_ui(
         .on_window_event(handle_window_event)
         .setup(move |app| {
             let state = app.state::<RuntimeState>();
-            let (width, height) = state.bootstrap.request.window_size();
+            let (width, height) = state.placement.size;
             let is_notify = state.bootstrap.request.mode == Mode::Notify;
             let window =
                 WebviewWindowBuilder::new(app, "popu", WebviewUrl::App("index.html".into()))
                     .title(&state.bootstrap.request.content.title)
-                    .inner_size(width, height)
-                    .min_inner_size(160.0, 160.0)
+                    .inner_size(f64::from(width), f64::from(height))
+                    .min_inner_size(1.0, 1.0)
                     .decorations(false)
                     .transparent(true)
                     .resizable(false)
@@ -185,7 +212,7 @@ pub fn run_ui(
                     .build()?;
 
             #[cfg(windows)]
-            if let Err(error) = configure_frameless_windows_window(&window) {
+            if let Err(error) = configure_frameless_windows_window(&window, state.maximized) {
                 // Transparency remains useful even if a system policy or an
                 // unexpected platform detail prevents the native refinements.
                 eprintln!("Popu warning: cannot configure frameless window: {error}");
@@ -233,10 +260,15 @@ pub fn run_ui(
 
 /// Applies the Windows-only parts of Popu's frameless-window contract.
 #[cfg(windows)]
-fn configure_frameless_windows_window(window: &WebviewWindow) -> Result<(), String> {
+fn configure_frameless_windows_window(
+    window: &WebviewWindow,
+    maximized: bool,
+) -> Result<(), String> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows_sys::Win32::Foundation::HWND;
-    use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, SetWindowRgn};
+    use windows_sys::Win32::Graphics::Gdi::{
+        CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_STYLE, HWND_TOP, SWP_FRAMECHANGED,
         SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_CAPTION, WS_MAXIMIZEBOX,
@@ -272,7 +304,11 @@ fn configure_frameless_windows_window(window: &WebviewWindow) -> Result<(), Stri
 
         // SetWindowRgn takes ownership on success; on failure we retain it and
         // must release it ourselves.
-        let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2);
+        let region = if maximized {
+            CreateRectRgn(0, 0, width + 1, height + 1)
+        } else {
+            CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2)
+        };
         if region.is_null() {
             return Err("CreateRoundRectRgn failed".into());
         }
@@ -349,10 +385,7 @@ fn exit_code_for(status: ResponseStatus) -> i32 {
 }
 
 #[cfg(windows)]
-fn position_window(
-    window: &WebviewWindow,
-    position: crate::protocol::Position,
-) -> Result<(), String> {
+fn resolve_window_placement(request: &Request) -> Result<WindowPlacement, String> {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
@@ -361,8 +394,20 @@ fn position_window(
 
     let mut cursor = POINT { x: 0, y: 0 };
     unsafe {
-        let _ = GetCursorPos(&mut cursor);
-        let monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
+        if request.window.screen == Screen::Cursor && GetCursorPos(&mut cursor) == 0 {
+            return Err("GetCursorPos failed".into());
+        }
+        let monitor = MonitorFromPoint(
+            if request.window.screen == Screen::Primary {
+                POINT {
+                    x: i32::MIN,
+                    y: i32::MIN,
+                }
+            } else {
+                cursor
+            },
+            MONITOR_DEFAULTTOPRIMARY,
+        );
         let mut info = MONITORINFO {
             cbSize: std::mem::size_of::<MONITORINFO>() as u32,
             rcMonitor: Default::default(),
@@ -372,40 +417,43 @@ fn position_window(
         if GetMonitorInfoW(monitor, &mut info) == 0 {
             return Err("GetMonitorInfoW failed".into());
         }
-        let size = window.outer_size().map_err(|error| error.to_string())?;
-        let work_area = crate::placement::Rect {
-            x: info.rcWork.left,
-            y: info.rcWork.top,
-            width: (info.rcWork.right - info.rcWork.left).max(0) as u32,
-            height: (info.rcWork.bottom - info.rcWork.top).max(0) as u32,
+        let rect = match request.window.area {
+            ScreenArea::WorkArea => info.rcWork,
+            ScreenArea::Screen => info.rcMonitor,
         };
-        let point = crate::placement::calculate(position, work_area, (size.width, size.height), 16);
-        window
-            .set_position(PhysicalPosition::new(point.x, point.y))
-            .map_err(|error| error.to_string())?;
+        let area = crate::placement::Rect {
+            x: rect.left,
+            y: rect.top,
+            width: (rect.right - rect.left).max(0) as u32,
+            height: (rect.bottom - rect.top).max(0) as u32,
+        };
+        if area.width == 0 || area.height == 0 {
+            return Err("target display area is empty".into());
+        }
+        Ok(crate::placement::resolve(request, area, 16))
     }
-    Ok(())
 }
 
 #[cfg(not(windows))]
-fn position_window(
-    window: &WebviewWindow,
-    position: crate::protocol::Position,
-) -> Result<(), String> {
-    let monitor = window
-        .current_monitor()
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "no monitor available".to_owned())?;
-    let size = window.outer_size().map_err(|error| error.to_string())?;
-    let area = crate::placement::Rect {
-        x: monitor.position().x,
-        y: monitor.position().y,
-        width: monitor.size().width,
-        height: monitor.size().height,
-    };
-    let point = crate::placement::calculate(position, area, (size.width, size.height), 16);
+fn resolve_window_placement(request: &Request) -> Result<WindowPlacement, String> {
+    Ok(crate::placement::resolve(
+        request,
+        crate::placement::Rect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        },
+        16,
+    ))
+}
+
+fn position_window(window: &WebviewWindow, placement: WindowPlacement) -> Result<(), String> {
     window
-        .set_position(PhysicalPosition::new(point.x, point.y))
+        .set_position(PhysicalPosition::new(
+            placement.position.x,
+            placement.position.y,
+        ))
         .map_err(|error| error.to_string())?;
     Ok(())
 }

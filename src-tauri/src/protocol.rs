@@ -19,6 +19,14 @@ fn default_always_on_top() -> bool {
     true
 }
 
+fn default_screen() -> Screen {
+    Screen::Cursor
+}
+
+fn default_area() -> ScreenArea {
+    ScreenArea::WorkArea
+}
+
 fn default_dialog_timeout() -> u64 {
     300
 }
@@ -61,19 +69,93 @@ impl Default for Severity {
 pub struct WindowOptions {
     #[serde(default = "default_always_on_top")]
     pub always_on_top: bool,
+    #[serde(default = "default_screen")]
+    pub screen: Screen,
+    #[serde(default = "default_area")]
+    pub area: ScreenArea,
     #[serde(default)]
-    pub width: Option<f64>,
+    pub width: Option<WindowDimension>,
     #[serde(default)]
-    pub height: Option<f64>,
+    pub height: Option<WindowDimension>,
 }
 
 impl Default for WindowOptions {
     fn default() -> Self {
         Self {
             always_on_top: true,
+            screen: Screen::Cursor,
+            area: ScreenArea::WorkArea,
             width: None,
             height: None,
         }
+    }
+}
+
+/// Identifies the display used to resolve window dimensions and placement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Screen {
+    Cursor,
+    Primary,
+}
+
+/// Selects whether dimensions use the available work area or the full display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScreenArea {
+    WorkArea,
+    Screen,
+}
+
+/// A window dimension in physical pixels or as a percentage of its target area.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum WindowDimension {
+    Pixels(f64),
+    Percentage(String),
+}
+
+impl WindowDimension {
+    pub fn is_full(&self) -> bool {
+        matches!(self, Self::Percentage(value) if parse_percentage(value).is_ok_and(|percent| percent == 100.0))
+    }
+
+    pub fn resolve(&self, limit: u32) -> u32 {
+        match self {
+            Self::Pixels(value) => value.round().max(1.0).min(limit as f64) as u32,
+            Self::Percentage(value) => {
+                let percent = parse_percentage(value).expect("percentage validated");
+                ((limit as f64 * percent / 100.0).round() as u32).clamp(1, limit)
+            }
+        }
+    }
+
+    fn validate(&self, name: &str) -> Result<(), ProtocolError> {
+        match self {
+            Self::Pixels(value) if value.is_finite() && *value > 0.0 => Ok(()),
+            Self::Pixels(_) => Err(ProtocolError::Invalid(format!(
+                "{name} must be a positive finite pixel value"
+            ))),
+            Self::Percentage(value) => {
+                let percent = parse_percentage(value).map_err(|message| {
+                    ProtocolError::Invalid(format!("{name} percentage {message}"))
+                })?;
+                if (0.0..=100.0).contains(&percent) && percent > 0.0 {
+                    Ok(())
+                } else {
+                    Err(ProtocolError::Invalid(format!(
+                        "{name} percentage must be within 0%-100%"
+                    )))
+                }
+            }
+        }
+    }
+}
+
+impl WindowOptions {
+    pub fn is_maximized(&self) -> bool {
+        self.width.as_ref().is_some_and(WindowDimension::is_full)
+            && self.height.as_ref().is_some_and(WindowDimension::is_full)
     }
 }
 
@@ -239,9 +321,12 @@ impl Request {
             }
         }
 
-        let (default_width, default_height) = self.default_window_size();
-        validate_dimension(self.window.width.unwrap_or(default_width), "width")?;
-        validate_dimension(self.window.height.unwrap_or(default_height), "height")?;
+        if let Some(width) = &self.window.width {
+            width.validate("width")?;
+        }
+        if let Some(height) = &self.window.height {
+            height.validate("height")?;
+        }
 
         match self.mode {
             Mode::Dialog => {
@@ -315,11 +400,17 @@ impl Request {
         }
     }
 
-    pub fn window_size(&self) -> (f64, f64) {
+    pub fn window_size(&self, bounds: (u32, u32)) -> (u32, u32) {
         let defaults = self.default_window_size();
         (
-            self.window.width.unwrap_or(defaults.0),
-            self.window.height.unwrap_or(defaults.1),
+            self.window.width.as_ref().map_or_else(
+                || defaults.0.round() as u32,
+                |value| value.resolve(bounds.0),
+            ),
+            self.window.height.as_ref().map_or_else(
+                || defaults.1.round() as u32,
+                |value| value.resolve(bounds.1),
+            ),
         )
     }
 
@@ -393,13 +484,16 @@ pub enum ProtocolError {
     Invalid(String),
 }
 
-fn validate_dimension(value: f64, name: &str) -> Result<(), ProtocolError> {
-    if !(160.0..=2_000.0).contains(&value) {
-        return Err(ProtocolError::Invalid(format!(
-            "{name} must be within 160-2000"
-        )));
-    }
-    Ok(())
+fn parse_percentage(value: &str) -> Result<f64, &'static str> {
+    let Some(number) = value.strip_suffix('%') else {
+        return Err("must end with '%' ");
+    };
+    number
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|number| number.is_finite())
+        .ok_or("must contain a finite number")
 }
 
 fn validate_identifier(value: &str, kind: &str) -> Result<(), ProtocolError> {
@@ -603,7 +697,43 @@ mod tests {
     fn parses_minimal_dialog_and_applies_defaults() {
         let request = request();
         assert_eq!(request.position, Position::CursorScreenCenter);
-        assert_eq!(request.window_size(), (440.0, 300.0));
+        assert_eq!(request.window.screen, Screen::Cursor);
+        assert_eq!(request.window.area, ScreenArea::WorkArea);
+        assert_eq!(request.window_size((1920, 1040)), (440, 300));
+    }
+
+    #[test]
+    fn accepts_percentage_dimensions_and_rejects_invalid_ones() {
+        let request = Request::parse(
+            r#"{"version":"1.0","mode":"dialog","window":{"screen":"primary","area":"screen","width":"80%","height":"100%"},"content":{"title":"Percent"},"actions":[{"id":"ok","label":"OK","submit":true}]}"#,
+        )
+        .unwrap();
+        assert_eq!(request.window.screen, Screen::Primary);
+        assert_eq!(request.window.area, ScreenArea::Screen);
+        assert_eq!(request.window_size((1920, 1080)), (1536, 1080));
+
+        for dimension in [r#""0%""#, r#""101%""#, r#""large""#] {
+            let error = Request::parse(&format!(
+                r#"{{"version":"1.0","mode":"dialog","window":{{"width":{dimension}}},"content":{{"title":"Invalid"}},"actions":[{{"id":"ok","label":"OK","submit":true}}]}}"#
+            ))
+            .unwrap_err();
+            assert!(error.to_string().contains("width percentage"));
+        }
+    }
+
+    #[test]
+    fn only_two_full_percentage_dimensions_are_maximized() {
+        let full = Request::parse(
+            r#"{"version":"1.0","mode":"dialog","window":{"width":"100%","height":"100%"},"content":{"title":"Full"},"actions":[{"id":"ok","label":"OK","submit":true}]}"#,
+        )
+        .unwrap();
+        assert!(full.window.is_maximized());
+
+        let partial = Request::parse(
+            r#"{"version":"1.0","mode":"dialog","window":{"width":"100%","height":"80%"},"content":{"title":"Partial"},"actions":[{"id":"ok","label":"OK","submit":true}]}"#,
+        )
+        .unwrap();
+        assert!(!partial.window.is_maximized());
     }
 
     #[test]
@@ -685,6 +815,7 @@ mod tests {
             include_str!("../../protocol/examples/dialog-short-content.json"),
             include_str!("../../protocol/examples/dialog-long-content.json"),
             include_str!("../../protocol/examples/dialog-ultra-long-content.json"),
+            include_str!("../../protocol/examples/dialog-fullscreen-screen.json"),
         ] {
             Request::parse(example).unwrap();
         }

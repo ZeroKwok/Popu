@@ -9,6 +9,7 @@ const nonDragSelector = [
   "select",
   "option",
   "label",
+  "[data-popu-scrollable]",
   "[data-popu-selectable]",
   "[data-popu-no-drag]",
 ].join(", ");
@@ -196,6 +197,7 @@ function renderProgress(progress) {
 
 function installDragRegions() {
   document.addEventListener("mousedown", (event) => {
+    if (bootstrap.maximized) return;
     if (event.button !== 0 || !(event.target instanceof Element)) return;
     if (!event.target.closest("[data-popu-drag-region]")) return;
     if (event.target.closest(nonDragSelector)) return;
@@ -208,6 +210,7 @@ function installDragRegions() {
 async function start() {
   bootstrap = await invoke("get_bootstrap");
   const app = document.getElementById("app");
+  document.documentElement.classList.toggle("popu-maximized", bootstrap.maximized);
   app.innerHTML = bootstrap.template.html;
   const style = document.createElement("style");
   style.textContent = bootstrap.template.css;
