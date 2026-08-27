@@ -45,7 +45,7 @@ build-test-release file="dialog-confirm.json": build-release
 # Build the release executable, then run a protocol fixture.
 install: build-release
     #!/usr/bin/env bash
-    cp -v ./src-tauri/target/release/popu.exe /g/Local/tools/
+    cp -v ./src-tauri/target/release/popu.exe /g/Local/bin/
 
 # Build once, then run every protocol fixture in filename order. Each request
 # waits for Popu to exit before the next fixture starts.
