@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Minimal capability for the trusted Popu renderer.",
-  "windows": ["popu"],
+  "windows": ["*-*-*-*-*"],
   "permissions": ["core:window:allow-start-dragging"]
 }
