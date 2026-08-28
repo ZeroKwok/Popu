@@ -26,17 +26,17 @@ COMMITTED_PNGS = (
     (256, "128x128@2x.png"),
 )
 ICO_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
+SMALL_ICON_SIZES = frozenset((16, 20))
+TRAY_SIZE = 16
 TRAY_FRAMES = (
-    ("idle",            205, 196, 15, 15, "#78E3B5"),  # 静止
-    ("takeoff",         205, 204, 20, 11, "#78E3B5"),  # 起飞
-    ("rise",            201, 174, 18, 21, "#45D6C4"),  # 上升
-    ("peak",            194, 147, 21, 21, "#FFBE4F"),  # 顶点
-    ("fall",            200, 175, 23, 23, "#FF8A4C"),  # 下落
-    ("land",            205, 204, 28, 16, "#FF5C62"),  # 着陆
-    ("active",          205, 190, 24, 24, "#FF5C62"),  # 活跃
-    ("pulse-crouch",    205, 202, 28, 16, "#FF5C62"),  # 脉冲下蹲
-    ("pulse-peak",      197, 158, 23, 25, "#FF5C62"),  # 脉冲顶点
-    ("pulse-land",      205, 204, 28, 16, "#FF5C62"),  # 脉冲着陆
+    # name, center x, top edge, radius x/y, color
+    ("0-idle",          205, 181, 15, 15, "#78E3B5"),  # 静止
+    ("1-takeoff",       205, 193, 20, 11, "#78E3B5"),  # 起飞
+    ("2-rise",          201, 105, 18, 21, "#45D6C4"),  # 上升
+    ("3-peak",          194,  51, 21, 21, "#FFBE4F"),  # 顶点
+    ("4-fall",          200, 107, 23, 23, "#FF8A4C"),  # 下落
+    ("5-land",          205, 188, 28, 16, "#FF5C62"),  # 着陆
+    ("6-active",        205, 166, 24, 24, "#FF5C62"),  # 活跃
 )
 STATUS_DOT = re.compile(r'<ellipse id="status-dot"[^>]*/>')
 
@@ -58,6 +58,17 @@ def export_png(executable: str, source: Path, size: int, destination: Path) -> N
     )
 
 
+def replace_status_dot(source: str, cx: int, cy: int, rx: int, ry: int, color: str) -> str:
+    ellipse = (
+        f'<ellipse id="status-dot" cx="{cx}" cy="{cy}" '
+        f'rx="{rx}" ry="{ry}" fill="{color}"/>'
+    )
+    result, replacements = STATUS_DOT.subn(ellipse, source)
+    if replacements != 1:
+        raise RuntimeError(f"Expected one status-dot ellipse, found {replacements}")
+    return result
+
+
 def generate(executable: str) -> None:
     if shutil.which(executable) is None:
         raise SystemExit(f"ImageMagick command {executable!r} was not found")
@@ -72,28 +83,39 @@ def generate(executable: str) -> None:
     temporary = REPO_ROOT / ".assets"
     temporary.mkdir(parents=True, exist_ok=True)
     if temporary.exists():
+        small_icon_svg = temporary / "icon-small-status.svg"
+        small_icon_svg.write_text(
+            replace_status_dot(source, 205, 196, 34, 34, "#78E3B5"),
+            encoding="utf-8",
+            newline="\n",
+        )
 
         for size, name in COMMITTED_PNGS:
-            export_png(executable, SOURCE_SVG, size, ICON_DIR / name)
+            icon_source = small_icon_svg if size in SMALL_ICON_SIZES else SOURCE_SVG
+            export_png(executable, icon_source, size, ICON_DIR / name)
 
         ico_inputs: list[Path] = []
         for size in ICO_SIZES:
             path = temporary / f"ico-{size}.png"
-            export_png(executable, SOURCE_SVG, size, path)
+            icon_source = small_icon_svg if size in SMALL_ICON_SIZES else SOURCE_SVG
+            export_png(executable, icon_source, size, path)
             ico_inputs.append(path)
         run_magick(executable, *ico_inputs, ICON_DIR / "icon.ico")
 
-        for name, cx, cy, rx, ry, color in TRAY_FRAMES:
-            ellipse = (
-                f'<ellipse id="status-dot" cx="{cx}" cy="{cy}" '
-                f'rx="{rx}" ry="{ry}" fill="{color}"/>'
-            )
-            frame_svg, replacements = STATUS_DOT.subn(ellipse, source)
-            if replacements != 1:
-                raise RuntimeError(f"Expected one status-dot ellipse, found {replacements}")
+        for obsolete_size in ("16", "20"):
+            shutil.rmtree(TRAY_DIR / obsolete_size, ignore_errors=True)
+        expected_tray_files = {f"{name}.png" for name, *_ in TRAY_FRAMES}
+        for existing in TRAY_DIR.glob("*.png"):
+            if existing.name not in expected_tray_files:
+                existing.unlink()
+        scale = 2
+        for name, cx, top, rx, ry, color in TRAY_FRAMES:
+            scaled_rx, scaled_ry = rx * scale, ry * scale
+            scaled_cx = min(cx, 244 - scaled_rx)
+            frame_svg = replace_status_dot(source, scaled_cx, top + scaled_ry, scaled_rx, scaled_ry, color)
             temporary_svg = temporary / f"tray-{name}.svg"
             temporary_svg.write_text(frame_svg, encoding="utf-8", newline="\n")
-            export_png(executable, temporary_svg, 32, TRAY_DIR / f"{name}.png")
+            export_png(executable, temporary_svg, TRAY_SIZE, TRAY_DIR / f"{name}.png")
 
 
 def main() -> None:

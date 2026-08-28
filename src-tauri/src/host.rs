@@ -24,11 +24,10 @@ pub struct HostState {
     changed: Condvar,
     stopping: AtomicBool,
     history: Mutex<Option<HistoryStore>>,
-    tray_animation: Mutex<tray::Animator>,
 }
 
 impl Default for HostState {
-    fn default() -> Self { Self { registry: Mutex::new(RequestRegistry::default()), changed: Condvar::new(), stopping: AtomicBool::new(false), history: Mutex::new(HistoryStore::open_default().ok()), tray_animation: Mutex::new(tray::Animator::default()) } }
+    fn default() -> Self { Self { registry: Mutex::new(RequestRegistry::default()), changed: Condvar::new(), stopping: AtomicBool::new(false), history: Mutex::new(HistoryStore::open_default().ok()) } }
 }
 
 #[derive(Clone, Serialize)]
@@ -55,6 +54,7 @@ pub fn run() -> i32 {
             start_listener(app.handle().clone(), Arc::clone(&state))?;
             build_tray(app.handle())?;
             start_timer(app.handle().clone(), Arc::clone(&state));
+            start_tray_animation(app.handle().clone(), Arc::clone(&state));
             Ok(())
         })
         .build(tauri::generate_context!());
@@ -277,17 +277,27 @@ fn reposition_notifications(app: &AppHandle, state: &Arc<HostState>) {
 fn start_timer(app: AppHandle, state: Arc<HostState>) {
     std::thread::spawn(move || { let mut ticks = 0_u8; while !state.stopping.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(100));
-        let (effects, notifications_active) = { let mut registry = state.registry.lock().unwrap(); let effects = registry.expire_due(Instant::now()); (effects, registry.active_notification_count() > 0) };
+        let effects = { state.registry.lock().unwrap().expire_due(Instant::now()) };
         if !effects.is_empty() { for effect in &effects { if let Effect::Close(id) = effect { persist_terminal(&state, *id); } } state.changed.notify_all(); schedule(&app, Arc::clone(&state), effects); }
-        if let Some(frame) = state.tray_animation.lock().unwrap().advance(notifications_active) { schedule_tray_frame(&app, frame); }
         ticks = ticks.wrapping_add(1);
         if ticks == 10 { ticks = 0; schedule(&app, Arc::clone(&state), vec![]); }
     }});
 }
 
-fn schedule_tray_frame(app: &AppHandle, frame: usize) {
-    let app = app.clone(); let callback_app = app.clone();
-    let _ = app.run_on_main_thread(move || { if let Some(icon) = callback_app.tray_by_id("popu") { let _ = icon.set_icon(Some(tray::frame(frame))); } });
+fn start_tray_animation(app: AppHandle, state: Arc<HostState>) {
+    std::thread::spawn(move || {
+        let renderer = tray::FrameRenderer::new(app);
+        let mut animator = tray::Animator::default();
+        let interval = tray::FRAME_INTERVAL;
+        let mut deadline = Instant::now() + interval;
+        while !state.stopping.load(Ordering::SeqCst) {
+            std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+            let active = state.registry.lock().unwrap().active_notification_count() > 0;
+            if let Some(frame) = animator.advance(active) { renderer.render(frame); }
+            deadline += interval;
+            if deadline < Instant::now() { deadline = Instant::now() + interval; }
+        }
+    });
 }
 
 fn id_for(window: &WebviewWindow) -> Result<Uuid, String> { Uuid::parse_str(window.label()).map_err(|_| "invalid request window".into()) }
@@ -315,12 +325,12 @@ fn history_clear(state: State<'_, Arc<HostState>>) -> Result<usize, String> {
 fn ui_presented(window: WebviewWindow, state: State<'_, Arc<HostState>>) -> Result<(), String> {
     let id = id_for(&window)?;
     runtime::reveal_windows_window(&window)?;
-    let is_dialog = {
+    let mode = {
         let mut registry = state.registry.lock().unwrap();
         registry.mark_shown(id, Instant::now()).map_err(|e| e.to_string())?;
-        registry.request(id).is_some_and(|request| request.mode == Mode::Dialog)
+        registry.request(id).map(|request| request.mode).ok_or("request not found")?
     };
-    if is_dialog { window.set_focus().map_err(|e| e.to_string())?; }
+    if mode == Mode::Dialog { window.set_focus().map_err(|e| e.to_string())?; }
     state.changed.notify_all(); Ok(())
 }
 

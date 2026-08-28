@@ -1,35 +1,144 @@
 use std::sync::LazyLock;
+use std::time::Duration;
 
-use tauri::image::Image;
+use tauri::{image::Image, AppHandle};
 
 pub const IDLE_FRAME: usize = 0;
-const HOLD_TICKS: u8 = 40;
-const ACTIVATION: &[usize] = &[1, 2, 3, 2, 1, 2, 3, 4, 5, 6];
-const PULSE: &[usize] = &[7, 8, 8, 9, 6];
-const RETURN: &[usize] = &[5, 4, 2, 0];
+pub const FRAME_INTERVAL: Duration = Duration::from_millis(120);
+const ACTIVATION: &[usize] = &[1, 2, 3, 4, 5, 6];
+const PLAY_ROUNDS: usize = 3;
+const REST_TICKS: u8 = 10;
 
-static FRAMES: LazyLock<Vec<Image<'static>>> = LazyLock::new(|| {
-    [
-        include_bytes!("../icons/tray/idle.png").as_slice(),
-        include_bytes!("../icons/tray/takeoff.png").as_slice(),
-        include_bytes!("../icons/tray/rise.png").as_slice(),
-        include_bytes!("../icons/tray/peak.png").as_slice(),
-        include_bytes!("../icons/tray/fall.png").as_slice(),
-        include_bytes!("../icons/tray/land.png").as_slice(),
-        include_bytes!("../icons/tray/active.png").as_slice(),
-        include_bytes!("../icons/tray/pulse-crouch.png").as_slice(),
-        include_bytes!("../icons/tray/pulse-peak.png").as_slice(),
-        include_bytes!("../icons/tray/pulse-land.png").as_slice(),
-    ]
-    .into_iter()
-    .map(|bytes| Image::from_bytes(bytes).expect("embedded tray frame must be a valid PNG").to_owned())
-    .collect()
-});
+static FRAMES: LazyLock<Vec<Image<'static>>> = LazyLock::new(|| decode_frames([
+    include_bytes!("../icons/tray/0-idle.png").as_slice(),
+    include_bytes!("../icons/tray/1-takeoff.png").as_slice(),
+    include_bytes!("../icons/tray/2-rise.png").as_slice(),
+    include_bytes!("../icons/tray/3-peak.png").as_slice(),
+    include_bytes!("../icons/tray/4-fall.png").as_slice(),
+    include_bytes!("../icons/tray/5-land.png").as_slice(),
+    include_bytes!("../icons/tray/6-active.png").as_slice(),
+]));
+
+fn decode_frames(bytes: [&'static [u8]; 7]) -> Vec<Image<'static>> {
+    bytes
+        .into_iter()
+        .map(|bytes| Image::from_bytes(bytes).expect("embedded tray frame must be a valid PNG").to_owned())
+        .collect()
+}
 
 pub fn frame(index: usize) -> Image<'static> { FRAMES[index].clone() }
 
+pub struct FrameRenderer {
+    app: AppHandle,
+    #[cfg(windows)]
+    native: Option<WindowsFrameRenderer>,
+}
+
+impl FrameRenderer {
+    pub fn new(app: AppHandle) -> Self {
+        #[cfg(windows)]
+        let native = match WindowsFrameRenderer::attach() {
+            Ok(renderer) => Some(renderer),
+            Err(error) => { eprintln!("Popu native tray renderer unavailable ({error}); using Tauri fallback"); None }
+        };
+        Self {
+            app,
+            #[cfg(windows)]
+            native,
+        }
+    }
+
+    pub fn render(&self, index: usize) {
+        #[cfg(windows)]
+        if self.native.as_ref().is_some_and(|renderer| renderer.render(index)) { return; }
+        if let Some(icon) = self.app.tray_by_id("popu") { let _ = icon.set_icon(Some(frame(index))); }
+    }
+}
+
+#[cfg(windows)]
+struct WindowsFrameRenderer {
+    hwnd: isize,
+    tray_id: u32,
+    icons: Vec<isize>,
+}
+
+#[cfg(windows)]
+impl WindowsFrameRenderer {
+    fn attach() -> Result<Self, String> {
+        use windows_sys::Win32::UI::WindowsAndMessaging::CreateIcon;
+        let (hwnd, tray_id) = find_tauri_tray().ok_or("Tauri tray window not found")?;
+        let mut icons = Vec::with_capacity(FRAMES.len());
+        for image in FRAMES.iter() {
+            let mut bgra = image.rgba().to_vec();
+            let mut and_mask = Vec::with_capacity(bgra.len() / 4);
+            for pixel in bgra.chunks_exact_mut(4) {
+                and_mask.push(pixel[3].wrapping_sub(u8::MAX));
+                pixel.swap(0, 2);
+            }
+            let icon = unsafe { CreateIcon(std::ptr::null_mut(), image.width() as i32, image.height() as i32, 1, 32, and_mask.as_ptr(), bgra.as_ptr()) };
+            if icon.is_null() {
+                for icon in icons { unsafe { let _ = windows_sys::Win32::UI::WindowsAndMessaging::DestroyIcon(icon as _); } }
+                return Err(std::io::Error::last_os_error().to_string());
+            }
+            icons.push(icon as isize);
+        }
+        Ok(Self { hwnd, tray_id, icons })
+    }
+
+    fn render(&self, index: usize) -> bool {
+        use std::mem::size_of;
+        use windows_sys::Win32::UI::Shell::{Shell_NotifyIconW, NIF_ICON, NIM_MODIFY, NOTIFYICONDATAW};
+        let data = NOTIFYICONDATAW {
+            cbSize: size_of::<NOTIFYICONDATAW>() as u32,
+            hWnd: self.hwnd as _,
+            uID: self.tray_id,
+            uFlags: NIF_ICON,
+            hIcon: self.icons[index] as _,
+            ..unsafe { std::mem::zeroed() }
+        };
+        unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) != 0 }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsFrameRenderer {
+    fn drop(&mut self) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::DestroyIcon;
+        for icon in self.icons.drain(..) { unsafe { let _ = DestroyIcon(icon as _); } }
+    }
+}
+
+#[cfg(windows)]
+fn find_tauri_tray() -> Option<(isize, u32)> {
+    use std::mem::size_of;
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::Shell::{Shell_NotifyIconGetRect, NOTIFYICONIDENTIFIER};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowExW, GetWindowThreadProcessId};
+
+    let class: Vec<u16> = "tray_icon_app\0".encode_utf16().collect();
+    let mut hwnd = std::ptr::null_mut();
+    loop {
+        hwnd = unsafe { FindWindowExW(std::ptr::null_mut(), hwnd, class.as_ptr(), std::ptr::null()) };
+        if hwnd.is_null() { return None; }
+        let mut process_id = 0;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut process_id); }
+        if process_id != unsafe { GetCurrentProcessId() } { continue; }
+        for tray_id in 1..=32 {
+            let identifier = NOTIFYICONIDENTIFIER {
+                cbSize: size_of::<NOTIFYICONIDENTIFIER>() as u32,
+                hWnd: hwnd,
+                uID: tray_id,
+                ..unsafe { std::mem::zeroed() }
+            };
+            let mut rect: RECT = unsafe { std::mem::zeroed() };
+            if unsafe { Shell_NotifyIconGetRect(&identifier, &mut rect) } >= 0 { return Some((hwnd as isize, tray_id)); }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Phase { Idle, Activating(usize), Holding(u8), Pulsing(usize), Returning(usize) }
+enum Phase { Idle, Playing { next: usize, completed_rounds: usize }, Resting(u8) }
 
 pub struct Animator {
     phase: Phase,
@@ -41,21 +150,28 @@ impl Default for Animator {
 }
 
 impl Animator {
-    /// Advance one 100 ms Host tick and return a frame only when the image changes.
+    /// Advance one animation tick and return a frame only when the image changes.
     pub fn advance(&mut self, active: bool) -> Option<usize> {
-        let (phase, target) = if active {
-            match self.phase {
-                Phase::Idle | Phase::Returning(_) => (Phase::Activating(1), Some(ACTIVATION[0])),
-                Phase::Activating(next) => sequence_step(ACTIVATION, next, Phase::Activating, Phase::Holding(0)),
-                Phase::Holding(ticks) if ticks + 1 >= HOLD_TICKS => (Phase::Pulsing(1), Some(PULSE[0])),
-                Phase::Holding(ticks) => (Phase::Holding(ticks + 1), None),
-                Phase::Pulsing(next) => sequence_step(PULSE, next, Phase::Pulsing, Phase::Holding(0)),
-            }
+        let (phase, target) = if !active {
+            (Phase::Idle, Some(IDLE_FRAME))
         } else {
             match self.phase {
-                Phase::Idle => (Phase::Idle, None),
-                Phase::Returning(next) => sequence_step(RETURN, next, Phase::Returning, Phase::Idle),
-                _ => (Phase::Returning(1), Some(RETURN[0])),
+                Phase::Idle => (Phase::Playing { next: 1, completed_rounds: 0 }, Some(ACTIVATION[0])),
+                Phase::Playing { next, completed_rounds } => {
+                    let following = next + 1;
+                    let phase = if following < ACTIVATION.len() {
+                        Phase::Playing { next: following, completed_rounds }
+                    } else if completed_rounds + 1 < PLAY_ROUNDS {
+                        Phase::Playing { next: 0, completed_rounds: completed_rounds + 1 }
+                    } else {
+                        Phase::Resting(0)
+                    };
+                    (phase, Some(ACTIVATION[next]))
+                }
+                Phase::Resting(ticks) if ticks + 1 >= REST_TICKS => {
+                    (Phase::Playing { next: 1, completed_rounds: 0 }, Some(ACTIVATION[0]))
+                }
+                Phase::Resting(ticks) => (Phase::Resting(ticks + 1), None),
             }
         };
         self.phase = phase;
@@ -63,12 +179,6 @@ impl Animator {
         self.current_frame = target;
         Some(target)
     }
-}
-
-fn sequence_step(sequence: &[usize], next: usize, continuing: fn(usize) -> Phase, completed: Phase) -> (Phase, Option<usize>) {
-    let following = next + 1;
-    let phase = if following == sequence.len() { completed } else { continuing(following) };
-    (phase, Some(sequence[next]))
 }
 
 #[cfg(test)]
@@ -80,40 +190,34 @@ mod tests {
     }
 
     #[test]
-    fn activation_holds_then_pulses_without_redundant_frames() {
+    fn activation_plays_three_rounds_then_rests() {
         let mut animator = Animator::default();
-        let activation = changed_frames(&mut animator, true, ACTIVATION.len());
-        assert_eq!(activation.first(), Some(&ACTIVATION[0]));
-        assert_eq!(activation.last(), Some(&6));
-        assert!(changed_frames(&mut animator, true, (HOLD_TICKS - 1) as usize).is_empty());
-        assert_eq!(animator.advance(true), Some(PULSE[0]));
-        let pulse = changed_frames(&mut animator, true, PULSE.len() - 1);
-        assert_eq!(pulse.last(), Some(&6));
-        assert!(changed_frames(&mut animator, true, (HOLD_TICKS - 1) as usize).is_empty());
-        assert_eq!(animator.advance(true), Some(PULSE[0]));
+        let played = changed_frames(&mut animator, true, ACTIVATION.len() * PLAY_ROUNDS);
+        let expected: Vec<_> = (0..PLAY_ROUNDS).flat_map(|_| ACTIVATION.iter().copied()).collect();
+        assert_eq!(played, expected);
+        assert!(changed_frames(&mut animator, true, (REST_TICKS - 1) as usize).is_empty());
+        assert_eq!(animator.advance(true), Some(ACTIVATION[0]));
     }
 
     #[test]
-    fn inactive_reverses_to_idle_and_reactivation_restarts_jump() {
+    fn inactive_resets_to_idle_and_reactivation_replays() {
         let mut animator = Animator::default();
-        changed_frames(&mut animator, true, ACTIVATION.len());
-        assert_eq!(animator.advance(false), Some(RETURN[0]));
-        let returned = changed_frames(&mut animator, false, RETURN.len() - 1);
-        assert_eq!(returned.last(), Some(&IDLE_FRAME));
+        changed_frames(&mut animator, true, ACTIVATION.len() * PLAY_ROUNDS);
+        assert_eq!(animator.advance(false), Some(IDLE_FRAME));
         assert_eq!(animator.advance(false), None);
         assert_eq!(animator.advance(true), Some(ACTIVATION[0]));
-        assert_eq!(animator.advance(false), Some(RETURN[0]));
+        assert_eq!(animator.advance(false), Some(IDLE_FRAME));
         assert_eq!(animator.advance(true), Some(ACTIVATION[0]));
     }
 
     #[test]
-    fn embedded_frames_are_32px_with_transparent_corners() {
-        assert_eq!(FRAMES.len(), 10);
+    fn embedded_frames_are_16px_with_transparent_corners() {
+        assert_eq!(FRAMES.len(), 7);
         for (index, image) in FRAMES.iter().enumerate() {
-            assert_eq!((image.width(), image.height()), (32, 32), "frame {index}");
+            assert_eq!((image.width(), image.height()), (16, 16), "frame {index}");
             let rgba = image.rgba();
             assert_eq!(rgba[3], 0, "frame {index} top-left corner");
-            assert_eq!(rgba[(32 * 32 - 1) * 4 + 3], 0, "frame {index} bottom-right corner");
+            assert_eq!(rgba[(16 * 16 - 1) * 4 + 3], 0, "frame {index} bottom-right corner");
         }
     }
 }
