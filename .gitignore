@@ -3,5 +3,11 @@
 /dist/
 /.pytest_cache/
 /**/__pycache__/
+.assets/
 *.pyc
 TODO.md
+
+# make by script
+/src-tauri/icons/tray/
+/src-tauri/icons/*x*.png
+/src-tauri/icons/icon.ico

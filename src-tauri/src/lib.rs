@@ -6,6 +6,7 @@ pub mod placement;
 pub mod protocol;
 mod runtime;
 pub mod templates;
+mod tray;
 
 use std::fs;
 use std::io::{self, Read};

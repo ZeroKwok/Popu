@@ -2,6 +2,10 @@
 build:
     cargo build --manifest-path src-tauri/Cargo.toml
 
+# Regenerate committed application and tray icons from the SVG source.
+icons:
+    python scripts/generate-icons.py
+
 # Build the release executable.
 build-release:
     cargo build --release --manifest-path src-tauri/Cargo.toml

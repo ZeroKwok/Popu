@@ -17,16 +17,18 @@ use crate::history::HistoryStore;
 use crate::protocol::{Content, Mode, Position, Request, ResponseStatus, Screen};
 use crate::runtime;
 use crate::templates::{self, TemplateAssets};
+use crate::tray;
 
 pub struct HostState {
     registry: Mutex<RequestRegistry>,
     changed: Condvar,
     stopping: AtomicBool,
     history: Mutex<Option<HistoryStore>>,
+    tray_animation: Mutex<tray::Animator>,
 }
 
 impl Default for HostState {
-    fn default() -> Self { Self { registry: Mutex::new(RequestRegistry::default()), changed: Condvar::new(), stopping: AtomicBool::new(false), history: Mutex::new(HistoryStore::open_default().ok()) } }
+    fn default() -> Self { Self { registry: Mutex::new(RequestRegistry::default()), changed: Condvar::new(), stopping: AtomicBool::new(false), history: Mutex::new(HistoryStore::open_default().ok()), tray_animation: Mutex::new(tray::Animator::default()) } }
 }
 
 #[derive(Clone, Serialize)]
@@ -51,8 +53,8 @@ pub fn run() -> i32 {
         .on_window_event(handle_window_event)
         .setup(move |app| {
             start_listener(app.handle().clone(), Arc::clone(&state))?;
-            start_timer(app.handle().clone(), Arc::clone(&state));
             build_tray(app.handle())?;
+            start_timer(app.handle().clone(), Arc::clone(&state));
             Ok(())
         })
         .build(tauri::generate_context!());
@@ -76,7 +78,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let clear_history = MenuItem::with_id(app, "clear_history", "Clear history", true, None::<&str>)?;
     let exit = MenuItem::with_id(app, "exit", "Exit Popu Host", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &clear_current, &clear_history, &exit])?;
-    let tray = TrayIconBuilder::with_id("popu").menu(&menu).tooltip("Popu — 0 notifications").icon(badge_icon(0));
+    let tray = TrayIconBuilder::with_id("popu").menu(&menu).tooltip("Popu — 0 notifications").icon(tray::frame(tray::IDLE_FRAME));
     tray.on_menu_event(|app, event| match event.id().as_ref() {
         "history" => open_history(app),
         "clear_current" => clear_current_notifications(app),
@@ -225,47 +227,15 @@ fn apply_effects(app: &AppHandle, state: &Arc<HostState>, effects: Vec<Effect>) 
         }
     }
     reposition_notifications(app, state);
-    update_tray_badge(app, state);
+    update_tray_tooltip(app, state);
 }
 
-fn update_tray_badge(app: &AppHandle, state: &Arc<HostState>) {
+fn update_tray_tooltip(app: &AppHandle, state: &Arc<HostState>) {
     let count = state.registry.lock().unwrap().active_notification_count();
     if let Some(tray) = app.tray_by_id("popu") {
         let label = if count > 99 { "99+".to_owned() } else { count.to_string() };
         let _ = tray.set_tooltip(Some(format!("Popu — {label} notifications")));
-        let _ = tray.set_icon(Some(badge_icon(count)));
     }
-}
-
-fn badge_icon(count: usize) -> tauri::image::Image<'static> {
-    const SIZE: usize = 32;
-    let mut rgba = vec![0_u8; SIZE * SIZE * 4];
-    for y in 3..29 { for x in 3..29 {
-        let dx = x as i32 - 16; let dy = y as i32 - 16;
-        if dx * dx + dy * dy <= 13 * 13 { pixel(&mut rgba, x, y, [76, 92, 210, 255]); }
-    }}
-    if count == 0 { return tauri::image::Image::new_owned(rgba, SIZE as u32, SIZE as u32); }
-    let text = if count > 99 { "99+".to_owned() } else { count.to_string() };
-    let scale = if text.len() <= 2 { 2 } else { 1 };
-    let width = text.len() * (3 * scale + scale) - scale;
-    let left = SIZE.saturating_sub(width + 2);
-    for y in 0..12 { for x in left.saturating_sub(2)..SIZE { pixel(&mut rgba, x, y, [220, 38, 38, 255]); } }
-    for (index, ch) in text.chars().enumerate() {
-        let glyph = match ch {
-            '0' => [7,5,5,5,7], '1' => [2,6,2,2,7], '2' => [7,1,7,4,7], '3' => [7,1,7,1,7],
-            '4' => [5,5,7,1,1], '5' => [7,4,7,1,7], '6' => [7,4,7,5,7], '7' => [7,1,1,1,1],
-            '8' => [7,5,7,5,7], '9' => [7,5,7,1,7], '+' => [0,2,7,2,0], _ => [0;5],
-        };
-        let origin = left + index * (4 * scale);
-        for (row, bits) in glyph.iter().enumerate() { for column in 0..3 {
-            if bits & (1 << (2 - column)) != 0 { for sy in 0..scale { for sx in 0..scale { pixel(&mut rgba, origin + column * scale + sx, 1 + row * scale + sy, [255,255,255,255]); } } }
-        }}
-    }
-    tauri::image::Image::new_owned(rgba, SIZE as u32, SIZE as u32)
-}
-
-fn pixel(rgba: &mut [u8], x: usize, y: usize, color: [u8; 4]) {
-    if x >= 32 || y >= 32 { return; } let offset = (y * 32 + x) * 4; rgba[offset..offset + 4].copy_from_slice(&color);
 }
 
 fn show_window(app: &AppHandle, state: &Arc<HostState>, id: Uuid) -> Result<(), String> {
@@ -307,11 +277,17 @@ fn reposition_notifications(app: &AppHandle, state: &Arc<HostState>) {
 fn start_timer(app: AppHandle, state: Arc<HostState>) {
     std::thread::spawn(move || { let mut ticks = 0_u8; while !state.stopping.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(100));
-        let effects = state.registry.lock().unwrap().expire_due(Instant::now());
+        let (effects, notifications_active) = { let mut registry = state.registry.lock().unwrap(); let effects = registry.expire_due(Instant::now()); (effects, registry.active_notification_count() > 0) };
         if !effects.is_empty() { for effect in &effects { if let Effect::Close(id) = effect { persist_terminal(&state, *id); } } state.changed.notify_all(); schedule(&app, Arc::clone(&state), effects); }
+        if let Some(frame) = state.tray_animation.lock().unwrap().advance(notifications_active) { schedule_tray_frame(&app, frame); }
         ticks = ticks.wrapping_add(1);
         if ticks == 10 { ticks = 0; schedule(&app, Arc::clone(&state), vec![]); }
     }});
+}
+
+fn schedule_tray_frame(app: &AppHandle, frame: usize) {
+    let app = app.clone(); let callback_app = app.clone();
+    let _ = app.run_on_main_thread(move || { if let Some(icon) = callback_app.tray_by_id("popu") { let _ = icon.set_icon(Some(tray::frame(frame))); } });
 }
 
 fn id_for(window: &WebviewWindow) -> Result<Uuid, String> { Uuid::parse_str(window.label()).map_err(|_| "invalid request window".into()) }
