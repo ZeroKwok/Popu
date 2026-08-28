@@ -293,6 +293,18 @@ window.popuApplyUpdate = (content) => {
   renderContent(content, bootstrap.request.mode === "dialog");
 };
 
+async function waitForPresentationFrame() {
+  await Promise.race([
+    (async () => {
+      if (document.fonts) await document.fonts.ready;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    })(),
+    // A cloaked WebView can suspend font or frame notifications. Keep native
+    // presentation bounded so the window and notification timer cannot stall.
+    new Promise((resolve) => setTimeout(resolve, 250)),
+  ]);
+}
+
 function showValidationError(message) {
   const firstField = document.querySelector(".popu-field");
   if (!firstField) return;
@@ -376,7 +388,8 @@ async function start() {
       invoke("finish", { status: "cancelled", action: null });
     }
   });
-  await invoke("ui_ready");
+  await waitForPresentationFrame();
+  await invoke("ui_presented");
   document.querySelector("input, textarea, select, button")?.focus();
 }
 

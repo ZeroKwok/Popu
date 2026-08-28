@@ -10,13 +10,10 @@ pub const EXIT_ERROR: i32 = 12;
 
 #[cfg(windows)]
 pub(crate) fn configure_frameless_windows_window(window: &WebviewWindow, maximized: bool) -> Result<(), String> {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::Graphics::Gdi::{CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn};
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_STYLE, HWND_TOP, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_CAPTION, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME};
-    let handle = window.window_handle().map_err(|e| e.to_string())?;
-    let RawWindowHandle::Win32(handle) = handle.as_raw() else { return Err("window does not expose a Win32 handle".into()) };
-    let hwnd = handle.hwnd.get() as HWND;
+    let hwnd = windows_hwnd(window)?;
+    set_window_cloaked(hwnd, true)?;
     let size = window.outer_size().map_err(|e| e.to_string())?;
     let radius = (14.0 * window.scale_factor().map_err(|e| e.to_string())?).round().max(1.0) as i32;
     let width = i32::try_from(size.width).map_err(|_| "window width is too large")?;
@@ -31,6 +28,42 @@ pub(crate) fn configure_frameless_windows_window(window: &WebviewWindow, maximiz
     }
     Ok(())
 }
+
+#[cfg(windows)]
+pub(crate) fn reveal_windows_window(window: &WebviewWindow) -> Result<(), String> {
+    use windows_sys::Win32::Graphics::Dwm::DwmFlush;
+    let hwnd = windows_hwnd(window)?;
+    unsafe { let _ = DwmFlush(); }
+    set_window_cloaked(hwnd, false)?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn windows_hwnd(window: &WebviewWindow) -> Result<windows_sys::Win32::Foundation::HWND, String> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::Foundation::HWND;
+    let handle = window.window_handle().map_err(|e| e.to_string())?;
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else { return Err("window does not expose a Win32 handle".into()) };
+    Ok(handle.hwnd.get() as HWND)
+}
+
+#[cfg(windows)]
+fn set_window_cloaked(hwnd: windows_sys::Win32::Foundation::HWND, cloaked: bool) -> Result<(), String> {
+    use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_CLOAK};
+    let value = i32::from(cloaked);
+    let result = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAK as u32,
+            std::ptr::from_ref(&value).cast(),
+            std::mem::size_of_val(&value) as u32,
+        )
+    };
+    if result < 0 { Err(format!("DwmSetWindowAttribute(DWMWA_CLOAK={cloaked}) failed: {result:#x}")) } else { Ok(()) }
+}
+
+#[cfg(not(windows))]
+pub(crate) fn reveal_windows_window(_window: &WebviewWindow) -> Result<(), String> { Ok(()) }
 
 #[cfg(windows)]
 pub(crate) fn resolve_window_placement(request: &Request) -> Result<WindowPlacement, String> {

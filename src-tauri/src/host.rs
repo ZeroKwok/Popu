@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use interprocess::local_socket::traits::ListenerExt as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use tauri::{AppHandle, Manager, PhysicalPosition, RunEvent, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{window::Color, AppHandle, Manager, PhysicalPosition, RunEvent, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use uuid::Uuid;
@@ -47,7 +47,7 @@ pub fn run() -> i32 {
     let managed = Arc::clone(&state);
     let app = tauri::Builder::default()
         .manage(managed)
-        .invoke_handler(tauri::generate_handler![get_bootstrap, submit, finish, render_failed, ui_ready, history_list, history_clear])
+        .invoke_handler(tauri::generate_handler![get_bootstrap, submit, finish, render_failed, ui_presented, history_list, history_clear])
         .on_window_event(handle_window_event)
         .setup(move |app| {
             start_listener(app.handle().clone(), Arc::clone(&state))?;
@@ -281,10 +281,12 @@ fn show_window(app: &AppHandle, state: &Arc<HostState>, id: Uuid) -> Result<(), 
     let window = WebviewWindowBuilder::new(app, id.to_string(), WebviewUrl::App("index.html".into()))
         .title(&request.content.title).inner_size(placement.size.0 as f64, placement.size.1 as f64)
         .min_inner_size(1.0, 1.0).decorations(false).transparent(true).resizable(false)
+        .background_color(Color(0, 0, 0, 0))
         .always_on_top(request.window.always_on_top).skip_taskbar(notify).focused(!notify).visible(false).shadow(false)
         .build().map_err(|e| e.to_string())?;
     runtime::position_window(&window, placement)?;
     #[cfg(windows)] runtime::configure_frameless_windows_window(&window, request.window.is_maximized())?;
+    window.show().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -334,10 +336,15 @@ fn history_clear(state: State<'_, Arc<HostState>>) -> Result<usize, String> {
 }
 
 #[tauri::command]
-fn ui_ready(window: WebviewWindow, state: State<'_, Arc<HostState>>) -> Result<(), String> {
-    let id = id_for(&window)?; state.registry.lock().unwrap().mark_shown(id, Instant::now()).map_err(|e| e.to_string())?;
-    window.show().map_err(|e| e.to_string())?;
-    if state.registry.lock().unwrap().request(id).is_some_and(|r| r.mode == Mode::Dialog) { window.set_focus().map_err(|e| e.to_string())?; }
+fn ui_presented(window: WebviewWindow, state: State<'_, Arc<HostState>>) -> Result<(), String> {
+    let id = id_for(&window)?;
+    runtime::reveal_windows_window(&window)?;
+    let is_dialog = {
+        let mut registry = state.registry.lock().unwrap();
+        registry.mark_shown(id, Instant::now()).map_err(|e| e.to_string())?;
+        registry.request(id).is_some_and(|request| request.mode == Mode::Dialog)
+    };
+    if is_dialog { window.set_focus().map_err(|e| e.to_string())?; }
     state.changed.notify_all(); Ok(())
 }
 
