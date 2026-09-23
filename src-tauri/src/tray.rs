@@ -211,13 +211,13 @@ mod tests {
     }
 
     #[test]
-    fn embedded_frames_are_16px_with_transparent_corners() {
+    fn embedded_frames_are_32px_with_transparent_corners() {
         assert_eq!(FRAMES.len(), 7);
         for (index, image) in FRAMES.iter().enumerate() {
-            assert_eq!((image.width(), image.height()), (16, 16), "frame {index}");
+            assert_eq!((image.width(), image.height()), (32, 32), "frame {index}");
             let rgba = image.rgba();
             assert_eq!(rgba[3], 0, "frame {index} top-left corner");
-            assert_eq!(rgba[(16 * 16 - 1) * 4 + 3], 0, "frame {index} bottom-right corner");
+            assert_eq!(rgba[(32 * 32 - 1) * 4 + 3], 0, "frame {index} bottom-right corner");
         }
     }
 }
