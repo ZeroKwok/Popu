@@ -259,13 +259,14 @@ fn show_window(app: &AppHandle, state: &Arc<HostState>, id: Uuid) -> Result<(), 
     if let Some(slot) = slot { placement.position.y -= slot as i32 * (placement.size.1 as i32 + 12); }
     let notify = request.mode == Mode::Notify;
     let window = WebviewWindowBuilder::new(app, id.to_string(), WebviewUrl::App("index.html".into()))
-        // The builder accepts logical pixels. Set the requested physical size
-        // immediately after construction, while the window is still hidden.
+        // Move the hidden window to the target monitor before setting its
+        // logical size, so Tauri applies that monitor's DPI scale factor.
         .title(&request.content.title).inner_size(1.0, 1.0)
         .min_inner_size(1.0, 1.0).decorations(false).transparent(true).resizable(false)
         .background_color(Color(0, 0, 0, 0))
         .always_on_top(request.window.always_on_top).skip_taskbar(notify).focused(!notify).visible(false).shadow(false)
         .build().map_err(|e| e.to_string())?;
+    runtime::position_window(&window, placement)?;
     runtime::size_window(&window, placement)?;
     runtime::position_window(&window, placement)?;
     #[cfg(windows)] runtime::configure_frameless_windows_window(&window, request.window.is_maximized())?;

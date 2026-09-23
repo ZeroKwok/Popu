@@ -120,7 +120,7 @@ pub enum ScreenArea {
     Screen,
 }
 
-/// A window dimension in physical pixels or as a percentage of its target area.
+/// A window dimension in logical pixels or as a percentage of its target area.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum WindowDimension {

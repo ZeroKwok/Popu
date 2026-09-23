@@ -1,6 +1,6 @@
 //! Thin platform window helpers used by the persistent Host.
 
-use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow};
+use tauri::{LogicalSize, PhysicalPosition, WebviewWindow};
 
 use crate::placement::WindowPlacement;
 use crate::protocol::{Request, Screen, ScreenArea};
@@ -69,33 +69,37 @@ pub(crate) fn reveal_windows_window(_window: &WebviewWindow) -> Result<(), Strin
 pub(crate) fn resolve_window_placement(request: &Request) -> Result<WindowPlacement, String> {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY};
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
     use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
     let mut cursor = POINT { x: 0, y: 0 };
     unsafe {
         if request.window.screen == Screen::Cursor && GetCursorPos(&mut cursor) == 0 { return Err("GetCursorPos failed".into()); }
         let point = if request.window.screen == Screen::Primary { POINT { x: i32::MIN, y: i32::MIN } } else { cursor };
         let monitor = MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY);
+        let mut dpi_x = 0_u32;
+        let mut dpi_y = 0_u32;
+        if GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) < 0 || dpi_x == 0 {
+            return Err("GetDpiForMonitor failed".into());
+        }
         let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, rcMonitor: Default::default(), rcWork: Default::default(), dwFlags: 0 };
         if GetMonitorInfoW(monitor, &mut info) == 0 { return Err("GetMonitorInfoW failed".into()); }
         let rect = match request.window.area { ScreenArea::WorkArea => info.rcWork, ScreenArea::Screen => info.rcMonitor };
         let area = crate::placement::Rect { x: rect.left, y: rect.top, width: (rect.right - rect.left).max(0) as u32, height: (rect.bottom - rect.top).max(0) as u32 };
         if area.width == 0 || area.height == 0 { return Err("target display area is empty".into()); }
-        Ok(crate::placement::resolve(request, area, 16))
+        Ok(crate::placement::resolve(request, area, dpi_x as f64 / 96.0, 16))
     }
 }
 
 #[cfg(not(windows))]
 pub(crate) fn resolve_window_placement(request: &Request) -> Result<WindowPlacement, String> {
-    Ok(crate::placement::resolve(request, crate::placement::Rect { x: 0, y: 0, width: 1920, height: 1080 }, 16))
+    Ok(crate::placement::resolve(request, crate::placement::Rect { x: 0, y: 0, width: 1920, height: 1080 }, 1.0, 16))
 }
 
 pub(crate) fn position_window(window: &WebviewWindow, placement: WindowPlacement) -> Result<(), String> {
     window.set_position(PhysicalPosition::new(placement.position.x, placement.position.y)).map_err(|e| e.to_string())
 }
 
-/// `WindowPlacement` is expressed in physical pixels because it is derived
-/// from Win32 monitor rectangles. Keep the native window size in that same
-/// coordinate space; `WebviewWindowBuilder::inner_size` takes logical pixels.
+/// Native coordinates are physical, but WebView layout dimensions are logical.
 pub(crate) fn size_window(window: &WebviewWindow, placement: WindowPlacement) -> Result<(), String> {
-    window.set_size(PhysicalSize::new(placement.size.0, placement.size.1)).map_err(|e| e.to_string())
+    window.set_size(LogicalSize::new(placement.logical_size.0 as f64, placement.logical_size.1 as f64)).map_err(|e| e.to_string())
 }

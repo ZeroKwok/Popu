@@ -24,6 +24,29 @@ Tauri Host ── RequestRegistry ── request_id → WebviewWindow
 - Closing or expiring a visible request promotes queued work and reflows the notification stack.
 - Host shutdown terminalizes active requests, wakes waiters, destroys windows, and exits the process.
 
+## Window sizing and DPI
+
+Request `window.width` and `window.height`, including the dialog and notification defaults, are logical pixels. Clients must use the same values on 1080p, 2K, and 4K displays; they must not multiply dimensions by display resolution or Windows scaling.
+
+On Windows, placement keeps two coordinate spaces deliberately separate:
+
+```text
+request logical size + logical margin
+             │
+             ▼
+protocol / placement ── target monitor effective DPI ──► physical size + physical position
+             │                                                  │
+             ▼                                                  ▼
+WebView logical CSS viewport                         Win32 work area / set_position
+```
+
+- `runtime.rs` selects the target monitor, reads its effective DPI, and obtains its work area in physical pixels.
+- `placement.rs` clamps logical request dimensions against the target logical work area, then derives the physical native size, margin, and position from that monitor's scale factor.
+- `host.rs` first moves a hidden window onto the target monitor, sets its logical WebView size, and applies the computed physical position. This prevents a high-DPI display from shrinking the CSS viewport or clipping a right-aligned window.
+- Notification stack offsets are physical values derived from the same placement, so spacing remains visually consistent at different DPI scales. A stack is reflowed when a notification leaves it; periodic timer ticks and content-only updates do not overwrite a user's drag.
+
+`"100%" × "100%"` continues to fill the selected physical display area after conversion. The resulting logical viewport varies with DPI, as expected for a fullscreen window.
+
 ## Identity, coalescing, and updates
 
 `coalesce_key` is an optional live business-slot key scoped by mode. A duplicate create returns the existing ID, state, and revision without changing content. Terminalization releases the key immediately.
@@ -66,7 +89,8 @@ The internal `popu host run` command is hidden. Exit codes are 0 for success/con
 - `ipc.rs`: bounded framing and local-socket client/listener construction.
 - `host.rs`: RPC dispatch, synchronization, multi-window ownership, and UI commands.
 - `history.rs`: notification-only SQLite persistence and retention.
-- `runtime.rs`: thin platform window-placement and frameless-window helpers.
-- `protocol.rs`: versioned request/response data validation.
+- `runtime.rs`: target-monitor/DPI discovery, physical placement, and frameless-window helpers.
+- `placement.rs`: DPI-independent logical sizing plus logical-to-physical placement conversion.
+- `protocol.rs`: versioned request/response validation and logical window-dimension semantics.
 
 The Python SDK invokes the public CLI and exposes create/update/dismiss/status/wait. It does not implement a second server or a notification lifetime pipe.
