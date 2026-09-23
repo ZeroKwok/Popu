@@ -1,6 +1,6 @@
 //! Thin platform window helpers used by the persistent Host.
 
-use tauri::{PhysicalPosition, WebviewWindow};
+use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow};
 
 use crate::placement::WindowPlacement;
 use crate::protocol::{Request, Screen, ScreenArea};
@@ -91,4 +91,11 @@ pub(crate) fn resolve_window_placement(request: &Request) -> Result<WindowPlacem
 
 pub(crate) fn position_window(window: &WebviewWindow, placement: WindowPlacement) -> Result<(), String> {
     window.set_position(PhysicalPosition::new(placement.position.x, placement.position.y)).map_err(|e| e.to_string())
+}
+
+/// `WindowPlacement` is expressed in physical pixels because it is derived
+/// from Win32 monitor rectangles. Keep the native window size in that same
+/// coordinate space; `WebviewWindowBuilder::inner_size` takes logical pixels.
+pub(crate) fn size_window(window: &WebviewWindow, placement: WindowPlacement) -> Result<(), String> {
+    window.set_size(PhysicalSize::new(placement.size.0, placement.size.1)).map_err(|e| e.to_string())
 }

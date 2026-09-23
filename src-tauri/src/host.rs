@@ -215,6 +215,16 @@ fn schedule(app: &AppHandle, state: Arc<HostState>, effects: Vec<Effect>) {
 }
 
 fn apply_effects(app: &AppHandle, state: &Arc<HostState>, effects: Vec<Effect>) {
+    // New notifications are positioned as they are created. Reflow only after
+    // a notification leaves the stack, so a user's drag is not overwritten by
+    // timer ticks, content updates, or unrelated dialog activity.
+    let reflow_notifications = {
+        let registry = state.registry.lock().unwrap();
+        effects.iter().any(|effect| match effect {
+            Effect::Close(id) => registry.request(*id).is_some_and(|request| request.mode == Mode::Notify),
+            Effect::Show(_) | Effect::Update(_) => false,
+        })
+    };
     for effect in effects {
         match effect {
             Effect::Show(id) => if let Err(error) = show_window(app, state, id) { eprintln!("Popu window error: {error}"); complete_failed(app, state, id); },
@@ -226,7 +236,7 @@ fn apply_effects(app: &AppHandle, state: &Arc<HostState>, effects: Vec<Effect>) 
             Effect::Close(id) => if let Some(window) = app.get_webview_window(&id.to_string()) { let _ = window.destroy(); },
         }
     }
-    reposition_notifications(app, state);
+    if reflow_notifications { reposition_notifications(app, state); }
     update_tray_tooltip(app, state);
 }
 
@@ -249,11 +259,14 @@ fn show_window(app: &AppHandle, state: &Arc<HostState>, id: Uuid) -> Result<(), 
     if let Some(slot) = slot { placement.position.y -= slot as i32 * (placement.size.1 as i32 + 12); }
     let notify = request.mode == Mode::Notify;
     let window = WebviewWindowBuilder::new(app, id.to_string(), WebviewUrl::App("index.html".into()))
-        .title(&request.content.title).inner_size(placement.size.0 as f64, placement.size.1 as f64)
+        // The builder accepts logical pixels. Set the requested physical size
+        // immediately after construction, while the window is still hidden.
+        .title(&request.content.title).inner_size(1.0, 1.0)
         .min_inner_size(1.0, 1.0).decorations(false).transparent(true).resizable(false)
         .background_color(Color(0, 0, 0, 0))
         .always_on_top(request.window.always_on_top).skip_taskbar(notify).focused(!notify).visible(false).shadow(false)
         .build().map_err(|e| e.to_string())?;
+    runtime::size_window(&window, placement)?;
     runtime::position_window(&window, placement)?;
     #[cfg(windows)] runtime::configure_frameless_windows_window(&window, request.window.is_maximized())?;
     window.show().map_err(|e| e.to_string())?;
@@ -275,12 +288,10 @@ fn reposition_notifications(app: &AppHandle, state: &Arc<HostState>) {
 }
 
 fn start_timer(app: AppHandle, state: Arc<HostState>) {
-    std::thread::spawn(move || { let mut ticks = 0_u8; while !state.stopping.load(Ordering::SeqCst) {
+    std::thread::spawn(move || { while !state.stopping.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(100));
         let effects = { state.registry.lock().unwrap().expire_due(Instant::now()) };
         if !effects.is_empty() { for effect in &effects { if let Effect::Close(id) = effect { persist_terminal(&state, *id); } } state.changed.notify_all(); schedule(&app, Arc::clone(&state), effects); }
-        ticks = ticks.wrapping_add(1);
-        if ticks == 10 { ticks = 0; schedule(&app, Arc::clone(&state), vec![]); }
     }});
 }
 
