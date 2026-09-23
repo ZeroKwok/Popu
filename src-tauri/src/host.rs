@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use interprocess::local_socket::traits::ListenerExt as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use tauri::{window::Color, AppHandle, Manager, PhysicalPosition, RunEvent, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{window::Color, AppHandle, Emitter, Manager, PhysicalPosition, RunEvent, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use uuid::Uuid;
@@ -75,14 +75,17 @@ pub fn run() -> i32 {
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "history", "Open history", true, None::<&str>)?;
     let clear_current = MenuItem::with_id(app, "clear_current", "Clear current notifications", true, None::<&str>)?;
-    let clear_history = MenuItem::with_id(app, "clear_history", "Clear history", true, None::<&str>)?;
+    let clear_history_item = MenuItem::with_id(app, "clear_history", "Clear history", true, None::<&str>)?;
     let exit = MenuItem::with_id(app, "exit", "Exit Popu Host", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &clear_current, &clear_history, &exit])?;
+    let menu = Menu::with_items(app, &[&open, &clear_current, &clear_history_item, &exit])?;
     let tray = TrayIconBuilder::with_id("popu").menu(&menu).tooltip("Popu — 0 notifications").icon(tray::frame(tray::IDLE_FRAME));
     tray.on_menu_event(|app, event| match event.id().as_ref() {
         "history" => open_history(app),
         "clear_current" => clear_current_notifications(app),
-        "clear_history" => { let state = app.state::<Arc<HostState>>(); if let Some(history) = state.history.lock().unwrap().as_mut() { let _ = history.clear(); }; },
+        "clear_history" => {
+            let state = app.state::<Arc<HostState>>();
+            if clear_history(state.inner()).is_ok() { emit_history_changed(app); }
+        },
         "exit" => stop_from_tray(app),
         _ => {}
     }).on_tray_icon_event(|tray, event| {
@@ -102,14 +105,14 @@ fn clear_current_notifications(app: &AppHandle) {
     let mut effects = vec![];
     for id in ids {
         let result = { state.registry.lock().unwrap().dismiss(id) };
-        if let Ok(mut next) = result { effects.append(&mut next); persist_terminal(state.inner(), id); }
+        if let Ok(mut next) = result { effects.append(&mut next); persist_terminal(app, state.inner(), id); }
     }
     state.changed.notify_all(); schedule(app, state.inner().clone(), effects);
 }
 
 fn stop_from_tray(app: &AppHandle) {
     let state = app.state::<Arc<HostState>>(); state.stopping.store(true, Ordering::SeqCst);
-    let ids = state.registry.lock().unwrap().shutdown(); for id in ids { persist_terminal(state.inner(), id); }
+    let ids = state.registry.lock().unwrap().shutdown(); for id in ids { persist_terminal(app, state.inner(), id); }
     state.changed.notify_all(); app.exit(0);
 }
 
@@ -165,7 +168,7 @@ fn dispatch(rpc: RpcRequest, app: &AppHandle, state: &Arc<HostState>) -> RpcResp
             let mut registry = state.registry.lock().unwrap();
             let effects = registry.dismiss(params.request_id).map_err(|e| serde_json::to_value(e).unwrap())?;
             let snapshot = registry.snapshot(params.request_id).unwrap(); drop(registry);
-            persist_terminal(state, params.request_id);
+            persist_terminal(app, state, params.request_id);
             state.changed.notify_all(); schedule(app, Arc::clone(state), effects);
             serde_json::to_value(snapshot).map_err(invalid)
         }
@@ -190,14 +193,14 @@ fn dispatch(rpc: RpcRequest, app: &AppHandle, state: &Arc<HostState>) -> RpcResp
             serde_json::to_value(items).map_err(invalid)
         }
         "history.clear" => {
-            let mut history = state.history.lock().unwrap();
-            let count = history.as_mut().ok_or_else(|| json!({"code":"history_unavailable"}))?.clear().map_err(invalid)?;
+            let count = clear_history(state).map_err(|error| json!({"code":"history_unavailable","message":error}))?;
+            emit_history_changed(app);
             Ok(json!({"status":"cleared","count":count}))
         }
         "host.stop" => {
             state.stopping.store(true, Ordering::SeqCst);
             let ids = state.registry.lock().unwrap().shutdown(); state.changed.notify_all();
-            for id in &ids { persist_terminal(state, *id); }
+            for id in &ids { persist_terminal(app, state, *id); }
             let app = app.clone(); std::thread::spawn(move || { std::thread::sleep(Duration::from_millis(30)); let exit_app = app.clone(); let _ = app.run_on_main_thread(move || exit_app.exit(0)); });
             Ok(json!({"status":"stopping","cancelled":ids.len()}))
         }
@@ -292,7 +295,7 @@ fn start_timer(app: AppHandle, state: Arc<HostState>) {
     std::thread::spawn(move || { while !state.stopping.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(100));
         let effects = { state.registry.lock().unwrap().expire_due(Instant::now()) };
-        if !effects.is_empty() { for effect in &effects { if let Effect::Close(id) = effect { persist_terminal(&state, *id); } } state.changed.notify_all(); schedule(&app, Arc::clone(&state), effects); }
+        if !effects.is_empty() { for effect in &effects { if let Effect::Close(id) = effect { persist_terminal(&app, &state, *id); } } state.changed.notify_all(); schedule(&app, Arc::clone(&state), effects); }
     }});
 }
 
@@ -329,8 +332,10 @@ fn history_list(state: State<'_, Arc<HostState>>) -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn history_clear(state: State<'_, Arc<HostState>>) -> Result<usize, String> {
-    let mut history = state.history.lock().unwrap(); history.as_mut().ok_or("history unavailable")?.clear().map_err(|e| e.to_string())
+fn history_clear(app: AppHandle, state: State<'_, Arc<HostState>>) -> Result<usize, String> {
+    let count = clear_history(state.inner())?;
+    emit_history_changed(&app);
+    Ok(count)
 }
 
 #[tauri::command]
@@ -353,7 +358,7 @@ fn submit(window: WebviewWindow, app: AppHandle, state: State<'_, Arc<HostState>
     let response = request.submitted_response(&action, values).map_err(|e| e.to_string())?;
     let code = request.actions.iter().find(|a| a.id == action).and_then(|a| a.exit_code).map(i32::from).unwrap_or(0);
     let effects = registry.complete(id, response, code).map_err(|e| e.to_string())?; drop(registry);
-    persist_terminal(state.inner(), id);
+    persist_terminal(&app, state.inner(), id);
     state.changed.notify_all(); schedule(&app, state.inner().clone(), effects); Ok(())
 }
 
@@ -364,7 +369,7 @@ fn finish(window: WebviewWindow, app: AppHandle, state: State<'_, Arc<HostState>
     let code = action.as_deref().and_then(|id| request.actions.iter().find(|a| a.id == id)).and_then(|a| a.exit_code).map(i32::from)
         .unwrap_or(match status { ResponseStatus::Submitted | ResponseStatus::Confirmed => 0, ResponseStatus::TimedOut => 11, _ => 10 });
     let effects = registry.complete(id, response, code).map_err(|e| e.to_string())?; drop(registry);
-    persist_terminal(state.inner(), id);
+    persist_terminal(&app, state.inner(), id);
     state.changed.notify_all(); schedule(&app, state.inner().clone(), effects); Ok(())
 }
 
@@ -375,7 +380,7 @@ fn render_failed(window: WebviewWindow, app: AppHandle, state: State<'_, Arc<Hos
 
 fn complete_failed(app: &AppHandle, state: &Arc<HostState>, id: Uuid) {
     let result = { state.registry.lock().unwrap().fail(id) };
-    if let Ok(effects) = result { persist_terminal(state, id); state.changed.notify_all(); schedule(app, Arc::clone(state), effects); }
+    if let Ok(effects) = result { persist_terminal(app, state, id); state.changed.notify_all(); schedule(app, Arc::clone(state), effects); }
 }
 
 fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
@@ -385,12 +390,25 @@ fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
         let Some(request) = registry.request(id).cloned() else { return };
         if request.mode == Mode::Dialog { registry.complete(id, request.terminal_response(ResponseStatus::Closed, None), 10) } else { registry.dismiss(id) }
     };
-    if let Ok(effects) = result { persist_terminal(state.inner(), id); state.changed.notify_all(); schedule(app, state.inner().clone(), effects); }
+    if let Ok(effects) = result { persist_terminal(app, state.inner(), id); state.changed.notify_all(); schedule(app, state.inner().clone(), effects); }
 }
 
-fn persist_terminal(state: &Arc<HostState>, id: Uuid) {
-    let snapshot = state.registry.lock().unwrap().snapshot(id).ok();
-    if let (Some(snapshot), Some(history)) = (snapshot, state.history.lock().unwrap().as_mut()) {
-        if let Err(error) = history.record(&snapshot) { eprintln!("Popu history error: {error}"); }
+fn clear_history(state: &Arc<HostState>) -> Result<usize, String> {
+    let mut history = state.history.lock().unwrap();
+    history.as_mut().ok_or("history unavailable")?.clear().map_err(|error| error.to_string())
+}
+
+fn persist_terminal(app: &AppHandle, state: &Arc<HostState>, id: Uuid) {
+    let Some(snapshot) = state.registry.lock().unwrap().snapshot(id).ok() else { return };
+    if snapshot.mode != Mode::Notify || !snapshot.state.is_terminal() { return; }
+    let mut history_guard = state.history.lock().unwrap();
+    let Some(history) = history_guard.as_mut() else { return };
+    match history.record(&snapshot) {
+        Ok(()) => emit_history_changed(app),
+        Err(error) => eprintln!("Popu history error: {error}"),
     }
+}
+
+fn emit_history_changed(app: &AppHandle) {
+    let _ = app.emit_to("history", "history-changed", ());
 }

@@ -71,6 +71,8 @@ Only terminal notifications are stored in SQLite under the Popu application-data
 
 The history window is a read-only master-detail view: its left list identifies each notification by title, terminal outcome, and end time; its right pane renders the saved structured body. It never reopens a notification or recreates its controls, so viewing history cannot start a timer, alter the notification stack, or emit a business action. `expired` is shown as a timeout, `closed` as a user close, and other terminal states retain their own labels.
 
+When a terminal notification is successfully recorded, or history is successfully cleared, the Host emits a targeted `history-changed` event to the `history` webview. The window makes an initial `history_list` request and treats each event as a refresh hint, coalescing bursts and preserving the selected item when possible. No window polls the database, and an unopened history window receives no work.
+
 ## Public CLI
 
 ```text

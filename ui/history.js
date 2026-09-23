@@ -5,6 +5,9 @@ const list = document.getElementById("history-list");
 const detail = document.getElementById("history-detail");
 let items = [];
 let selectedId = null;
+let refreshTimer = null;
+let refreshing = false;
+let refreshQueued = false;
 
 const statusLabels = {
   expired: "Timed out",
@@ -105,11 +108,44 @@ function renderList() {
 }
 
 async function refresh() {
-  items = await invoke("history_list");
-  if (!items.some((item) => item.request_id === selectedId)) selectedId = items[0]?.request_id ?? null;
-  renderList();
-  renderDetail(items.find((item) => item.request_id === selectedId));
+  if (refreshing) {
+    refreshQueued = true;
+    return;
+  }
+  refreshing = true;
+  try {
+    items = await invoke("history_list");
+    if (!items.some((item) => item.request_id === selectedId)) selectedId = items[0]?.request_id ?? null;
+    renderList();
+    renderDetail(items.find((item) => item.request_id === selectedId));
+  } finally {
+    refreshing = false;
+    if (refreshQueued) {
+      refreshQueued = false;
+      queueMicrotask(() => refresh().catch(showError));
+    }
+  }
+}
+
+function showError(error) { detail.textContent = String(error); }
+
+function scheduleRefresh() {
+  if (refreshTimer !== null) return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    refresh().catch(showError);
+  }, 50);
 }
 
 document.getElementById("clear").addEventListener("click", async () => { await invoke("history_clear"); await refresh(); });
-refresh().catch((error) => { detail.textContent = String(error); });
+
+async function initialize() {
+  // Register before the first query so a tray action immediately after opening
+  // this window cannot arrive before its listener exists.
+  const historyWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
+  await historyWindow.listen("history-changed", scheduleRefresh);
+  window.addEventListener("focus", scheduleRefresh);
+  await refresh();
+}
+
+initialize().catch(showError);
