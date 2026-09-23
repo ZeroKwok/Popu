@@ -73,6 +73,8 @@ The history window is a read-only master-detail view: its left list identifies e
 
 When a terminal notification is successfully recorded, or history is successfully cleared, the Host emits a targeted `history-changed` event to the `history` webview. The window makes an initial `history_list` request and treats each event as a refresh hint, coalescing bursts and preserving the selected item when possible. No window polls the database, and an unopened history window receives no work.
 
+History metadata persists a single `needs_attention` flag. Terminal notifications other than user/application cancellation or user close set it atomically with their history record. Opening or focusing the history window, and clearing history, acknowledges it. Tray animation remains active while there are visible/queued notifications or this flag is set, so a timed-out or failed notification remains discoverable across Host restarts without requiring a tray-number badge.
+
 ## Public CLI
 
 ```text

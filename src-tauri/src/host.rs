@@ -84,20 +84,29 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         "clear_current" => clear_current_notifications(app),
         "clear_history" => {
             let state = app.state::<Arc<HostState>>();
-            if clear_history(state.inner()).is_ok() { emit_history_changed(app); }
+            if clear_history(state.inner()).is_ok() {
+                emit_history_changed(app);
+                update_tray_tooltip(app, state.inner());
+            }
         },
         "exit" => stop_from_tray(app),
         _ => {}
     }).on_tray_icon_event(|tray, event| {
         if matches!(event, TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. }) { open_history(tray.app_handle()); }
     }).build(app)?;
+    let state = app.state::<Arc<HostState>>();
+    update_tray_tooltip(app, state.inner());
     Ok(())
 }
 
 fn open_history(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("history") { let _ = window.show(); let _ = window.set_focus(); return; }
-    let _ = WebviewWindowBuilder::new(app, "history", WebviewUrl::App("history.html".into()))
-        .title("Popu notification history").inner_size(960.0, 620.0).min_inner_size(640.0, 420.0).resizable(true).build();
+    let opened = if let Some(window) = app.get_webview_window("history") {
+        if window.show().is_err() { false } else { let _ = window.set_focus(); true }
+    } else {
+        WebviewWindowBuilder::new(app, "history", WebviewUrl::App("history.html".into()))
+            .title("Popu notification history").inner_size(960.0, 620.0).min_inner_size(640.0, 420.0).resizable(true).build().is_ok()
+    };
+    if opened { acknowledge_history(app); }
 }
 
 fn clear_current_notifications(app: &AppHandle) {
@@ -195,6 +204,7 @@ fn dispatch(rpc: RpcRequest, app: &AppHandle, state: &Arc<HostState>) -> RpcResp
         "history.clear" => {
             let count = clear_history(state).map_err(|error| json!({"code":"history_unavailable","message":error}))?;
             emit_history_changed(app);
+            update_tray_tooltip(app, state);
             Ok(json!({"status":"cleared","count":count}))
         }
         "host.stop" => {
@@ -244,10 +254,9 @@ fn apply_effects(app: &AppHandle, state: &Arc<HostState>, effects: Vec<Effect>) 
 }
 
 fn update_tray_tooltip(app: &AppHandle, state: &Arc<HostState>) {
-    let count = state.registry.lock().unwrap().active_notification_count();
+    let (count, attention) = tray_status(state);
     if let Some(tray) = app.tray_by_id("popu") {
-        let label = if count > 99 { "99+".to_owned() } else { count.to_string() };
-        let _ = tray.set_tooltip(Some(format!("Popu — {label} notifications")));
+        let _ = tray.set_tooltip(Some(tray_tooltip_from_status(count, attention)));
     }
 }
 
@@ -307,7 +316,8 @@ fn start_tray_animation(app: AppHandle, state: Arc<HostState>) {
         let mut deadline = Instant::now() + interval;
         while !state.stopping.load(Ordering::SeqCst) {
             std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
-            let active = state.registry.lock().unwrap().active_notification_count() > 0;
+            let (notifications, attention) = tray_status(&state);
+            let active = notifications > 0 || attention;
             if let Some(frame) = animator.advance(active) { renderer.render(frame); }
             deadline += interval;
             if deadline < Instant::now() { deadline = Instant::now() + interval; }
@@ -335,6 +345,7 @@ fn history_list(state: State<'_, Arc<HostState>>) -> Result<Value, String> {
 fn history_clear(app: AppHandle, state: State<'_, Arc<HostState>>) -> Result<usize, String> {
     let count = clear_history(state.inner())?;
     emit_history_changed(&app);
+    update_tray_tooltip(&app, state.inner());
     Ok(count)
 }
 
@@ -384,6 +395,10 @@ fn complete_failed(app: &AppHandle, state: &Arc<HostState>, id: Uuid) {
 }
 
 fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
+    if window.label() == "history" && matches!(event, WindowEvent::Focused(true)) {
+        acknowledge_history(window.app_handle());
+        return;
+    }
     if !matches!(event, WindowEvent::CloseRequested { .. }) { return; }
     let Ok(id) = Uuid::parse_str(window.label()) else { return }; let app = window.app_handle(); let state = app.state::<Arc<HostState>>();
     let result = { let mut registry = state.registry.lock().unwrap();
@@ -396,6 +411,35 @@ fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
 fn clear_history(state: &Arc<HostState>) -> Result<usize, String> {
     let mut history = state.history.lock().unwrap();
     history.as_mut().ok_or("history unavailable")?.clear().map_err(|error| error.to_string())
+}
+
+fn acknowledge_history(app: &AppHandle) {
+    let state = app.state::<Arc<HostState>>();
+    let acknowledged = state.history.lock().unwrap().as_mut()
+        .map(|history| history.acknowledge_attention())
+        .transpose();
+    match acknowledged {
+        Ok(Some(true)) => update_tray_tooltip(app, state.inner()),
+        Ok(_) => {}
+        Err(error) => eprintln!("Popu history error: {error}"),
+    }
+}
+
+fn tray_status(state: &Arc<HostState>) -> (usize, bool) {
+    let notifications = state.registry.lock().unwrap().active_notification_count();
+    let attention = state.history.lock().unwrap().as_ref()
+        .and_then(|history| history.needs_attention().ok())
+        .unwrap_or(false);
+    (notifications, attention)
+}
+
+fn tray_tooltip_from_status(notifications: usize, attention: bool) -> String {
+    match (notifications, attention) {
+        (0, false) => "Popu — no active notifications".into(),
+        (0, true) => "Popu — notification history needs review".into(),
+        (count, false) => format!("Popu — {count} active notifications"),
+        (count, true) => format!("Popu — {count} active notifications; history needs review"),
+    }
 }
 
 fn persist_terminal(app: &AppHandle, state: &Arc<HostState>, id: Uuid) {

@@ -2,13 +2,15 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
-use crate::core::RequestSnapshot;
+use crate::core::{RequestSnapshot, RequestState};
 use crate::protocol::Mode;
 
 pub struct HistoryStore { connection: Connection }
+
+const ATTENTION_KEY: &str = "needs_attention";
 
 #[derive(Serialize)]
 pub struct HistoryItem {
@@ -34,22 +36,28 @@ impl HistoryStore {
           request_id TEXT PRIMARY KEY, state TEXT NOT NULL, revision INTEGER NOT NULL,
           content_json TEXT NOT NULL, created_at_ms INTEGER NOT NULL, shown_at_ms INTEGER,
           ended_at_ms INTEGER NOT NULL, response_json TEXT
-        ); CREATE INDEX IF NOT EXISTS notification_history_ended ON notification_history(ended_at_ms DESC);")?;
+        ); CREATE INDEX IF NOT EXISTS notification_history_ended ON notification_history(ended_at_ms DESC);
+        CREATE TABLE IF NOT EXISTS history_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        INSERT OR IGNORE INTO history_meta (key, value) VALUES ('needs_attention', '0');")?;
         Ok(Self { connection })
     }
 
     pub fn record(&mut self, snapshot: &RequestSnapshot) -> rusqlite::Result<()> {
         if snapshot.mode != Mode::Notify || !snapshot.state.is_terminal() { return Ok(()); }
-        self.connection.execute("INSERT OR REPLACE INTO notification_history
+        let transaction = self.connection.transaction()?;
+        transaction.execute("INSERT OR REPLACE INTO notification_history
           (request_id,state,revision,content_json,created_at_ms,shown_at_ms,ended_at_ms,response_json)
           VALUES (?1,?2,?3,?4,?5,?6,?7,?8)", params![snapshot.request_id.to_string(),
             serde_json::to_value(snapshot.state).unwrap().as_str().unwrap(), snapshot.revision,
             serde_json::to_string(&snapshot.content).unwrap(), millis(snapshot.created_at),
             snapshot.shown_at.map(millis), snapshot.ended_at.map(millis).unwrap_or_else(|| millis(SystemTime::now())),
             snapshot.response.as_ref().map(|v| serde_json::to_string(v).unwrap())])?;
-        self.connection.execute("DELETE FROM notification_history WHERE request_id IN
+        transaction.execute("DELETE FROM notification_history WHERE request_id IN
           (SELECT request_id FROM notification_history ORDER BY ended_at_ms DESC, rowid DESC LIMIT -1 OFFSET 500)", [])?;
-        Ok(())
+        if needs_attention(snapshot.state) {
+            transaction.execute("UPDATE history_meta SET value = '1' WHERE key = ?1", [ATTENTION_KEY])?;
+        }
+        transaction.commit()
     }
 
     pub fn list(&self) -> rusqlite::Result<Vec<HistoryItem>> {
@@ -63,7 +71,27 @@ impl HistoryStore {
         items
     }
 
-    pub fn clear(&mut self) -> rusqlite::Result<usize> { self.connection.execute("DELETE FROM notification_history", []) }
+    pub fn needs_attention(&self) -> rusqlite::Result<bool> {
+        let value = self.connection.query_row("SELECT value FROM history_meta WHERE key = ?1", [ATTENTION_KEY], |row| row.get::<_, String>(0))
+            .optional()?;
+        Ok(value.as_deref() == Some("1"))
+    }
+
+    pub fn acknowledge_attention(&mut self) -> rusqlite::Result<bool> {
+        Ok(self.connection.execute("UPDATE history_meta SET value = '0' WHERE key = ?1 AND value <> '0'", [ATTENTION_KEY])? > 0)
+    }
+
+    pub fn clear(&mut self) -> rusqlite::Result<usize> {
+        let transaction = self.connection.transaction()?;
+        let deleted = transaction.execute("DELETE FROM notification_history", [])?;
+        transaction.execute("UPDATE history_meta SET value = '0' WHERE key = ?1", [ATTENTION_KEY])?;
+        transaction.commit()?;
+        Ok(deleted)
+    }
+}
+
+fn needs_attention(state: RequestState) -> bool {
+    !matches!(state, RequestState::Cancelled | RequestState::Closed)
 }
 
 fn millis(time: SystemTime) -> i64 { time.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().min(i64::MAX as u128) as i64 }
@@ -117,5 +145,25 @@ mod tests {
         store.record(&registry.snapshot(created.request_id).unwrap()).unwrap();
 
         assert_eq!(store.list().unwrap()[0].state, "closed");
+    }
+
+    #[test]
+    fn retains_attention_only_until_history_is_acknowledged() {
+        let mut store = HistoryStore::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+        let mut registry = RequestRegistry::default();
+
+        let cancelled = Request::parse(r#"{"version":"1.0","mode":"notify","content":{"title":"Dismissed"}}"#).unwrap();
+        let (cancelled, _) = registry.create(cancelled, None);
+        registry.dismiss(cancelled.request_id).unwrap();
+        store.record(&registry.snapshot(cancelled.request_id).unwrap()).unwrap();
+        assert!(!store.needs_attention().unwrap());
+
+        let failed = Request::parse(r#"{"version":"1.0","mode":"notify","content":{"title":"Failed"}}"#).unwrap();
+        let (failed, _) = registry.create(failed, None);
+        registry.fail(failed.request_id).unwrap();
+        store.record(&registry.snapshot(failed.request_id).unwrap()).unwrap();
+        assert!(store.needs_attention().unwrap());
+        assert!(store.acknowledge_attention().unwrap());
+        assert!(!store.needs_attention().unwrap());
     }
 }
