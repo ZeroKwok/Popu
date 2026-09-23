@@ -94,7 +94,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 fn open_history(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("history") { let _ = window.show(); let _ = window.set_focus(); return; }
     let _ = WebviewWindowBuilder::new(app, "history", WebviewUrl::App("history.html".into()))
-        .title("Popu notification history").inner_size(720.0, 520.0).resizable(true).build();
+        .title("Popu notification history").inner_size(960.0, 620.0).min_inner_size(640.0, 420.0).resizable(true).build();
 }
 
 fn clear_current_notifications(app: &AppHandle) {

@@ -1,3 +1,5 @@
+import { renderReadOnlyBlocks } from "./content-renderer.js";
+
 const invoke = window.__TAURI__.core.invoke;
 
 let bootstrap;
@@ -284,7 +286,12 @@ function renderContent(content, preserveForm = false) {
     icon.textContent = { info: "i", success: "✓", warning: "!", error: "×" }[severity];
   }
   setText("title", content.title);
-  renderBlocks(content.blocks, content.vertical_align ?? "center");
+  const blocks = content.blocks ?? [];
+  if (blocks.some((block) => block.type === "form")) {
+    renderBlocks(blocks, content.vertical_align ?? "center");
+  } else {
+    renderReadOnlyBlocks(element("content"), blocks, content.vertical_align ?? "center");
+  }
   if (values) restoreValues(values);
 }
 

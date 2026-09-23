@@ -96,4 +96,26 @@ mod tests {
         assert_eq!(items.len(), 500);
         assert_eq!(items[0].content["title"], "Item 500");
     }
+
+    #[test]
+    fn preserves_the_notification_terminal_state_for_history_detail() {
+        let mut store = HistoryStore::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+        let mut registry = RequestRegistry::default();
+        let request = Request::parse(
+            r#"{"version":"1.0","mode":"notify","content":{"title":"Completed"}}"#,
+        )
+        .unwrap();
+        let (created, _) = registry.create(request, None);
+        let request = registry.request(created.request_id).unwrap().clone();
+        registry
+            .complete(
+                created.request_id,
+                request.terminal_response(crate::protocol::ResponseStatus::Closed, None),
+                10,
+            )
+            .unwrap();
+        store.record(&registry.snapshot(created.request_id).unwrap()).unwrap();
+
+        assert_eq!(store.list().unwrap()[0].state, "closed");
+    }
 }

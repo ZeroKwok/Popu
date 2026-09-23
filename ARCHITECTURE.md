@@ -67,7 +67,9 @@ Malformed JSON, unsupported versions, unknown methods, oversized frames, revisio
 
 ## History
 
-Only terminal notifications are stored in SQLite under the Popu application-data directory. Records contain the final content snapshot, revision, timestamps, terminal state, and optional response. Dialogs and form values are never persisted. Insertion prunes history to the newest 500 rows using a stable timestamp/row sequence.
+Only terminal notifications are stored in SQLite under the Popu application-data directory. Records contain the final structured content snapshot, revision, timestamps, terminal state, and optional response. Dialogs and form values are never persisted. Insertion prunes history to the newest 500 rows using a stable timestamp/row sequence.
+
+The history window is a read-only master-detail view: its left list identifies each notification by title, terminal outcome, and end time; its right pane renders the saved structured body. It never reopens a notification or recreates its controls, so viewing history cannot start a timer, alter the notification stack, or emit a business action. `expired` is shown as a timeout, `closed` as a user close, and other terminal states retain their own labels.
 
 ## Public CLI
 

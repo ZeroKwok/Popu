@@ -1,5 +1,12 @@
 <!doctype html>
 <html lang="en">
-  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Popu history</title><link rel="stylesheet" href="history.css"></head>
-  <body><header><h1>Notification history</h1><button id="clear">Clear history</button></header><main id="history" aria-live="polite"></main><script src="history.js"></script></body>
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Popu history</title><link rel="stylesheet" href="base.css"><link rel="stylesheet" href="history.css"></head>
+  <body>
+    <header><h1>Notification history</h1><button id="clear" class="popu-button popu-button-secondary">Clear history</button></header>
+    <main id="history">
+      <aside class="history-list-pane" aria-label="Notification history"><div id="history-list" role="list"></div></aside>
+      <section id="history-detail" class="popu-shell" aria-live="polite"><p class="empty">Select a notification to view its contents.</p></section>
+    </main>
+    <script type="module" src="history.js"></script>
+  </body>
 </html>
