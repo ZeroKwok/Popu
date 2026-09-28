@@ -1,5 +1,7 @@
 use crate::protocol::{Position, Request};
 
+pub const NOTIFICATION_STACK_GAP: u32 = 12;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rect {
     pub x: i32,
@@ -68,6 +70,17 @@ pub fn resolve(
         size,
         position,
     }
+}
+
+/// Returns the vertical distance needed to place a notification above all of
+/// its older visible siblings. Heights are physical pixels because native
+/// window coordinates are physical.
+pub fn notification_stack_offset(preceding_heights: impl IntoIterator<Item = u32>) -> i32 {
+    preceding_heights.into_iter().fold(0_i32, |offset, height| {
+        offset
+            .saturating_add(i32::try_from(height).unwrap_or(i32::MAX))
+            .saturating_add(NOTIFICATION_STACK_GAP as i32)
+    })
 }
 
 fn contains(rect: Rect, point: Point) -> bool {
@@ -167,5 +180,26 @@ mod tests {
         assert_eq!(placement.logical_size, (360, 180));
         assert_eq!(placement.size, (720, 360));
         assert_eq!(placement.position, Point { x: 3088, y: 1768 });
+    }
+
+    #[test]
+    fn notification_stack_offset_accounts_for_each_preceding_height() {
+        let bottom = 1_024_i32;
+        let heights = [620_u32, 180, 180];
+        let positions: Vec<_> = heights
+            .iter()
+            .enumerate()
+            .map(|(index, height)| {
+                bottom - *height as i32 - notification_stack_offset(heights[..index].iter().copied())
+            })
+            .collect();
+
+        assert_eq!(positions, [404, 212, 20]);
+        for (positions, heights) in positions.windows(2).zip(heights.windows(2)) {
+            assert_eq!(
+                positions[1] + heights[1] as i32 + NOTIFICATION_STACK_GAP as i32,
+                positions[0]
+            );
+        }
     }
 }

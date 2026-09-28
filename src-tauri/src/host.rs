@@ -15,7 +15,7 @@ use crate::core::{Effect, RequestRegistry};
 use crate::ipc::{self, RpcRequest, RpcResponse, RPC_VERSION};
 use crate::history::HistoryStore;
 use crate::protocol::{Content, Mode, Position, Request, ResponseStatus, Screen};
-use crate::runtime;
+use crate::{placement, runtime};
 use crate::templates::{self, TemplateAssets};
 use crate::tray;
 
@@ -261,14 +261,26 @@ fn update_tray_tooltip(app: &AppHandle, state: &Arc<HostState>) {
 }
 
 fn show_window(app: &AppHandle, state: &Arc<HostState>, id: Uuid) -> Result<(), String> {
-    let (mut request, template_dir, slot) = {
+    let (mut request, template_dir, preceding_notifications) = {
         let registry = state.registry.lock().unwrap();
-        (registry.request(id).cloned().ok_or("request not found")?, registry.template_dir(id).map(PathBuf::from), registry.notification_slot(id))
+        let preceding_notifications: Vec<Request> = registry.notification_slot(id).map(|slot| {
+            registry.active_notification_ids().into_iter().take(slot)
+                .filter_map(|previous_id| registry.request(previous_id).cloned())
+                .collect()
+        }).unwrap_or_default();
+        (registry.request(id).cloned().ok_or("request not found")?, registry.template_dir(id).map(PathBuf::from), preceding_notifications)
     };
     if request.mode == Mode::Notify { request.window.screen = Screen::Primary; request.position = Position::BottomRight; }
     let _template = templates::resolve(&request, template_dir.as_deref()).map_err(|e| e.to_string())?;
     let mut placement = runtime::resolve_window_placement(&request)?;
-    if let Some(slot) = slot { placement.position.y -= slot as i32 * (placement.size.1 as i32 + 12); }
+    if request.mode == Mode::Notify {
+        let preceding_heights = preceding_notifications.into_iter().map(|mut notification| {
+            notification.window.screen = Screen::Primary;
+            notification.position = Position::BottomRight;
+            runtime::resolve_window_placement(&notification).map(|placement| placement.size.1)
+        }).collect::<Result<Vec<_>, _>>()?;
+        placement.position.y = placement.position.y.saturating_sub(placement::notification_stack_offset(preceding_heights));
+    }
     let notify = request.mode == Mode::Notify;
     let window = WebviewWindowBuilder::new(app, id.to_string(), WebviewUrl::App("index.html".into()))
         // Move the hidden window to the target monitor before setting its
@@ -296,7 +308,7 @@ fn reposition_notifications(app: &AppHandle, state: &Arc<HostState>) {
     for (window, mut request, slot) in items {
         request.window.screen = Screen::Primary; request.position = Position::BottomRight;
         let _ = slot;
-        if let Ok(mut placement) = runtime::resolve_window_placement(&request) { placement.position.y -= offset; offset += placement.size.1 as i32 + 12; let _ = window.set_position(PhysicalPosition::new(placement.position.x, placement.position.y)); }
+        if let Ok(mut placement) = runtime::resolve_window_placement(&request) { placement.position.y = placement.position.y.saturating_sub(offset); offset = offset.saturating_add(placement.size.1 as i32).saturating_add(placement::NOTIFICATION_STACK_GAP as i32); let _ = window.set_position(PhysicalPosition::new(placement.position.x, placement.position.y)); }
     }
 }
 
