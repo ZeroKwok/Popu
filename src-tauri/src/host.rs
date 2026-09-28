@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Sender};
 use std::time::{Duration, Instant};
 
 use interprocess::local_socket::traits::ListenerExt as _;
@@ -24,10 +25,11 @@ pub struct HostState {
     changed: Condvar,
     stopping: AtomicBool,
     history: Mutex<Option<HistoryStore>>,
+    effect_sender: Mutex<Option<Sender<Vec<Effect>>>>,
 }
 
 impl Default for HostState {
-    fn default() -> Self { Self { registry: Mutex::new(RequestRegistry::default()), changed: Condvar::new(), stopping: AtomicBool::new(false), history: Mutex::new(HistoryStore::open_default().ok()) } }
+    fn default() -> Self { Self { registry: Mutex::new(RequestRegistry::default()), changed: Condvar::new(), stopping: AtomicBool::new(false), history: Mutex::new(HistoryStore::open_default().ok()), effect_sender: Mutex::new(None) } }
 }
 
 #[derive(Clone, Serialize)]
@@ -51,6 +53,7 @@ pub fn run() -> i32 {
         .invoke_handler(tauri::generate_handler![get_bootstrap, submit, finish, render_failed, ui_presented, history_list, history_clear])
         .on_window_event(handle_window_event)
         .setup(move |app| {
+            start_effect_worker(app.handle().clone(), Arc::clone(&state));
             start_listener(app.handle().clone(), Arc::clone(&state))?;
             build_tray(app.handle())?;
             start_timer(app.handle().clone(), Arc::clone(&state));
@@ -222,12 +225,32 @@ fn dispatch(rpc: RpcRequest, app: &AppHandle, state: &Arc<HostState>) -> RpcResp
 fn invalid(error: impl std::fmt::Display) -> Value { json!({"code":"invalid_request","message":error.to_string()}) }
 fn failure(code: &str, message: String) -> RpcResponse { RpcResponse::failure(json!({"code":code,"message":message})).unwrap() }
 
-fn schedule(app: &AppHandle, state: Arc<HostState>, effects: Vec<Effect>) {
-    let app = app.clone(); let callback_app = app.clone();
-    let _ = app.run_on_main_thread(move || apply_effects(&callback_app, &state, effects));
+fn start_effect_worker(app: AppHandle, state: Arc<HostState>) {
+    let (sender, receiver) = mpsc::channel();
+    *state.effect_sender.lock().unwrap() = Some(sender);
+    std::thread::spawn(move || {
+        while let Ok(effects) = receiver.recv() {
+            apply_effects(&app, &state, effects);
+        }
+    });
+}
+
+fn schedule(_app: &AppHandle, state: Arc<HostState>, effects: Vec<Effect>) {
+    if effects.is_empty() { return; }
+    let sender = state.effect_sender.lock().unwrap().clone();
+    if let Some(sender) = sender {
+        if sender.send(effects).is_err() { eprintln!("Popu effect worker stopped unexpectedly"); }
+    } else {
+        eprintln!("Popu effect worker is not ready");
+    }
 }
 
 fn apply_effects(app: &AppHandle, state: &Arc<HostState>, effects: Vec<Effect>) {
+    // WebView2 can synchronously pump messages while a window is being built.
+    // Running builders or destroys in an app.run_on_main_thread callback can
+    // therefore re-enter Wry while its WebContextStore mutex is held. Keep a
+    // single FIFO worker off the UI thread; Tauri dispatches each native
+    // operation to its event loop without blocking that loop re-entrantly.
     // New notifications are positioned as they are created. Reflow only after
     // a notification leaves the stack, so a user's drag is not overwritten by
     // timer ticks, content updates, or unrelated dialog activity.
