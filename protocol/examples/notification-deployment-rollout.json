@@ -1,0 +1,60 @@
+{
+  "version": "1.0",
+  "mode": "notify",
+  "template": "notification",
+  "coalesce_key": "deployment:production-east-asia",
+  "position": "bottom_right",
+  "duration_ms": 900000,
+  "window": {
+    "always_on_top": true,
+    "screen": "primary",
+    "area": "work_area",
+    "width": 620,
+    "height": 620
+  },
+  "content": {
+    "severity": "warning",
+    "title": "Production rollout is in progress",
+    "vertical_align": "start",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": "Release 2026.09.28.3 is being deployed in controlled batches. The notification is coalesced by environment, so later status updates can replace this card without creating a stack of stale notices."
+      },
+      {
+        "type": "properties",
+        "title": "Rollout snapshot",
+        "items": [
+          { "label": "Environment", "text": "production / east-asia" },
+          { "label": "Change", "text": "CHG-2026-0928" },
+          { "label": "Current batch", "text": "37 of 50 nodes" },
+          { "label": "Health checks", "text": "1,842 passed; 3 retrying" },
+          { "text": "Rollback point: snapshot prod-ea-before-2026.09.28.3" }
+        ]
+      },
+      {
+        "type": "progress",
+        "title": "Node activation",
+        "value": 74
+      },
+      {
+        "type": "unordered_list",
+        "title": "Guardrails still active",
+        "items": [
+          "Error-rate alert threshold is 0.5% over five minutes.",
+          "Payments traffic remains pinned to the previous revision.",
+          "Automatic rollback pauses the next batch if either regional probe fails."
+        ]
+      },
+      {
+        "type": "ordered_list",
+        "title": "Next milestones",
+        "items": [
+          "Complete canary validation for the final 13 nodes.",
+          "Shift 25% of payments traffic after the stability window.",
+          "Mark the change complete and retain the rollback snapshot for 24 hours."
+        ]
+      }
+    ]
+  }
+}

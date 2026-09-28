@@ -1,0 +1,55 @@
+{
+  "version": "1.0",
+  "mode": "notify",
+  "template": "notification",
+  "coalesce_key": "security:certificate:api-gateway",
+  "position": "cursor_screen_center",
+  "duration_ms": 1800000,
+  "window": {
+    "always_on_top": true,
+    "screen": "cursor",
+    "area": "work_area",
+    "width": "42%",
+    "height": 560
+  },
+  "content": {
+    "severity": "error",
+    "title": "API gateway certificate validation failed",
+    "vertical_align": "start",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": "A newly observed certificate chain cannot be validated by the production trust store. Requests are being served by the last known-good endpoint while the security response workflow is active."
+      },
+      {
+        "type": "properties",
+        "title": "Incident details",
+        "items": [
+          { "label": "Incident", "text": "SEC-2026-0918" },
+          { "label": "Endpoint", "text": "https://api.example.internal:443" },
+          { "label": "Observed at", "text": "2026-09-28T13:42:16+08:00" },
+          { "label": "Reason", "text": "issuer certificate expired at 2026-09-28T05:00:00Z" },
+          { "label": "Impact", "text": "New connections are blocked; existing pooled connections continue until rotation." }
+        ]
+      },
+      {
+        "type": "unordered_list",
+        "title": "Evidence retained",
+        "items": [
+          "SHA-256 leaf fingerprint: 3A:91:6C:0E:5D:44:7F:9B:AC:01:75:2E:11:29:6B:FE",
+          "Full peer chain and TLS handshake metadata were written to the encrypted incident bundle.",
+          "No client secret, session token, or request body is included in the captured data."
+        ]
+      },
+      {
+        "type": "ordered_list",
+        "title": "Response sequence",
+        "items": [
+          "Verify the certificate rotation record with the platform team.",
+          "Install a chain signed by an approved issuer and validate from an isolated probe.",
+          "Remove the fallback route only after two consecutive healthy checks."
+        ]
+      }
+    ]
+  }
+}

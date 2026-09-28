@@ -1,0 +1,49 @@
+{
+  "version": "1.0",
+  "mode": "notify",
+  "template": "notification",
+  "coalesce_key": "sync:catalog:shanghai",
+  "position": "bottom_right",
+  "duration_ms": 600000,
+  "window": {
+    "screen": "primary",
+    "area": "work_area",
+    "width": "38%",
+    "height": 500
+  },
+  "content": {
+    "severity": "info",
+    "title": "Catalog synchronization has pending conflicts",
+    "vertical_align": "start",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": "The Shanghai warehouse catalog is being reconciled with the central inventory service. Safe records are applied immediately; conflicting revisions are isolated for the next reconciliation pass."
+      },
+      {
+        "type": "properties",
+        "title": "Synchronization window",
+        "items": [
+          { "label": "Source", "text": "warehouse-sha-02 / inventory-v5" },
+          { "label": "Cursor", "text": "evt_01J8Z1CV1YM2AKN9T1MP4R4X7K" },
+          { "label": "Processed", "text": "18,426 of 24,000 records" },
+          { "label": "Conflicts", "text": "17 price revisions; 2 discontinued SKU updates" }
+        ]
+      },
+      {
+        "type": "progress",
+        "title": "Reconciliation progress",
+        "value": 76.775
+      },
+      {
+        "type": "unordered_list",
+        "title": "Conflict handling",
+        "items": [
+          "The central revision wins when both updates have the same logical timestamp.",
+          "Supplier cost changes are never overwritten automatically.",
+          "The next retry is scheduled for 14:00 Asia/Shanghai after the import lock expires."
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "version": "1.0",
+  "mode": "notify",
+  "template": "notification",
+  "coalesce_key": "backup:audit:daily",
+  "position": "bottom_right",
+  "duration_ms": 300000,
+  "window": {
+    "always_on_top": false,
+    "screen": "primary",
+    "area": "work_area",
+    "width": 580,
+    "height": 520
+  },
+  "content": {
+    "severity": "success",
+    "title": "Daily backup audit completed with follow-up items",
+    "vertical_align": "start",
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": "The nightly backup set is recoverable and meets the retention target. Two non-blocking housekeeping tasks were recorded so the next run stays within its copy-time objective."
+      },
+      {
+        "type": "properties",
+        "title": "Audit results",
+        "items": [
+          { "label": "Backup set", "text": "daily-2026-09-28T0200+08:00" },
+          { "label": "Protected data", "text": "3,987,421 objects / 4.82 TB" },
+          { "label": "Restore drill", "text": "Passed in 11m 38s on isolated storage" },
+          { "label": "Retention", "text": "30 daily, 12 monthly, 7 yearly recovery points" },
+          { "text": "Integrity manifest signature verified with key backup-audit-2026-q3." }
+        ]
+      },
+      {
+        "type": "progress",
+        "title": "Integrity verification",
+        "value": 100
+      },
+      {
+        "type": "ordered_list",
+        "title": "Scheduled follow-up",
+        "items": [
+          "Compact the archive index for the cold-storage tier before tomorrow's run.",
+          "Replace the expiring read-only credential before 2026-10-03.",
+          "Re-run the quarterly cross-region restore drill on the next maintenance window."
+        ]
+      }
+    ]
+  }
+}
