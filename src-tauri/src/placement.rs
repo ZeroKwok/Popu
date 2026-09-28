@@ -18,6 +18,8 @@ pub struct Point {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowPlacement {
+    /// The physical display area selected for this window.
+    pub area: Rect,
     /// The requested content size in logical pixels.
     pub logical_size: (u32, u32),
     /// The native window size in physical pixels.
@@ -66,6 +68,7 @@ pub fn resolve(
         },
     };
     WindowPlacement {
+        area,
         logical_size,
         size,
         position,
@@ -81,6 +84,12 @@ pub fn notification_stack_offset(preceding_heights: impl IntoIterator<Item = u32
             .saturating_add(i32::try_from(height).unwrap_or(i32::MAX))
             .saturating_add(NOTIFICATION_STACK_GAP as i32)
     })
+}
+
+/// Returns whether a vertically stacked notification remains fully inside its
+/// selected display area.
+pub fn notification_fits(placement: WindowPlacement) -> bool {
+    placement.position.y >= placement.area.y
 }
 
 fn contains(rect: Rect, point: Point) -> bool {
@@ -201,5 +210,24 @@ mod tests {
                 positions[0]
             );
         }
+    }
+
+    #[test]
+    fn notification_that_would_cross_the_work_area_top_does_not_fit() {
+        let area = Rect { x: 0, y: 0, width: 1920, height: 800 };
+        let first = Request::parse(
+            r#"{"version":"1.0","mode":"notify","position":"bottom_right","window":{"height":520},"content":{"title":"First"}}"#,
+        ).unwrap();
+        let next = Request::parse(
+            r#"{"version":"1.0","mode":"notify","position":"bottom_right","window":{"height":360},"content":{"title":"Next"}}"#,
+        ).unwrap();
+        let first_placement = resolve(&first, area, 1.0, 16);
+        let mut next_placement = resolve(&next, area, 1.0, 16);
+        next_placement.position.y = next_placement.position.y.saturating_sub(
+            notification_stack_offset([first_placement.size.1]),
+        );
+
+        assert!(notification_fits(first_placement));
+        assert!(!notification_fits(next_placement));
     }
 }

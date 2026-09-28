@@ -140,6 +140,21 @@ impl RequestRegistry {
         self.visible_notifications.iter().chain(self.notification_queue.iter()).copied().collect()
     }
 
+    /// Returns a notification that was provisionally marked as shown to the
+    /// FIFO queue when the host cannot fit it in the target work area.
+    pub fn defer_notification(&mut self, id: Uuid) -> Result<(), RegistryError> {
+        {
+            let record = self.records.get_mut(&id).ok_or(RegistryError::NotFound)?;
+            if record.request.mode != Mode::Notify || record.state != RequestState::Shown {
+                return Err(RegistryError::Terminal);
+            }
+            record.state = RequestState::Queued;
+        }
+        self.visible_notifications.retain(|item| *item != id);
+        self.notification_queue.push_back(id);
+        Ok(())
+    }
+
     pub fn mark_shown(&mut self, id: Uuid, now: Instant) -> Result<(), RegistryError> {
         let r = self.records.get_mut(&id).ok_or(RegistryError::NotFound)?;
         if r.state != RequestState::Shown { return Err(RegistryError::Terminal); }
@@ -274,5 +289,17 @@ mod tests {
         assert!(matches!(r.update(a.request_id, 1, content), Err(RegistryError::RevisionConflict { current_revision: 2 })));
         let start = Instant::now(); assert!(r.expire_due(start + Duration::from_secs(60)).is_empty());
         r.mark_shown(a.request_id, start).unwrap(); assert!(!r.expire_due(start + Duration::from_secs(9)).is_empty());
+    }
+    #[test]
+    fn deferring_a_notification_releases_its_visible_slot() {
+        let mut r = RequestRegistry::default();
+        let (notification, effects) = r.create(req("notify", None), None);
+        assert_eq!(effects, vec![Effect::Show(notification.request_id)]);
+
+        r.defer_notification(notification.request_id).unwrap();
+
+        assert_eq!(r.snapshot(notification.request_id).unwrap().state, RequestState::Queued);
+        assert_eq!(r.notification_slot(notification.request_id), None);
+        assert_eq!(r.active_notification_ids(), vec![notification.request_id]);
     }
 }

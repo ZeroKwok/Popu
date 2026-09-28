@@ -1073,8 +1073,8 @@ mod tests {
         for example in [
             include_str!("../../protocol/examples/dialog-short-content.json"),
             include_str!("../../protocol/examples/dialog-long-content.json"),
-            include_str!("../../protocol/examples/dialog-ultra-long-content.json"),
-            include_str!("../../protocol/examples/dialog-fullscreen-screen.json"),
+            include_str!("../../protocol/examples/fullscreen-ultra-long-content.json"),
+            include_str!("../../protocol/examples/fullscreen-screen.json"),
         ] {
             Request::parse(example).unwrap();
         }

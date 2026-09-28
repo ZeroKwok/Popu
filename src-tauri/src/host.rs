@@ -163,7 +163,19 @@ fn dispatch(rpc: RpcRequest, app: &AppHandle, state: &Arc<HostState>) -> RpcResp
             params.request.validate().map_err(invalid)?;
             params.template = params.template.map(|path| path.canonicalize()).transpose().map_err(invalid)?;
             if let Some(path) = params.template.as_deref() { templates::resolve(&params.request, Some(path)).map_err(invalid)?; }
-            let (created, effects) = state.registry.lock().unwrap().create(params.request, params.template);
+            let (created, effects) = {
+                let mut registry = state.registry.lock().unwrap();
+                let (mut created, mut effects) = registry.create(params.request, params.template);
+                if created.state == crate::core::RequestState::Shown
+                    && registry.request(created.request_id).is_some_and(|request| request.mode == Mode::Notify)
+                    && notification_fits_in_registry(&registry, created.request_id).is_ok_and(|fits| !fits)
+                {
+                    registry.defer_notification(created.request_id).map_err(invalid)?;
+                    created.state = crate::core::RequestState::Queued;
+                    effects.clear();
+                }
+                (created, effects)
+            };
             state.changed.notify_all(); schedule(app, Arc::clone(state), effects);
             serde_json::to_value(created).map_err(invalid)
         }
@@ -283,6 +295,31 @@ fn update_tray_tooltip(app: &AppHandle, state: &Arc<HostState>) {
     }
 }
 
+fn stacked_notification_request(mut request: Request) -> Request {
+    request.window.screen = Screen::Primary;
+    request.position = Position::BottomRight;
+    request
+}
+
+fn stacked_notification_placement(request: &Request, preceding: &[Request]) -> Result<placement::WindowPlacement, String> {
+    let request = stacked_notification_request(request.clone());
+    let mut placement = runtime::resolve_window_placement(&request)?;
+    let preceding_heights = preceding.iter().cloned().map(stacked_notification_request)
+        .map(|notification| runtime::resolve_window_placement(&notification).map(|placement| placement.size.1))
+        .collect::<Result<Vec<_>, _>>()?;
+    placement.position.y = placement.position.y.saturating_sub(placement::notification_stack_offset(preceding_heights));
+    Ok(placement)
+}
+
+fn notification_fits_in_registry(registry: &RequestRegistry, id: Uuid) -> Result<bool, String> {
+    let request = registry.request(id).cloned().ok_or("request not found")?;
+    if request.mode != Mode::Notify { return Ok(true); }
+    let preceding: Vec<_> = registry.notification_slot(id).into_iter().flat_map(|slot| {
+        registry.active_notification_ids().into_iter().take(slot)
+    }).filter_map(|previous_id| registry.request(previous_id).cloned()).collect();
+    Ok(placement::notification_fits(stacked_notification_placement(&request, &preceding)?))
+}
+
 fn show_window(app: &AppHandle, state: &Arc<HostState>, id: Uuid) -> Result<(), String> {
     let (mut request, template_dir, preceding_notifications) = {
         let registry = state.registry.lock().unwrap();
@@ -293,17 +330,19 @@ fn show_window(app: &AppHandle, state: &Arc<HostState>, id: Uuid) -> Result<(), 
         }).unwrap_or_default();
         (registry.request(id).cloned().ok_or("request not found")?, registry.template_dir(id).map(PathBuf::from), preceding_notifications)
     };
-    if request.mode == Mode::Notify { request.window.screen = Screen::Primary; request.position = Position::BottomRight; }
+    if request.mode == Mode::Notify { request = stacked_notification_request(request); }
     let _template = templates::resolve(&request, template_dir.as_deref()).map_err(|e| e.to_string())?;
-    let mut placement = runtime::resolve_window_placement(&request)?;
-    if request.mode == Mode::Notify {
-        let preceding_heights = preceding_notifications.into_iter().map(|mut notification| {
-            notification.window.screen = Screen::Primary;
-            notification.position = Position::BottomRight;
-            runtime::resolve_window_placement(&notification).map(|placement| placement.size.1)
-        }).collect::<Result<Vec<_>, _>>()?;
-        placement.position.y = placement.position.y.saturating_sub(placement::notification_stack_offset(preceding_heights));
-    }
+    let placement = if request.mode == Mode::Notify {
+        let placement = stacked_notification_placement(&request, &preceding_notifications)?;
+        if !placement::notification_fits(placement) {
+            state.registry.lock().unwrap().defer_notification(id).map_err(|error| error.to_string())?;
+            state.changed.notify_all();
+            return Ok(());
+        }
+        placement
+    } else {
+        runtime::resolve_window_placement(&request)?
+    };
     let notify = request.mode == Mode::Notify;
     let window = WebviewWindowBuilder::new(app, id.to_string(), WebviewUrl::App("index.html".into()))
         // Move the hidden window to the target monitor before setting its
