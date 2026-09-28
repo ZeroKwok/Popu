@@ -4,6 +4,9 @@
     "template": "notification",
     "position": "bottom_right",
     "duration_ms": 10000,
+    "window": {
+        "height": 200
+    },
     "content": {
         "severity": "success",
         "title": "Backup completed",
