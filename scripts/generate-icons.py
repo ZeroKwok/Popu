@@ -24,7 +24,9 @@ COMMITTED_PNGS = (
     (128, "128x128.png"),
     (256, "128x128@2x.png"),
 )
-ICO_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
+# Tauri decodes the first ICO frame as the default window icon on Windows.
+# Keep the largest source image first so taskbar icons remain sharp on HiDPI.
+ICO_SIZES = (256, 128, 64, 48, 40, 32, 24, 20, 16)
 SMALL_ICON_SIZES = frozenset((16, 20))
 TRAY_SIZE = 32
 TRAY_FRAMES = (

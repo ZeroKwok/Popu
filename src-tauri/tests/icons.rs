@@ -29,6 +29,8 @@ fn windows_icon_contains_all_required_frames() {
     let bytes = include_bytes!("../icons/icon.ico");
     assert_eq!(&bytes[0..4], &[0, 0, 1, 0]);
     let count = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
+    let first_width = if bytes[6] == 0 { 256 } else { bytes[6] as u16 };
+    assert_eq!(first_width, 256, "the first ICO frame is the HiDPI window icon");
     let sizes: BTreeSet<_> = (0..count).map(|index| {
         let offset = 6 + index * 16;
         let width = if bytes[offset] == 0 { 256 } else { bytes[offset] as u16 };
