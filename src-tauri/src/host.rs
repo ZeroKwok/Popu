@@ -311,29 +311,33 @@ fn stacked_notification_placement(request: &Request, preceding: &[Request]) -> R
     Ok(placement)
 }
 
+fn notification_placement_in_registry(registry: &RequestRegistry, id: Uuid) -> Result<placement::WindowPlacement, String> {
+    let request = registry.request(id).cloned().ok_or("request not found")?;
+    if request.mode != Mode::Notify { return Err("request is not a notification".into()); }
+    let preceding: Vec<_> = registry.notification_slot(id).into_iter().flat_map(|slot| {
+        registry.visible_notification_ids().into_iter().take(slot)
+    }).filter_map(|previous_id| registry.request(previous_id).cloned()).collect();
+    stacked_notification_placement(&request, &preceding)
+}
+
 fn notification_fits_in_registry(registry: &RequestRegistry, id: Uuid) -> Result<bool, String> {
     let request = registry.request(id).cloned().ok_or("request not found")?;
     if request.mode != Mode::Notify { return Ok(true); }
-    let preceding: Vec<_> = registry.notification_slot(id).into_iter().flat_map(|slot| {
-        registry.active_notification_ids().into_iter().take(slot)
-    }).filter_map(|previous_id| registry.request(previous_id).cloned()).collect();
-    Ok(placement::notification_fits(stacked_notification_placement(&request, &preceding)?))
+    Ok(placement::notification_fits(notification_placement_in_registry(registry, id)?))
 }
 
 fn show_window(app: &AppHandle, state: &Arc<HostState>, id: Uuid) -> Result<(), String> {
-    let (mut request, template_dir, preceding_notifications) = {
+    let (mut request, template_dir, notification_placement) = {
         let registry = state.registry.lock().unwrap();
-        let preceding_notifications: Vec<Request> = registry.notification_slot(id).map(|slot| {
-            registry.active_notification_ids().into_iter().take(slot)
-                .filter_map(|previous_id| registry.request(previous_id).cloned())
-                .collect()
-        }).unwrap_or_default();
-        (registry.request(id).cloned().ok_or("request not found")?, registry.template_dir(id).map(PathBuf::from), preceding_notifications)
+        let request = registry.request(id).cloned().ok_or("request not found")?;
+        let notification_placement = (request.mode == Mode::Notify)
+            .then(|| notification_placement_in_registry(&registry, id))
+            .transpose()?;
+        (request, registry.template_dir(id).map(PathBuf::from), notification_placement)
     };
     if request.mode == Mode::Notify { request = stacked_notification_request(request); }
     let _template = templates::resolve(&request, template_dir.as_deref()).map_err(|e| e.to_string())?;
-    let placement = if request.mode == Mode::Notify {
-        let placement = stacked_notification_placement(&request, &preceding_notifications)?;
+    let placement = if let Some(placement) = notification_placement {
         if !placement::notification_fits(placement) {
             state.registry.lock().unwrap().defer_notification(id).map_err(|error| error.to_string())?;
             state.changed.notify_all();
@@ -360,18 +364,21 @@ fn show_window(app: &AppHandle, state: &Arc<HostState>, id: Uuid) -> Result<(), 
     Ok(())
 }
 
-fn reposition_notifications(app: &AppHandle, state: &Arc<HostState>) {
-    let mut items: Vec<_> = app.webview_windows().into_iter().filter_map(|(label, window)| {
-        let id = Uuid::parse_str(&label).ok()?; let registry = state.registry.lock().unwrap();
-        let request = registry.request(id)?.clone(); let slot = registry.notification_slot(id)?; (request.mode == Mode::Notify).then_some((window, request, slot))
-    }).collect();
-    items.sort_by_key(|(_, _, slot)| *slot);
-    let mut offset = 0_i32;
-    for (window, mut request, slot) in items {
-        request.window.screen = Screen::Primary; request.position = Position::BottomRight;
-        let _ = slot;
-        if let Ok(mut placement) = runtime::resolve_window_placement(&request) { placement.position.y = placement.position.y.saturating_sub(offset); offset = offset.saturating_add(placement.size.1 as i32).saturating_add(placement::NOTIFICATION_STACK_GAP as i32); let _ = window.set_position(PhysicalPosition::new(placement.position.x, placement.position.y)); }
+fn reposition_notification(app: &AppHandle, state: &Arc<HostState>, id: Uuid) {
+    let placement = {
+        let registry = state.registry.lock().unwrap();
+        notification_placement_in_registry(&registry, id)
+    };
+    let Ok(placement) = placement else { return };
+    let Some(window) = app.get_webview_window(&id.to_string()) else { return };
+    if let Err(error) = window.set_position(PhysicalPosition::new(placement.position.x, placement.position.y)) {
+        eprintln!("Popu notification reflow failed for {id}: {error}");
     }
+}
+
+fn reposition_notifications(app: &AppHandle, state: &Arc<HostState>) {
+    let ids = state.registry.lock().unwrap().visible_notification_ids();
+    for id in ids { reposition_notification(app, state, id); }
 }
 
 fn start_timer(app: AppHandle, state: Arc<HostState>) {
@@ -432,7 +439,8 @@ fn ui_presented(window: WebviewWindow, state: State<'_, Arc<HostState>>) -> Resu
         registry.mark_shown(id, Instant::now()).map_err(|e| e.to_string())?;
         registry.request(id).map(|request| request.mode).ok_or("request not found")?
     };
-    if mode == Mode::Dialog { window.set_focus().map_err(|e| e.to_string())?; }
+    if mode == Mode::Notify { reposition_notification(window.app_handle(), state.inner(), id); }
+    else { window.set_focus().map_err(|e| e.to_string())?; }
     state.changed.notify_all(); Ok(())
 }
 

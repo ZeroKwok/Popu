@@ -136,6 +136,7 @@ impl RequestRegistry {
     pub fn template_dir(&self, id: Uuid) -> Option<&Path> { self.records.get(&id)?.template_dir.as_deref() }
     pub fn active_notification_count(&self) -> usize { self.visible_notifications.len() + self.notification_queue.len() }
     pub fn notification_slot(&self, id: Uuid) -> Option<usize> { self.visible_notifications.iter().position(|item| *item == id) }
+    pub fn visible_notification_ids(&self) -> Vec<Uuid> { self.visible_notifications.iter().copied().collect() }
     pub fn active_notification_ids(&self) -> Vec<Uuid> {
         self.visible_notifications.iter().chain(self.notification_queue.iter()).copied().collect()
     }
@@ -272,6 +273,17 @@ mod tests {
         let notifications: Vec<_> = (0..4).map(|_| r.create(req("notify", None), None).0).collect();
         assert_eq!(notifications[2].state, RequestState::Shown); assert_eq!(notifications[3].state, RequestState::Queued);
         assert!(r.dismiss(d1.request_id).unwrap().contains(&Effect::Show(d2.request_id)));
+    }
+    #[test]
+    fn closing_the_bottom_notification_promotes_fifo_and_reindexes_visible_slots() {
+        let mut r = RequestRegistry::default();
+        let notifications: Vec<_> = (0..4).map(|_| r.create(req("notify", None), None).0).collect();
+
+        let effects = r.dismiss(notifications[0].request_id).unwrap();
+
+        assert_eq!(effects, vec![Effect::Close(notifications[0].request_id), Effect::Show(notifications[3].request_id)]);
+        assert_eq!(r.visible_notification_ids(), notifications[1..].iter().map(|notification| notification.request_id).collect::<Vec<_>>());
+        assert_eq!(r.notification_slot(notifications[1].request_id), Some(0));
     }
     #[test]
     fn coalesce_is_mode_scoped_and_released_at_terminal() {
