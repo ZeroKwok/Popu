@@ -353,14 +353,19 @@ function renderActions(actions) {
   }
 }
 
+function hasScrollableOverflow(container) {
+  return container.scrollHeight > container.clientHeight
+    || container.scrollWidth > container.clientWidth;
+}
+
 function isScrollableContent(target) {
   const container = target.closest("[data-popu-scrollable]");
   if (!container) return false;
 
   // A short dialog's body still fills the card, but its visual whitespace is
-  // background and should drag. Once content overflows, scrolling takes
-  // priority everywhere in that body, including the scrollbar track.
-  return container.scrollHeight > container.clientHeight;
+  // background and should drag. Once either axis overflows, scrolling takes
+  // priority everywhere in that body, including either scrollbar track.
+  return hasScrollableOverflow(container);
 }
 
 function installDragRegions() {

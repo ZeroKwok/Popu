@@ -60,19 +60,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   box-shadow: 0 3px 8px rgba(0, 0, 0, .22);
 }
 
-.popu-heading { display: flex; flex: 0 0 auto; gap: 12px; align-items: flex-start; }
+.popu-heading { display: flex; flex: 0 0 auto; min-width: 0; gap: 12px; align-items: flex-start; }
 .popu-icon { width: 28px; height: 28px; flex: 0 0 auto; border-radius: 50%; display: grid; place-items: center; font-weight: 700; }
 .popu-icon[data-severity="info"] { color: #1d5fd0; background: #e8f0ff; }
 .popu-icon[data-severity="success"] { color: #087a3e; background: #e4f6ec; }
 .popu-icon[data-severity="warning"] { color: #8a5700; background: #fff2d1; }
 .popu-icon[data-severity="error"] { color: #b42318; background: #fee9e7; }
-.popu-title { margin: 1px 0 0; font-size: 18px; line-height: 1.35; font-weight: 650; }
-.popu-body { display:flex; flex:1 1 auto; flex-direction:column; min-height:0; overflow:auto; overscroll-behavior:contain; }
-.popu-content { display:grid; flex:none; width:100%; gap:14px; margin:12px 0 14px; color:#525866; }
+.popu-title { min-width:0; margin: 1px 0 0; font-size: 18px; line-height: 1.35; font-weight: 650; overflow-wrap:anywhere; }
+.popu-body { display:flex; flex:1 1 auto; flex-direction:column; min-width:0; min-height:0; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; }
+.popu-content { display:grid; flex:none; min-width:0; gap:14px; margin:12px 0 14px; color:#525866; }
 .popu-content[data-popu-vertical-align="center"] { margin-block:auto; padding-block:12px 14px; }
+.popu-block { min-width:0; }
 .popu-block-title { margin:0 0 6px; font-size:13px; }
 .popu-paragraph { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
-.popu-properties { display:grid; grid-template-columns:minmax(88px,auto) 1fr; gap:6px 14px; }
+.popu-properties { display:grid; min-width:0; grid-template-columns:minmax(88px,auto) minmax(0,1fr); gap:6px 14px; }
 .popu-property-label { grid-column:1; color:#777e8b; }
 .popu-property-text { grid-column:2; }
 .popu-property-text,.popu-list-item { overflow-wrap:anywhere; white-space:pre-wrap; }
@@ -94,8 +95,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .popu-button-secondary { color: #252a34; background: #edf0f5; }
 .popu-button-danger { color: #fff; background: #d92d20; }
 .popu-close { position: absolute; right: 13px; top: 10px; border: 0; background: transparent; color: #777e8b; font-size: 20px; cursor: pointer; }
-.popu-progress-row { display: flex; align-items: center; gap: 10px; }
-.popu-progress { width: 100%; min-width: 0; }
+.popu-progress-row { display: flex; min-width:0; align-items: center; gap: 10px; }
+.popu-progress { flex:1 1 0; width:auto; min-width:0; }
 .popu-progress-value { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
 
 @media (prefers-color-scheme: dark) {
