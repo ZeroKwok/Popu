@@ -38,30 +38,18 @@ cli executable request:
 test file="dialog-confirm.json": build
     just --quiet cli "src-tauri/target/debug/popu" "protocol/examples/{{file}}"
 
-# Build the debug executable, then run a protocol fixture.
-build-test file="dialog-confirm.json": build
-    just --quiet cli "src-tauri/target/debug/popu" "protocol/examples/{{file}}"
-
-# Build the release executable, then run a protocol fixture.
-build-test-release file="dialog-confirm.json": build-release
-    just --quiet cli "src-tauri/target/release/popu" "protocol/examples/{{file}}"
-
-# Build the release executable, then run a protocol fixture.
-install: build-release
-    #!/usr/bin/env bash
-    cp -v ./src-tauri/target/release/popu.exe /g/Local/bin/
-
-# Build once, then run every protocol fixture in filename order. Each request
-# waits for Popu to exit before the next fixture starts.
-build-test-all: build
+# Build once, then run protocol fixtures whose filenames begin with `prefix`.
+# For example: `just build-test notification` or `just build-test dialog`.
+build-test prefix="": build
     #!/usr/bin/env bash
     set -euo pipefail
     shopt -s nullglob
-    examples=(protocol/examples/*.json)
+    prefix="{{prefix}}"
+    examples=(protocol/examples/"$prefix"*.json)
     executable=src-tauri/target/debug/popu
     
     if (( ${#examples[@]} == 0 )); then
-        echo "No protocol examples found in protocol/examples" >&2
+        echo "No protocol examples found for prefix: $prefix" >&2
         exit 1
     fi
     for example in "${examples[@]}"; do
@@ -76,3 +64,16 @@ build-test-all: build
             *) exit "$status" ;;
         esac
     done
+
+# Build the release executable, then run a protocol fixture.
+build-test-release file="dialog-confirm.json": build-release
+    just --quiet cli "src-tauri/target/release/popu" "protocol/examples/{{file}}"
+
+# Build the release executable, then run a protocol fixture.
+install: build-release
+    #!/usr/bin/env bash
+    cp -v ./src-tauri/target/release/popu.exe /g/Local/bin/
+
+# Run every protocol fixture through the shared prefix-based entry point.
+build-test-all:
+    just build-test
