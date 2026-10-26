@@ -19,7 +19,8 @@
           "encoding": {
             "x": { "field": "session", "type": "ordinal", "sort": ["AM","Noon","PM"], "axis": { "title": null, "labelAngle": 0 } },
             "y": { "field": "sector", "type": "nominal", "axis": { "title": null } },
-            "color": { "field": "change", "type": "quantitative", "scale": { "scheme": "redblue", "domain": [-2,2] }, "legend": { "title": "%" } }
+            "color": { "field": "change", "type": "quantitative", "scale": { "scheme": "redblue", "domain": [-2,2] }, "legend": { "title": "%" } },
+            "tooltip": [{ "field": "sector", "type": "nominal", "title": "Sector" }, { "field": "session", "type": "ordinal", "title": "Session" }, { "field": "change", "type": "quantitative", "title": "Change (%)", "format": "+.2f" }]
           }
         }
       }

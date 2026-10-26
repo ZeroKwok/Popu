@@ -3,8 +3,8 @@ import { readFile, readdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const result = await build({
-  entryPoints: ["scripts/chart-worker.js"],
-  outfile: "ui/vendor/chart-worker.js",
+  entryPoints: ["scripts/chart-worker.js", "scripts/chart-runtime.js"],
+  outdir: "ui/vendor",
   bundle: true,
   format: "esm",
   platform: "browser",

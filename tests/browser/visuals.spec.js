@@ -18,6 +18,7 @@ async function mockHost(page, fixture, history = [], foreground = true) {
     window.__failed = null;
     window.__historyForeground = foreground;
     window.__detailRequests = [];
+    window.__dragStarts = 0;
     window.__TAURI__ = {
       core: { invoke: async (command, args) => {
         if (command === "get_bootstrap") return { request: fixture, template, maximized: false };
@@ -31,7 +32,7 @@ async function mockHost(page, fixture, history = [], foreground = true) {
         if (command === "finish") return;
         throw new Error(`Unexpected command: ${command}`);
       } },
-      window: { getCurrentWindow: () => ({ startDragging: async () => {} }) },
+      window: { getCurrentWindow: () => ({ startDragging: async () => { window.__dragStarts++; } }) },
       webviewWindow: { getCurrentWebviewWindow: () => ({ listen: async () => () => {}, onFocusChanged: async (callback) => { window.__focusCallback = callback; return () => {}; } }) },
     };
   }, { fixture, template, history, foreground });
@@ -49,9 +50,13 @@ for (const name of examples) {
     await page.goto("/index.html");
     await expect.poll(() => page.evaluate(() => window.__presented || window.__failed)).toBe(true);
     expect(await page.evaluate(() => window.__failed)).toBeNull();
-    const images = page.locator(".popu-visual img");
-    await expect(images).toHaveCount(1);
-    expect(await images.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0))).toBe(true);
+    if (fixture.content.blocks.some((block) => block.type === "chart")) {
+      await expect(page.locator('.popu-chart[data-ready="true"] svg')).toHaveCount(fixture.content.blocks.filter((block) => block.type === "chart").length);
+    } else {
+      const images = page.locator(".popu-visual img");
+      await expect(images).toHaveCount(1);
+      expect(await images.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0))).toBe(true);
+    }
     expect(await page.locator(".popu-body").evaluate((body) => body.scrollWidth <= body.clientWidth)).toBe(true);
     expect(violations).toEqual([]);
     expect(network).toEqual([]);
@@ -74,7 +79,7 @@ test("history waits for chart rendering before marking only the selected item re
   await mockHost(page, fixture, items);
   await page.goto("/history.html");
   await expect.poll(() => page.evaluate(() => window.__reads)).toEqual(["0"]);
-  await expect(page.locator("#history-detail .popu-visual img")).toHaveJSProperty("complete", true);
+  await expect(page.locator('#history-detail .popu-chart[data-ready="true"] svg')).toBeVisible();
   await expect(page.locator(".history-item[data-unread]")).toHaveCount(1);
   await expect(page.locator(".history-severity-icon")).toHaveCount(2);
   await page.screenshot({ path: testInfo.outputPath("history.png") });
@@ -86,18 +91,19 @@ test("updating a chart preserves entered form values", async ({ page }) => {
   await page.goto("/index.html");
   await expect.poll(() => page.evaluate(() => window.__presented)).toBe(true);
   await page.getByLabel("I have reviewed these measurements").check();
-  const previous = await page.locator(".popu-visual img").getAttribute("src");
+  const previous = await page.locator(".popu-chart svg").evaluate((svg) => svg.outerHTML);
   const content = structuredClone(fixture.content);
   content.blocks[1].spec.data.values[0].ms = 200;
   await page.evaluate((content) => window.popuApplyUpdate(content), content);
   await expect(page.getByLabel("I have reviewed these measurements")).toBeChecked();
-  await expect.poll(() => page.locator(".popu-visual img").getAttribute("src")).not.toBe(previous);
-  await expect.poll(() => page.locator(".popu-visual img").evaluate((image) => image.complete && image.naturalWidth > 0)).toBe(true);
+  await expect(page.locator('.popu-chart[data-ready="true"] svg')).toBeVisible();
+  expect(await page.locator(".popu-chart svg").evaluate((svg) => svg.outerHTML)).not.toBe(previous);
   expect(await page.evaluate(() => window.__failed)).toBeNull();
 });
 
 test("a semantically invalid chart reports a render failure instead of starting the timer", async ({ page }) => {
   const fixture = readJson("protocol/examples/notification-visual-line.json");
+  delete fixture.content.blocks[1].spec.layer;
   fixture.content.blocks[1].spec.mark = "not-a-mark";
   await mockHost(page, fixture);
   await page.goto("/index.html");
@@ -109,9 +115,114 @@ test("cached background history is acknowledged on focus without reloading its g
   const fixture = readJson("protocol/examples/notification-visual-line.json");
   await mockHost(page, fixture, [{ request_id: "0", state: "expired", revision: 1, content: fixture.content, ended_at_ms: 1000, read_at_ms: null, requires_read: true }], false);
   await page.goto("/history.html");
-  await expect.poll(() => page.locator(".popu-visual img").evaluate((image) => image.complete && image.naturalWidth > 0)).toBe(true);
+  await expect(page.locator('.popu-chart[data-ready="true"] svg')).toBeVisible();
   expect(await page.evaluate(() => window.__reads)).toEqual([]);
   await page.evaluate(() => { window.__focusCallback({ payload: false }); window.__historyForeground = true; window.__focusCallback({ payload: true }); });
   await expect.poll(() => page.evaluate(() => window.__reads)).toEqual(["0"]);
   expect(await page.evaluate(() => window.__detailRequests)).toEqual(["0"]);
+});
+
+test("bar tooltips show formatted values, stay out of window dragging and are disposed on update", async ({ page }, testInfo) => {
+  const fixture = readJson("protocol/examples/dialog-visual-bars.json");
+  await mockHost(page, fixture);
+  await page.goto("/index.html");
+  await expect(page.locator('.popu-chart[data-ready="true"]')).toBeVisible();
+  const gateway = page.locator('.popu-chart path[aria-label*="Gateway"]').first();
+  await gateway.hover();
+  const tip = page.getByRole("tooltip");
+  await expect(tip).toBeVisible();
+  await expect(tip).toContainText("Gateway");
+  await expect(tip).toContainText("42.0");
+  await page.screenshot({ path: testInfo.outputPath("bar-tooltip.png") });
+  await gateway.click();
+  expect(await page.evaluate(() => window.__dragStarts)).toBe(0);
+  const content = structuredClone(fixture.content);
+  content.blocks[1].spec.data.values[0].ms = 200;
+  await page.evaluate((content) => window.popuApplyUpdate(content), content);
+  await expect(page.locator('.popu-chart[data-ready="true"]')).toBeVisible();
+  await expect(page.locator(".popu-chart-tooltip")).toHaveCount(1);
+  await page.locator('.popu-chart path[aria-label*="Gateway"]').first().hover();
+  await expect(page.getByRole("tooltip")).toContainText("200.0");
+  await page.mouse.move(0, 0);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+});
+
+test("heatmap hover shows the cell coordinates and formatted value within the window", async ({ page }, testInfo) => {
+  const fixture = readJson("protocol/examples/notification-visual-heatmap.json");
+  await page.setViewportSize({ width: 460, height: 420 });
+  await mockHost(page, fixture);
+  await page.goto("/index.html");
+  await page.locator('.popu-chart path[aria-label*="Tech"][aria-label*="AM"]').first().hover();
+  const tip = page.getByRole("tooltip");
+  await expect(tip).toBeVisible();
+  await expect(tip).toContainText("Tech");
+  await expect(tip).toContainText("AM");
+  await expect(tip).toContainText("+1.20");
+  const bounds = await tip.boundingBox();
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.y).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(460);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(420);
+  await page.screenshot({ path: testInfo.outputPath("heatmap-tooltip.png") });
+});
+
+test("line hover finds the nearest point without requiring an exact point hit", async ({ page }, testInfo) => {
+  const fixture = readJson("protocol/examples/notification-visual-line.json");
+  await page.setViewportSize({ width: 440, height: 400 });
+  await mockHost(page, fixture);
+  await page.goto("/index.html");
+  const point = page.locator('.popu-chart .mark-symbol path[aria-label*="10:30"]').first();
+  const bounds = await point.boundingBox();
+  await page.mouse.move(bounds.x + bounds.width / 2 + 12, bounds.y + bounds.height / 2);
+  await expect(page.getByRole("tooltip")).toContainText("10:30");
+  await expect(page.getByRole("tooltip")).toContainText("801.00");
+  await page.screenshot({ path: testInfo.outputPath("nearest-tooltip.png") });
+});
+
+test("declarative legend selection changes mark emphasis", async ({ page }) => {
+  const fixture = readJson("protocol/examples/dialog-visual-bars.json");
+  const spec = fixture.content.blocks[1].spec;
+  spec.params = [{ name: "series", select: { type: "point", fields: ["service"] }, bind: "legend" }];
+  spec.encoding.color = { field: "service", type: "nominal" };
+  spec.encoding.opacity = { condition: { param: "series", value: 1 }, value: 0.2 };
+  await mockHost(page, fixture);
+  await page.goto("/index.html");
+  await page.locator(".popu-chart .role-legend-label text").filter({ hasText: "Gateway" }).click();
+  await expect.poll(() => page.locator(".popu-chart .mark-rect.role-mark path").evaluateAll((paths) => paths.map((path) => path.getAttribute("opacity")))).toContain("0.2");
+});
+
+test("declarative scale binding supports wheel zoom", async ({ page }) => {
+  const fixture = readJson("protocol/examples/dialog-visual-bars.json");
+  fixture.content.blocks[1].spec = {
+    data: { values: [{ x: 1, y: 3 }, { x: 2, y: 1 }, { x: 3, y: 5 }] },
+    mark: "point", params: [{ name: "viewport", select: "interval", bind: "scales" }],
+    encoding: { x: { field: "x", type: "quantitative" }, y: { field: "y", type: "quantitative" } },
+  };
+  await mockHost(page, fixture);
+  await page.goto("/index.html");
+  await expect(page.locator('.popu-chart[data-ready="true"]')).toBeVisible();
+  const labels = page.locator(".popu-chart .role-axis-label text");
+  const previous = await labels.allTextContents();
+  await page.locator(".popu-chart svg").hover();
+  await page.mouse.wheel(0, -300);
+  await expect.poll(() => labels.allTextContents()).not.toEqual(previous);
+});
+
+test("tooltip content is text, never executable HTML", async ({ page }) => {
+  const fixture = readJson("protocol/examples/dialog-visual-bars.json");
+  fixture.content.blocks[1].spec.data.values = [{ service: "<img src=x onerror=alert(1)>", ms: 10 }];
+  await mockHost(page, fixture);
+  await page.goto("/index.html");
+  await page.locator(".popu-chart .mark-rect.role-mark path").hover();
+  await expect(page.getByRole("tooltip")).toContainText("<img src=x onerror=alert(1)>");
+  await expect(page.locator(".popu-chart-tooltip img")).toHaveCount(0);
+});
+
+test("explicitly disabled tooltips stay disabled", async ({ page }) => {
+  const fixture = readJson("protocol/examples/dialog-visual-bars.json");
+  fixture.content.blocks[1].spec.encoding.tooltip = null;
+  await mockHost(page, fixture);
+  await page.goto("/index.html");
+  await page.locator(".popu-chart .mark-rect.role-mark path").first().hover();
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
 });

@@ -12,10 +12,18 @@
         "spec": {
           "description": "Illustrative gold prices from 09:30 to 11:30",
           "data": { "values": [{"time":"09:30","price":800},{"time":"10:00","price":803},{"time":"10:30","price":801},{"time":"11:00","price":805},{"time":"11:30","price":804}] },
-          "mark": { "type": "line", "point": true, "color": "#cf9515" },
+          "layer": [
+            { "mark": { "type": "line", "color": "#cf9515", "tooltip": false } },
+            {
+              "params": [{ "name": "hoverPoint", "select": { "type": "point", "fields": ["time"], "nearest": true, "on": "pointerover", "clear": "pointerout" } }],
+              "mark": { "type": "point", "filled": true, "color": "#cf9515" },
+              "encoding": { "size": { "condition": { "param": "hoverPoint", "empty": false, "value": 100 }, "value": 35 } }
+            }
+          ],
           "encoding": {
             "x": { "field": "time", "type": "ordinal", "axis": { "title": null, "labelAngle": 0 } },
-            "y": { "field": "price", "type": "quantitative", "scale": { "zero": false }, "axis": { "title": "CNY / g" } }
+            "y": { "field": "price", "type": "quantitative", "scale": { "zero": false }, "axis": { "title": "CNY / g" } },
+            "tooltip": [{ "field": "time", "type": "ordinal", "title": "Time" }, { "field": "price", "type": "quantitative", "title": "Price (CNY/g)", "format": ".2f" }]
           }
         }
       }

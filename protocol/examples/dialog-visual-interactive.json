@@ -1,0 +1,42 @@
+{
+  "version": "1.0", "mode": "dialog", "template": "confirm",
+  "window": { "width": 840, "height": 740 },
+  "content": {
+    "severity": "info", "title": "Interactive chart reading aids", "vertical_align": "start",
+    "blocks": [
+      { "type": "paragraph", "text": "Hover to inspect exact values. Click a legend entry to emphasize that series. In the second chart, use the wheel to zoom and drag to pan." },
+      {
+        "type": "chart", "engine": "vega_lite", "title": "Legend selection", "height": 230,
+        "spec": {
+          "data": { "values": [
+            {"day":"Mon","service":"API","ms":42},{"day":"Tue","service":"API","ms":60},{"day":"Wed","service":"API","ms":48},
+            {"day":"Mon","service":"Sync","ms":78},{"day":"Tue","service":"Sync","ms":65},{"day":"Wed","service":"Sync","ms":82}
+          ] },
+          "params": [{ "name": "series", "select": { "type": "point", "fields": ["service"] }, "bind": "legend" }],
+          "mark": { "type": "line", "point": true },
+          "encoding": {
+            "x": { "field": "day", "type": "ordinal", "sort": ["Mon","Tue","Wed"], "axis": { "labelAngle": 0, "title": null } },
+            "y": { "field": "ms", "type": "quantitative", "title": "Latency (ms)" },
+            "color": { "field": "service", "type": "nominal", "title": "Click to emphasize" },
+            "opacity": { "condition": { "param": "series", "value": 1 }, "value": 0.2 },
+            "tooltip": [{ "field": "service", "title": "Service" }, { "field": "day", "title": "Day" }, { "field": "ms", "type": "quantitative", "title": "Latency (ms)", "format": ".1f" }]
+          }
+        }
+      },
+      {
+        "type": "chart", "engine": "vega_lite", "title": "Wheel zoom and drag pan", "height": 230,
+        "spec": {
+          "data": { "values": [{"load":10,"ms":22},{"load":20,"ms":28},{"load":30,"ms":31},{"load":40,"ms":48},{"load":50,"ms":65},{"load":60,"ms":70},{"load":70,"ms":95}] },
+          "params": [{ "name": "viewport", "select": "interval", "bind": "scales" }],
+          "mark": { "type": "point", "filled": true, "size": 70 },
+          "encoding": {
+            "x": { "field": "load", "type": "quantitative", "title": "Load (%)" },
+            "y": { "field": "ms", "type": "quantitative", "title": "Latency (ms)" },
+            "tooltip": [{ "field": "load", "type": "quantitative", "title": "Load (%)" }, { "field": "ms", "type": "quantitative", "title": "Latency (ms)" }]
+          }
+        }
+      }
+    ]
+  },
+  "actions": [{ "id": "close", "label": "Close", "result_status": "confirmed" }]
+}

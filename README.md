@@ -98,7 +98,11 @@ dialog、notification 和历史详情共用渲染器。`content.icon` 可提供 
 
 图片块使用 `{ "type": "image", "source": { "src": "data:image/svg+xml;base64,...", "alt": "说明" }, "caption": "可选说明", "height": 240 }`。支持 SVG、PNG、JPEG 和 WebP；资源必须内嵌，不能使用本地路径或远程 URL。SVG 作为图片加载，支持静态样式、渐变和本地片段引用，不支持脚本、事件或外部资源。图片自动保持比例并限制在可用宽度内，`height` 是图片显示高度上限。
 
-图表块使用 `{ "type": "chart", "engine": "vega_lite", "spec": { ... }, "height": 220 }`。`spec` 是 Vega-Lite 6 配置，折线、柱状、热力、分层等图形共用同一个协议类型；数据通过 `data.values` 或内嵌 `datasets` 提供。`height` 是图表总显示高度，宽度随首次渲染时的容器确定，最终图片可随容器缩放；图表以静态 SVG 展示，不提供悬停工具提示、缩放或点击交互。修改完整 `content` 可以更新数据与图表。图表在独立工作线程内生成，5 秒超时；使用 CSP 兼容解释器，不开启 `unsafe-eval`。
+图表块使用 `{ "type": "chart", "engine": "vega_lite", "spec": { ... }, "height": 220 }`。`spec` 是 Vega-Lite 6 配置，折线、柱状、热力、分层等图形共用同一个协议类型；数据通过 `data.values` 或内嵌 `datasets` 提供。`height` 是图表总显示高度，宽度随容器变化重新排版。图表使用交互 SVG，默认悬停显示编码字段的具体值；通过 `encoding.tooltip` 配置字段、标题和数值格式，设为 `null` 或 `mark.tooltip: false` 可关闭提示。
+
+Vega-Lite 的 `spec.params` 可声明悬停高亮、最近点、图例选择以及绑定坐标轴的缩放和平移。Popu 不自动把所有图表变成可缩放图表；这些行为由配置决定，不需要新增协议字段。图表区域不会触发窗口拖拽，提示框保持在窗口范围内，并适配明暗主题。更新或切换历史条目时会销毁旧图表、事件和提示框。交互状态用于本次辅助阅读，不改变请求结果，也不回写历史数据；通知仍按 `duration_ms` 到期，需要长时间探索时可打开历史。
+
+修改完整 `content` 可以更新数据与图表并保留 dialog 表单输入。配置编译在独立工作线程中进行，5 秒超时；页面中的本地 Vega 运行实例负责 SVG 绘制和交互，使用 CSP 兼容解释器，不开启 `unsafe-eval`，不从网络加载资源。`image` 块仍作为静态图片展示。
 
 默认图片高度上限为 320，默认图表高度为 220，可设置范围为 64–1200。单张图片 data URI 不超过 256 KiB，栅格图片每边最多 4096 像素；图表配置不超过 128 KiB，嵌套不超过 32 层，配置节点不超过 20000；完整 content 不超过 768 KiB。SVG 节点最多 10000。图表配置禁止 `url`、`href` 属性，数据及资源不从网络加载。图片和图表就绪后才开始通知计时；历史详情就绪后才提交已读。
 
@@ -112,6 +116,7 @@ dialog、notification 和历史详情共用渲染器。`content.icon` 可提供 
 | `dialog-visual-bars.json` | 柱状图与必填确认表单 |
 | `dialog-visual-heatmap.json` | 热力图叠加数字标签 |
 | `dialog-visual-image.json` | 自定义图标、图片与属性说明 |
+| `dialog-visual-interactive.json` | 图例选择、悬停取值、滚轮缩放与拖动平移 |
 
 ```powershell
 just test notification-visual-line.json

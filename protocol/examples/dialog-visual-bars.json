@@ -10,9 +10,12 @@
         "spec": {
           "data": { "values": [{"service":"Gateway","ms":42},{"service":"Sync","ms":115},{"service":"Backup","ms":78},{"service":"History","ms":26}] },
           "mark": { "type": "bar", "color": "#377dff", "cornerRadiusTopLeft": 4, "cornerRadiusTopRight": 4 },
+          "params": [{ "name": "barHover", "select": { "type": "point", "fields": ["service"], "on": "pointerover", "clear": "pointerout" } }],
           "encoding": {
             "x": { "field": "service", "type": "nominal", "axis": { "title": null, "labelAngle": 0 } },
-            "y": { "field": "ms", "type": "quantitative", "axis": { "title": "Latency (ms)" } }
+            "y": { "field": "ms", "type": "quantitative", "axis": { "title": "Latency (ms)" } },
+            "opacity": { "condition": { "param": "barHover", "value": 1 }, "value": 0.35 },
+            "tooltip": [{ "field": "service", "type": "nominal", "title": "Service" }, { "field": "ms", "type": "quantitative", "title": "Latency (ms)", "format": ".1f" }]
           }
         }
       },

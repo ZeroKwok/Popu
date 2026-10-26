@@ -168,7 +168,7 @@ mod tests {
             assert_eq!(serde_json::to_value(snapshot.content).unwrap(), serde_json::to_value(content).unwrap());
             count += 1;
         }
-        assert_eq!(count, 6);
+        assert_eq!(count, 7);
     }
 }
 

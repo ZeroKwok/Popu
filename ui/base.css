@@ -77,6 +77,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .popu-visual { display: grid; min-width: 0; gap: 6px; margin: 0; }
 .popu-visual img { display: block; max-width: 100%; width: 100%; height: auto; object-fit: contain; object-position: left center; }
 .popu-visual figcaption { color: inherit; font-size: 12px; overflow-wrap: anywhere; }
+.popu-chart { position: relative; width: 100%; min-width: 0; }
+.popu-chart svg { display: block; max-width: 100%; height: auto; }
+.popu-chart-tooltip { position: fixed; z-index: 10000; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; max-width: min(320px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: hidden; padding: 9px 12px; border: 1px solid #c9ced8; border-radius: 7px; background: #fff; color: #202124; box-shadow: 0 3px 12px #0003; font-size: 12px; line-height: 1.4; pointer-events: none; }
+.popu-chart-tooltip strong, .popu-chart-tooltip span { overflow-wrap: anywhere; white-space: pre-wrap; }
 .popu-paragraph { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
 .popu-properties { display:grid; min-width:0; grid-template-columns:minmax(88px,auto) minmax(0,1fr); gap:6px 14px; }
 .popu-property-label { grid-column:1; color:#777e8b; }
@@ -105,6 +109,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .popu-progress-value { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
 
 @media (prefers-color-scheme: dark) {
+  .popu-chart-tooltip { background: #23262d; color: #f1f3f7; border-color: #555d6b; }
   :root { color: #f1f3f7; }
   .popu-shell { background: #23262d; border-color: rgba(255, 255, 255, .14); }
   .popu-content, .popu-property-label, .popu-close { color: #abb2bf; }
