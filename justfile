@@ -1,5 +1,5 @@
 # Build the debug executable used by local examples.
-build:
+build: build-ui
     cargo build --manifest-path src-tauri/Cargo.toml
 
 # Regenerate committed application and tray icons from the SVG source.
@@ -7,8 +7,12 @@ icons:
     python scripts/generate-icons.py
 
 # Build the release executable.
-build-release:
+build-release: build-ui
     cargo build --release --manifest-path src-tauri/Cargo.toml
+
+# Bundle the local chart renderer (run npm ci once before the first build).
+build-ui:
+    npm run build:ui
 
 # Clean the build artifacts for the debug and release executables.
 clean:

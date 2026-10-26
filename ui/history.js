@@ -1,5 +1,6 @@
-import { renderReadOnlyBlocks } from "./content-renderer.js";
+import { renderReadOnlyBlocks, disposeContentBlocks } from "./content-renderer.js";
 import { createReadTracker } from "./history-reading.js";
+import { renderContentIcon } from "./visual-renderer.js";
 
 const invoke = window.__TAURI__.core.invoke;
 const list = document.getElementById("history-list");
@@ -9,6 +10,9 @@ let selectedId = null;
 let refreshTimer = null;
 let refreshing = false;
 let refreshQueued = false;
+let detailVersion = 0;
+let detailKey = null;
+let readyDetail = null;
 const readTracker = createReadTracker({
   afterPaint: () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
   isForeground: () => document.visibilityState === "visible" && document.hasFocus(),
@@ -50,7 +54,16 @@ function formatTime(timestamp) {
 }
 
 function renderDetail(item) {
+  const key = item ? `${item.request_id}:${item.revision}` : null;
+  if (item && detailKey === key) {
+    if (readyDetail) readTracker.present(readyDetail);
+    return;
+  }
+  detailKey = key;
+  readyDetail = null;
+  const version = ++detailVersion;
   readTracker.present(null);
+  disposeContentBlocks(detail.querySelector(".history-content"));
   detail.replaceChildren();
   if (!item) {
     const empty = document.createElement("p");
@@ -60,10 +73,25 @@ function renderDetail(item) {
     return;
   }
 
+  const loading = document.createElement("p");
+  loading.className = "empty";
+  loading.textContent = "Loading notification…";
+  detail.append(loading);
+  invoke("history_get", { requestId: item.request_id }).then((fullItem) => {
+    if (version !== detailVersion) return;
+    renderDetailContent(fullItem, version);
+  }).catch((error) => {
+    if (version === detailVersion) { detailKey = null; showError(error); }
+  });
+}
+
+function renderDetailContent(item, version) {
+  detail.replaceChildren();
   const content = item.content ?? {};
   const heading = document.createElement("div");
   heading.className = "popu-heading";
   const icon = createSeverityIcon(content.severity);
+  const iconReady = renderContentIcon(icon, content);
   const title = document.createElement("h2");
   title.className = "popu-title";
   title.textContent = content.title ?? "Untitled notification";
@@ -85,7 +113,7 @@ function renderDetail(item) {
 
   const body = document.createElement("div");
   body.className = "popu-content history-content";
-  renderReadOnlyBlocks(body, content.blocks, content.vertical_align ?? "start");
+  const contentReady = renderReadOnlyBlocks(body, content.blocks, content.vertical_align ?? "start");
   if (body.hidden) {
     body.hidden = false;
     const empty = document.createElement("p");
@@ -94,7 +122,9 @@ function renderDetail(item) {
     body.append(empty);
   }
   detail.append(heading, metadata, body);
-  readTracker.present(item);
+  Promise.all([iconReady, contentReady]).then(() => {
+    if (version === detailVersion && body.isConnected) { readyDetail = item; readTracker.present(item); }
+  }).catch((error) => { if (version === detailVersion) { detailKey = null; showError(error); } });
 }
 
 function renderList() {

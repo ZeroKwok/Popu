@@ -1,0 +1,29 @@
+{
+  "version": "1.0", "mode": "dialog", "template": "confirm",
+  "window": { "width": 800, "height": 620 },
+  "content": {
+    "severity": "warning", "title": "Inspect weekly workload", "vertical_align": "start",
+    "blocks": [
+      { "type": "paragraph", "text": "A layered heatmap with numeric labels, using the same generic chart block as the line and bar examples." },
+      {
+        "type": "chart", "engine": "vega_lite", "height": 320,
+        "spec": {
+          "data": { "values": [
+            {"day":"Mon","team":"Core","jobs":24},{"day":"Tue","team":"Core","jobs":46},{"day":"Wed","team":"Core","jobs":33},
+            {"day":"Mon","team":"UI","jobs":12},{"day":"Tue","team":"UI","jobs":28},{"day":"Wed","team":"UI","jobs":39},
+            {"day":"Mon","team":"QA","jobs":35},{"day":"Tue","team":"QA","jobs":19},{"day":"Wed","team":"QA","jobs":51}
+          ] },
+          "encoding": {
+            "x": { "field": "day", "type": "ordinal", "sort": ["Mon","Tue","Wed"], "axis": { "title": null, "labelAngle": 0 } },
+            "y": { "field": "team", "type": "nominal", "axis": { "title": null } }
+          },
+          "layer": [
+            { "mark": "rect", "encoding": { "color": { "field": "jobs", "type": "quantitative", "scale": { "scheme": "blues" }, "legend": { "title": "Jobs" } } } },
+            { "mark": { "type": "text", "fontSize": 16, "fontWeight": "bold" }, "encoding": { "text": { "field": "jobs", "type": "quantitative" }, "color": { "condition": { "test": "datum.jobs > 30", "value": "#ffffff" }, "value": "#153a5b" } } }
+          ]
+        }
+      }
+    ]
+  },
+  "actions": [{ "id": "close", "label": "Reviewed", "result_status": "confirmed" }]
+}

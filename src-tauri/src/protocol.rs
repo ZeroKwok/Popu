@@ -182,8 +182,36 @@ pub struct PropertyItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImageSource {
+    pub src: String,
+    pub alt: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChartEngine { VegaLite }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ContentBlock {
+    Image {
+        #[serde(default)]
+        title: Option<String>,
+        source: ImageSource,
+        #[serde(default)]
+        caption: Option<String>,
+        #[serde(default)]
+        height: Option<u32>,
+    },
+    Chart {
+        #[serde(default)]
+        title: Option<String>,
+        engine: ChartEngine,
+        spec: Value,
+        #[serde(default)]
+        height: Option<u32>,
+    },
     Paragraph {
         #[serde(default)]
         title: Option<String>,
@@ -222,6 +250,8 @@ pub struct Content {
     #[serde(default)]
     pub severity: Severity,
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<ImageSource>,
     #[serde(default)]
     pub vertical_align: VerticalAlign,
     #[serde(default)]
@@ -370,6 +400,10 @@ impl Request {
         }
         for block in &self.content.blocks {
             validate_content_block(block)?;
+        }
+        if let Some(icon) = &self.content.icon { crate::visual::validate_image(icon)?; }
+        if serde_json::to_vec(&self.content)?.len() > 768 * 1024 {
+            return Err(ProtocolError::Invalid("content exceeds 768 KiB".into()));
         }
 
         if let Some(width) = &self.window.width {
@@ -568,6 +602,8 @@ fn validate_content_block(block: &ContentBlock) -> Result<(), ProtocolError> {
         | ContentBlock::UnorderedList { title, .. }
         | ContentBlock::OrderedList { title, .. }
         | ContentBlock::Progress { title, .. }
+        | ContentBlock::Image { title, .. }
+        | ContentBlock::Chart { title, .. }
         | ContentBlock::Form { title, .. } => title,
     };
     if title
@@ -580,6 +616,17 @@ fn validate_content_block(block: &ContentBlock) -> Result<(), ProtocolError> {
     }
     let text_ok = |value: &str| !value.trim().is_empty() && value.chars().count() <= 20_000;
     match block {
+        ContentBlock::Image { source, caption, height, .. } => {
+            crate::visual::validate_image(source)?;
+            if caption.as_ref().is_some_and(|value| !text_ok(value)) {
+                return Err(ProtocolError::Invalid("image caption must contain 1-20000 characters".into()));
+            }
+            crate::visual::validate_height(*height)
+        }
+        ContentBlock::Chart { spec, height, .. } => {
+            crate::visual::validate_chart(spec)?;
+            crate::visual::validate_height(*height)
+        }
         ContentBlock::Paragraph { text, .. } if !text_ok(text) => Err(ProtocolError::Invalid(
             "paragraph text must contain 1-20000 characters".into(),
         )),

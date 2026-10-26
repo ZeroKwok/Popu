@@ -50,7 +50,7 @@ pub fn run() -> i32 {
     let managed = Arc::clone(&state);
     let app = tauri::Builder::default()
         .manage(managed)
-        .invoke_handler(tauri::generate_handler![get_bootstrap, submit, finish, render_failed, ui_presented, history_list, history_clear, history_mark_read])
+        .invoke_handler(tauri::generate_handler![get_bootstrap, submit, finish, render_failed, ui_presented, history_list, history_get, history_clear, history_mark_read])
         .on_window_event(handle_window_event)
         .setup(move |app| {
             start_effect_worker(app.handle().clone(), Arc::clone(&state));
@@ -216,6 +216,13 @@ fn dispatch(rpc: RpcRequest, app: &AppHandle, state: &Arc<HostState>) -> RpcResp
             let history = state.history.lock().unwrap();
             let items = history.as_ref().ok_or_else(|| json!({"code":"history_unavailable"}))?.list().map_err(invalid)?;
             serde_json::to_value(items).map_err(invalid)
+        }
+        "history.get" => {
+            let params: IdParams = serde_json::from_value(rpc.params).map_err(invalid)?;
+            let history = state.history.lock().unwrap();
+            let item = history.as_ref().ok_or_else(|| json!({"code":"history_unavailable"}))?
+                .get(&params.request_id.to_string()).map_err(invalid)?;
+            serde_json::to_value(item).map_err(invalid)
         }
         "history.clear" => {
             let count = clear_history(state).map_err(|error| json!({"code":"history_unavailable","message":error}))?;
@@ -435,6 +442,13 @@ fn history_mark_read(window: WebviewWindow, app: AppHandle, state: State<'_, Arc
     emit_history_changed(&app);
     update_tray_tooltip(&app, state.inner());
     Ok(Some(read_at_ms))
+}
+
+#[tauri::command]
+fn history_get(state: State<'_, Arc<HostState>>, request_id: Uuid) -> Result<Value, String> {
+    let history = state.history.lock().unwrap();
+    let item = history.as_ref().ok_or("history unavailable")?.get(&request_id.to_string()).map_err(|e| e.to_string())?;
+    serde_json::to_value(item).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

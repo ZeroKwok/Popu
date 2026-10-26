@@ -1,3 +1,9 @@
+import { renderVisualBlock } from "./visual-renderer.js";
+
+const controllers = new WeakMap();
+
+export function disposeContentBlocks(root) { controllers.get(root)?.abort(); }
+
 function hasVisibleText(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -65,7 +71,7 @@ function renderProgress(block, section) {
   section.append(row);
 }
 
-function renderBlock(block) {
+function renderBlock(block, renderForm, signal, pending) {
   const section = document.createElement("section");
   section.className = `popu-block popu-block-${block.type}`;
   appendBlockTitle(section, block.title);
@@ -81,19 +87,32 @@ function renderBlock(block) {
     renderList(block, section);
   } else if (block.type === "progress") {
     renderProgress(block, section);
+  } else if (block.type === "image" || block.type === "chart") {
+    pending.push(renderVisualBlock(section, block, signal));
+  } else if (block.type === "form" && renderForm) {
+    renderForm(block, section);
+  } else if (block.type !== "form") {
+    throw new Error(`Unsupported content block: ${block.type}`);
   }
   return section;
 }
 
-// History and notifications are display-only. Form blocks are deliberately
-// omitted: the notify protocol rejects them and history never replays input.
-export function renderReadOnlyBlocks(root, blocks = [], verticalAlign = "start") {
-  if (!root) return;
+// Only dialogs supply a form renderer; notifications and history remain read-only.
+export function renderContentBlocks(root, blocks = [], verticalAlign = "start", renderForm = null) {
+  if (!root) return Promise.resolve();
+  controllers.get(root)?.abort();
+  const controller = new AbortController();
+  controllers.set(root, controller);
+  const pending = [];
   root.dataset.popuVerticalAlign = verticalAlign;
   root.replaceChildren();
   for (const block of blocks) {
-    const section = renderBlock(block);
+    const section = renderBlock(block, renderForm, controller.signal, pending);
     if (section.childElementCount > 0) root.append(section);
   }
   root.hidden = root.childElementCount === 0;
+  return Promise.all(pending).catch((error) => {
+    if (!controller.signal.aborted) throw error;
+  });
 }
+export const renderReadOnlyBlocks = renderContentBlocks;

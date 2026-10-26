@@ -27,3 +27,26 @@ client.notify(Notification.success(title="Review backup results", requires_read=
 ```
 
 After timeout, all notifications remain unread in history, but only those requiring reading keep the tray reminder active. Displayed or queued notifications do not trigger the tray reminder; it represents only unread history requiring reading. Viewing an individual detail in the foreground history window marks it read; opening the window does not acknowledge the whole list. Reading does not change the request's terminal state. Dialogs do not accept this field.
+
+Both builders accept `blocks=[...]` and an optional `icon` image source. Use `image_source` to capture a local SVG/PNG/JPEG/WebP file, or `svg_source` for SVG text; the submitted data is self-contained and remains available in history.
+
+```python
+from popu import chart_block, image_block, image_source, svg_source
+
+chart = chart_block({
+    "data": {"values": [{"service": "Sync", "ms": 115}, {"service": "Backup", "ms": 78}]},
+    "mark": "bar",
+    "encoding": {
+        "x": {"field": "service", "type": "nominal"},
+        "y": {"field": "ms", "type": "quantitative"},
+    },
+}, title="Service latency", height=240)
+client.notify(Notification.success(title="Measurements", blocks=[chart], height=400))
+client.show(DialogRequest.confirm(title="Review", blocks=[chart], width=740, height=580))
+
+# A caller-rendered graphic, including chart types outside Vega-Lite:
+picture = image_block(image_source("report.svg", alt="Report graphic"), height=240)
+client.notify(Notification.success(title="Report", blocks=[picture], height=400))
+```
+
+Chart blocks accept generic Vega-Lite 6 specifications with inline data, and render static SVG in a local worker without network access or interactive tooltips. Changing the mark/encodings is sufficient for lines, bars and heatmaps. Visual `height` is within 64–1200; an image data URI is limited to 256 KiB, a chart spec to 128 KiB, and the complete content to 768 KiB. SVG scripts and external resources are rejected.

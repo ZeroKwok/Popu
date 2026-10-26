@@ -23,6 +23,17 @@ class ScreenArea(str, Enum):
 WindowDimension = int | float | str
 
 
+def _content(severity: str, title: str, message: str,
+             blocks: list[Mapping[str, Any]] | None, icon: Mapping[str, str] | None) -> dict[str, Any]:
+    content: dict[str, Any] = {
+        "severity": severity, "title": title,
+        "blocks": ([{"type": "paragraph", "text": message}] if message else []) + [dict(block) for block in blocks or []],
+    }
+    if icon is not None:
+        content["icon"] = dict(icon)
+    return content
+
+
 def _window_options(
     *,
     screen: Screen,
@@ -48,6 +59,8 @@ class DialogRequest:
         *,
         title: str,
         message: str = "",
+        blocks: list[Mapping[str, Any]] | None = None,
+        icon: Mapping[str, str] | None = None,
         position: Position = Position.CURSOR_SCREEN_CENTER,
         confirm_label: str = "Confirm",
         cancel_label: str = "Cancel",
@@ -67,11 +80,7 @@ class DialogRequest:
                 "window": _window_options(
                     screen=screen, area=area, width=width, height=height
                 ),
-                "content": {
-                    "severity": "warning" if dangerous else "info",
-                    "title": title,
-                    "blocks": ([{"type": "paragraph", "text": message}] if message else []),
-                },
+                "content": _content("warning" if dangerous else "info", title, message, blocks, icon),
                 "actions": [
                     {
                         "id": "confirm",
@@ -99,6 +108,8 @@ class Notification:
         *,
         title: str,
         message: str = "",
+        blocks: list[Mapping[str, Any]] | None = None,
+        icon: Mapping[str, str] | None = None,
         position: Position = Position.BOTTOM_RIGHT,
         duration_ms: int = 8_000,
         requires_read: bool = False,
@@ -118,11 +129,7 @@ class Notification:
                 ),
                 "duration_ms": duration_ms,
                 "requires_read": requires_read,
-                "content": {
-                    "severity": "success",
-                    "title": title,
-                    "blocks": ([{"type": "paragraph", "text": message}] if message else []),
-                },
+                "content": _content("success", title, message, blocks, icon),
             }
         )
 

@@ -1,0 +1,28 @@
+{
+  "version": "1.0", "mode": "notify", "template": "notification",
+  "duration_ms": 12000, "requires_read": true,
+  "window": { "width": 460, "height": 420 },
+  "content": {
+    "severity": "warning", "title": "Sector changes — heatmap", "vertical_align": "start",
+    "blocks": [
+      { "type": "paragraph", "text": "Synthetic percentage changes. Review this history item after timeout to stop its tray reminder." },
+      {
+        "type": "chart", "engine": "vega_lite", "height": 220,
+        "spec": {
+          "description": "Synthetic sector percentage changes across three sessions",
+          "data": { "values": [
+            {"session":"AM","sector":"Tech","change":1.2},{"session":"Noon","sector":"Tech","change":-0.7},{"session":"PM","sector":"Tech","change":0.5},
+            {"session":"AM","sector":"Energy","change":-1.1},{"session":"Noon","sector":"Energy","change":0.4},{"session":"PM","sector":"Energy","change":1.7},
+            {"session":"AM","sector":"Metals","change":0.8},{"session":"Noon","sector":"Metals","change":1.4},{"session":"PM","sector":"Metals","change":-0.3}
+          ] },
+          "mark": "rect",
+          "encoding": {
+            "x": { "field": "session", "type": "ordinal", "sort": ["AM","Noon","PM"], "axis": { "title": null, "labelAngle": 0 } },
+            "y": { "field": "sector", "type": "nominal", "axis": { "title": null } },
+            "color": { "field": "change", "type": "quantitative", "scale": { "scheme": "redblue", "domain": [-2,2] }, "legend": { "title": "%" } }
+          }
+        }
+      }
+    ]
+  }
+}

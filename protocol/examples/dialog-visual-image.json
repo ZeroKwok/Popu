@@ -1,0 +1,17 @@
+{
+  "version": "1.0", "mode": "dialog", "template": "confirm",
+  "window": { "width": 720, "height": 500 },
+  "content": {
+    "severity": "info", "title": "Review an externally generated image", "vertical_align": "start",
+    "icon": { "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3QgeD0iMiIgeT0iMiIgd2lkdGg9IjI4IiBoZWlnaHQ9IjI4IiByeD0iNyIgZmlsbD0iI2U3YWQyMSIvPjxwYXRoIGQ9Ik03IDIxTDEyIDEzTDE5IDE4TDI1IDkiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMyIvPjwvc3ZnPg==", "alt": "Custom trend icon" },
+    "blocks": [
+      {
+        "type": "image", "title": "Caller-rendered graphic", "height": 240,
+        "source": { "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzNjAgMTIwIj48cmVjdCB3aWR0aD0iMzYwIiBoZWlnaHQ9IjEyMCIgcng9IjEyIiBmaWxsPSIjZThmMGZmIi8+PHBhdGggZD0iTTIwIDk1TDcwIDc1TDEyMCA4MkwxNzAgNDJMMjIwIDU1TDI3MCAyNUwzNDAgMzUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzM3N2RmZiIgc3Ryb2tlLXdpZHRoPSI0Ii8+PHRleHQgeD0iMjAiIHk9IjI1IiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzFkNWZkMCI+SWxsdXN0cmF0aXZlIHRyZW5kIC8gU1ZHIGltYWdlPC90ZXh0Pjwvc3ZnPg==", "alt": "Illustrative trend on a blue panel" },
+        "caption": "The request contains the image bytes; no filesystem path or network access is required."
+      },
+      { "type": "properties", "items": [{"label":"Format","text":"SVG"},{"label":"Rendering","text":"Shared by dialog, notification and history"}] }
+    ]
+  },
+  "actions": [ { "id": "accept", "label": "Accept", "result_status": "confirmed" }, { "id": "cancel", "label": "Cancel", "style": "secondary", "result_status": "cancelled" } ]
+}

@@ -29,6 +29,7 @@
       "properties": {
         "severity": { "enum": ["info", "success", "warning", "error"] },
         "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
+        "icon": { "$ref": "#/$defs/imageSource" },
         "vertical_align": { "enum": ["start", "center"], "default": "center" },
         "blocks": { "type": "array", "default": [], "items": { "$ref": "#/$defs/contentBlock" } }
       }
@@ -65,6 +66,13 @@
     }
   ],
   "$defs": {
+    "imageSource": {
+      "type": "object", "additionalProperties": false, "required": ["src", "alt"],
+      "properties": {
+        "src": { "type": "string", "maxLength": 262144, "pattern": "^data:image/(?:svg\\+xml|png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$" },
+        "alt": { "type": "string", "minLength": 1, "maxLength": 1000, "pattern": "\\S" }
+      }
+    },
     "blockTitle": { "type": "string", "maxLength": 200 },
     "blockText": { "type": "string", "minLength": 1, "maxLength": 20000, "pattern": "\\S" },
     "propertyItem": {
@@ -80,6 +88,22 @@
       ]
     },
     "contentBlock": { "oneOf": [
+      {
+        "type": "object", "additionalProperties": false, "required": ["type", "source"],
+        "properties": {
+          "type": { "const": "image" }, "title": { "$ref": "#/$defs/blockTitle" },
+          "source": { "$ref": "#/$defs/imageSource" }, "caption": { "$ref": "#/$defs/blockText" },
+          "height": { "type": "integer", "minimum": 64, "maximum": 1200 }
+        }
+      },
+      {
+        "type": "object", "additionalProperties": false, "required": ["type", "engine", "spec"],
+        "properties": {
+          "type": { "const": "chart" }, "title": { "$ref": "#/$defs/blockTitle" }, "engine": { "const": "vega_lite" },
+          "spec": { "type": "object", "anyOf": [{ "required": ["mark"] }, { "required": ["layer"] }, { "required": ["hconcat"] }, { "required": ["vconcat"] }, { "required": ["concat"] }, { "required": ["facet"] }, { "required": ["repeat"] }] },
+          "height": { "type": "integer", "minimum": 64, "maximum": 1200 }
+        }
+      },
       { "type": "object", "additionalProperties": false, "required": ["type", "text"], "properties": { "type": { "const": "paragraph" }, "title": { "$ref": "#/$defs/blockTitle" }, "text": { "$ref": "#/$defs/blockText" } } },
       { "type": "object", "additionalProperties": false, "required": ["type", "items"], "properties": { "type": { "const": "properties" }, "title": { "$ref": "#/$defs/blockTitle" }, "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/propertyItem" } } } },
       { "type": "object", "additionalProperties": false, "required": ["type", "items"], "properties": { "type": { "const": "unordered_list" }, "title": { "$ref": "#/$defs/blockTitle" }, "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/blockText" } } } },

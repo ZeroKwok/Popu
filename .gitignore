@@ -1,6 +1,8 @@
 /src-tauri/target/
 /node_modules/
 /dist/
+/ui/vendor/
+/test-results/
 /.pytest_cache/
 /**/__pycache__/
 .assets/

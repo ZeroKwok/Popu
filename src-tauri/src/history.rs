@@ -75,15 +75,18 @@ impl HistoryStore {
     }
 
     pub fn list(&self) -> rusqlite::Result<Vec<HistoryItem>> {
-        let mut statement = self.connection.prepare("SELECT request_id,state,revision,content_json,created_at_ms,shown_at_ms,ended_at_ms,response_json,requires_read,read_at_ms FROM notification_history ORDER BY ended_at_ms DESC, rowid DESC LIMIT 500")?;
-        let items = statement.query_map([], |row| {
-            let content: String = row.get(3)?; let response: Option<String> = row.get(7)?;
-            Ok(HistoryItem { request_id: row.get(0)?, state: row.get(1)?, revision: row.get(2)?,
-                content: serde_json::from_str(&content).unwrap_or_default(), created_at_ms: row.get(4)?,
-                shown_at_ms: row.get(5)?, ended_at_ms: row.get(6)?, response: response.and_then(|v| serde_json::from_str(&v).ok()),
-                requires_read: row.get(8)?, read_at_ms: row.get(9)? })
-        })?.collect();
+        // List only the fields used in the sidebar, never every inline image/spec.
+        let mut statement = self.connection.prepare("SELECT request_id,state,revision,
+          json_object('title',json_extract(content_json,'$.title'),'severity',COALESCE(json_extract(content_json,'$.severity'),'info')),
+          created_at_ms,shown_at_ms,ended_at_ms,response_json,requires_read,read_at_ms
+          FROM notification_history ORDER BY ended_at_ms DESC, rowid DESC LIMIT 500")?;
+        let items = statement.query_map([], history_item)?.collect();
         items
+    }
+
+    pub fn get(&self, request_id: &str) -> rusqlite::Result<HistoryItem> {
+        self.connection.query_row("SELECT request_id,state,revision,content_json,created_at_ms,shown_at_ms,ended_at_ms,response_json,requires_read,read_at_ms
+          FROM notification_history WHERE request_id = ?1", [request_id], history_item)
     }
 
     pub fn pending_read_count(&self) -> rusqlite::Result<usize> {
@@ -99,6 +102,15 @@ impl HistoryStore {
     pub fn clear(&mut self) -> rusqlite::Result<usize> {
         self.connection.execute("DELETE FROM notification_history", [])
     }
+}
+
+fn history_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryItem> {
+    let content: String = row.get(3)?;
+    let response: Option<String> = row.get(7)?;
+    Ok(HistoryItem { request_id: row.get(0)?, state: row.get(1)?, revision: row.get(2)?,
+        content: serde_json::from_str(&content).unwrap_or_default(), created_at_ms: row.get(4)?,
+        shown_at_ms: row.get(5)?, ended_at_ms: row.get(6)?, response: response.and_then(|v| serde_json::from_str(&v).ok()),
+        requires_read: row.get(8)?, read_at_ms: row.get(9)? })
 }
 
 fn millis(time: SystemTime) -> i64 { time.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().min(i64::MAX as u128) as i64 }
@@ -251,5 +263,23 @@ mod tests {
         for _ in 0..500 { store.record(&terminal(false, RequestState::Cancelled)).unwrap(); }
         assert_eq!(store.list().unwrap().len(), 500);
         assert_eq!(store.pending_read_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn visual_history_retains_the_image_bytes_and_chart_data_snapshot() {
+        let mut store = HistoryStore::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+        let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../protocol/examples");
+        for name in ["notification-visual-image.json", "notification-visual-line.json"] {
+            let request = Request::parse(&std::fs::read_to_string(examples.join(name)).unwrap()).unwrap();
+            let expected = serde_json::to_value(&request.content).unwrap();
+            let mut registry = RequestRegistry::default();
+            let (created, _) = registry.create(request, None);
+            registry.fail(created.request_id).unwrap();
+            store.record(&registry.snapshot(created.request_id).unwrap()).unwrap();
+            let items = store.list().unwrap();
+            assert!(items.iter().all(|item| item.content.get("blocks").is_none() && item.content.get("icon").is_none()));
+            let item = store.get(&created.request_id.to_string()).unwrap();
+            assert_eq!(item.content, expected);
+        }
     }
 }
