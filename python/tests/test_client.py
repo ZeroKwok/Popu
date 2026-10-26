@@ -43,7 +43,15 @@ def test_builders_emit_protocol_1() -> None:
     assert request["version"] == notification["version"] == "1.0"
     assert request["mode"] == "dialog"
     assert notification["mode"] == "notify"
+    assert notification["requires_read"] is False
+    assert "requires_read" not in request
     json.dumps(request)
+
+
+def test_notification_can_require_reading() -> None:
+    notification = Notification.success(title="Review result", requires_read=True).as_dict()
+    assert notification["requires_read"] is True
+    assert json.loads(json.dumps(notification))["requires_read"] is True
 
 
 def test_builder_supports_percentage_screen_dimensions() -> None:

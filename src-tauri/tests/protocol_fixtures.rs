@@ -33,3 +33,27 @@ fn invalid_protocol_examples_are_rejected() {
         );
     }
 }
+
+#[test]
+fn reading_requirement_is_a_notification_only_boolean() {
+    let base = serde_json::json!({"version":"1.0","mode":"notify","content":{"title":"Read me"}});
+    assert_eq!(Request::parse(&base.to_string()).unwrap().requires_read.unwrap_or(false), false);
+    for required in [false, true] {
+        let mut notification = base.clone();
+        notification["requires_read"] = required.into();
+        let parsed = Request::parse(&notification.to_string()).unwrap();
+        assert_eq!(parsed.requires_read, Some(required));
+        assert_eq!(serde_json::to_value(parsed).unwrap()["requires_read"], required);
+        notification["mode"] = "dialog".into();
+        notification["actions"] = serde_json::json!([{"id":"ok","label":"OK","submit":true}]);
+        assert!(Request::parse(&notification.to_string()).is_err());
+        notification.as_object_mut().unwrap().remove("requires_read");
+        let dialog = Request::parse(&notification.to_string()).unwrap();
+        assert!(Request::parse(&serde_json::to_string(&dialog).unwrap()).is_ok());
+    }
+    for invalid in [serde_json::Value::Null, serde_json::json!("true"), serde_json::json!(1)] {
+        let mut notification = base.clone();
+        notification["requires_read"] = invalid;
+        assert!(Request::parse(&notification.to_string()).is_err());
+    }
+}

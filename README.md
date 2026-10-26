@@ -22,6 +22,19 @@ Popu 是一个面向自动化脚本和 AI Agent 的轻量本机交互窗口。�
 - `data-popu-drag-region` 定义拖拽背景，`data-popu-selectable` 定义可复制文本；内置模板默认允许复制所有展示内容。
 - Host 生成 UUID `request_id`，支持 `coalesce_key`、revision 冲突检测和完整内容快照更新。
 - dialog 全局 FIFO 单活跃；notification 在主显示器最多显示三个，溢出后 FIFO 排队。
+- notification 可设置 `requires_read: true` 声明需要用户阅读，默认 `false`；dialog 不允许携带该字段。超时或展示失败的通知保留未读状态，只有需要阅读且未读的历史记录会持续触发托盘提醒。
+
+## 通知阅读与历史
+
+通知的请求终态和阅读状态独立：超时仍为 `expired`，阅读历史不会改变终态。主动关闭通知视为已知悉；调用方撤销或“Clear current notifications”也不留下待阅读提醒。
+
+历史窗口左侧以圆点和加粗标题表示未读，需要阅读的未读条目额外显示 “Awaiting reading” 标记。顶部同时显示待阅读数和全部未读数。只有详情在历史窗口前台完成展示后，该条记录才标记为已读；后台刷新和最小化不会批量清除未读。新记录到达时保留当前选择。
+
+托盘左键单击或双击打开／恢复历史窗口，右键显示菜单。有活跃通知，或存在 `requires_read: true` 且未读的历史记录时，托盘持续提醒；阅读其中一条不会清除其他待阅读记录的提醒。阅读状态会在 Host 重启后保留，历史最多保存最近 500 条。
+
+可以运行 `just test notification-requires-read.json` 和 `just test notification-ordinary-unread.json` 对比两类未读行为。Python 调用使用 `Notification.success(title="Review result", requires_read=True)`。
+
+既有历史内容会保留，并按新字段默认值处理为普通未读；不恢复旧全局提醒标志的含义，不提供新旧协议或阅读状态的兼容层。
 
 ## 组织展示内容
 

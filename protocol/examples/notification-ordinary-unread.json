@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "mode": "notify",
+  "template": "notification",
+  "requires_read": false,
+  "duration_ms": 3000,
+  "content": {
+    "severity": "info",
+    "title": "Background sync completed",
+    "blocks": [
+      { "type": "paragraph", "text": "This notification remains unread in history after timing out, but does not keep the tray reminder active." }
+    ]
+  }
+}

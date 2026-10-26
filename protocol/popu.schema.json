@@ -38,12 +38,13 @@
       "items": { "$ref": "#/$defs/action" }
     },
     "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
-    "duration_ms": { "type": "integer", "minimum": 500, "maximum": 86400000 }
+    "duration_ms": { "type": "integer", "minimum": 500, "maximum": 86400000 },
+    "requires_read": { "type": "boolean", "default": false, "description": "Require reading this notification; unread history keeps the tray reminder active." }
   },
   "allOf": [
     {
       "if": { "properties": { "mode": { "const": "dialog" } } },
-      "then": { "required": ["actions"] },
+      "then": { "required": ["actions"], "not": { "required": ["requires_read"] } },
       "else": {
         "properties": {
           "actions": { "maxItems": 0 },

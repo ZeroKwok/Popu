@@ -27,6 +27,7 @@ pub struct RequestSnapshot {
     pub state: RequestState,
     pub revision: u64,
     pub mode: Mode,
+    pub requires_read: bool,
     pub content: Content,
     pub created_at: SystemTime,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -128,7 +129,8 @@ impl RequestRegistry {
     pub fn snapshot(&self, id: Uuid) -> Result<RequestSnapshot, RegistryError> {
         let r = self.records.get(&id).ok_or(RegistryError::NotFound)?;
         Ok(RequestSnapshot { request_id: id, state: r.state, revision: r.revision,
-            mode: r.request.mode, content: r.request.content.clone(), created_at: r.created_at,
+            mode: r.request.mode, requires_read: r.request.requires_read.unwrap_or(false),
+            content: r.request.content.clone(), created_at: r.created_at,
             shown_at: r.shown_at, ended_at: r.ended_at, response: r.response.clone(), exit_code: r.exit_code })
     }
 

@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "mode": "notify",
+  "template": "notification",
+  "requires_read": true,
+  "duration_ms": 3000,
+  "content": {
+    "severity": "error",
+    "title": "Backup failed — please review",
+    "blocks": [
+      { "type": "paragraph", "text": "The destination is unavailable. Read this notification in history before retrying the backup." }
+    ]
+  }
+}

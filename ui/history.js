@@ -1,4 +1,5 @@
 import { renderReadOnlyBlocks } from "./content-renderer.js";
+import { createReadTracker } from "./history-reading.js";
 
 const invoke = window.__TAURI__.core.invoke;
 const list = document.getElementById("history-list");
@@ -8,6 +9,17 @@ let selectedId = null;
 let refreshTimer = null;
 let refreshing = false;
 let refreshQueued = false;
+const readTracker = createReadTracker({
+  afterPaint: () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  isForeground: () => document.visibilityState === "visible" && document.hasFocus(),
+  markRead: (requestId) => invoke("history_mark_read", { requestId }),
+  onRead: (requestId, timestamp) => {
+    const item = items.find((item) => item.request_id === requestId);
+    if (item) item.read_at_ms = timestamp;
+    renderList();
+  },
+  onError: showError,
+});
 
 const statusLabels = {
   expired: "Timed out",
@@ -28,6 +40,7 @@ function formatTime(timestamp) {
 }
 
 function renderDetail(item) {
+  readTracker.present(null);
   detail.replaceChildren();
   if (!item) {
     const empty = document.createElement("p");
@@ -75,9 +88,13 @@ function renderDetail(item) {
     body.append(empty);
   }
   detail.append(heading, metadata, body);
+  readTracker.present(item);
 }
 
 function renderList() {
+  const unread = items.filter((item) => item.read_at_ms === null);
+  document.getElementById("history-counts").textContent =
+    `${unread.filter((item) => item.requires_read).length} awaiting reading · ${unread.length} unread`;
   list.replaceChildren();
   if (!items.length) {
     const empty = document.createElement("p");
@@ -93,11 +110,28 @@ function renderList() {
     row.setAttribute("role", "listitem");
     row.toggleAttribute("data-selected", item.request_id === selectedId);
     row.setAttribute("aria-current", String(item.request_id === selectedId));
+    const unread = item.read_at_ms === null;
+    const required = unread && item.requires_read;
+    row.toggleAttribute("data-unread", unread);
+    row.toggleAttribute("data-required", required);
+    row.setAttribute("aria-label", `${item.content?.title ?? "Untitled notification"}${unread ? (required ? ", awaiting reading" : ", unread") : ", read"}`);
+    const heading = document.createElement("div");
+    heading.className = "history-item-heading";
+    const dot = document.createElement("span");
+    dot.className = "history-unread-dot";
+    dot.setAttribute("aria-hidden", "true");
     const title = document.createElement("strong");
     title.textContent = item.content?.title ?? "Untitled notification";
     const summary = document.createElement("span");
     summary.textContent = `${formatStatus(item.state)} · ${formatTime(item.ended_at_ms)}`;
-    row.append(title, summary);
+    heading.append(dot, title);
+    if (required) {
+      const badge = document.createElement("span");
+      badge.className = "history-required-badge";
+      badge.textContent = "Awaiting reading";
+      heading.append(badge);
+    }
+    row.append(heading, summary);
     row.addEventListener("click", () => {
       selectedId = item.request_id;
       renderList();
@@ -115,6 +149,7 @@ async function refresh() {
   refreshing = true;
   try {
     items = await invoke("history_list");
+    document.getElementById("history-error").textContent = "";
     if (!items.some((item) => item.request_id === selectedId)) selectedId = items[0]?.request_id ?? null;
     renderList();
     renderDetail(items.find((item) => item.request_id === selectedId));
@@ -127,7 +162,7 @@ async function refresh() {
   }
 }
 
-function showError(error) { detail.textContent = String(error); }
+function showError(error) { document.getElementById("history-error").textContent = String(error); }
 
 function scheduleRefresh() {
   if (refreshTimer !== null) return;
@@ -137,14 +172,23 @@ function scheduleRefresh() {
   }, 50);
 }
 
-document.getElementById("clear").addEventListener("click", async () => { await invoke("history_clear"); await refresh(); });
+document.getElementById("clear").addEventListener("click", () => {
+  invoke("history_clear").then(refresh).catch(showError);
+});
 
 async function initialize() {
   // Register before the first query so a tray action immediately after opening
   // this window cannot arrive before its listener exists.
   const historyWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
   await historyWindow.listen("history-changed", scheduleRefresh);
-  window.addEventListener("focus", scheduleRefresh);
+  await historyWindow.onFocusChanged(({ payload: focused }) => {
+    if (focused) { scheduleRefresh(); readTracker.recheck(); }
+    else readTracker.present(null);
+  });
+  window.addEventListener("focus", () => { scheduleRefresh(); readTracker.recheck(); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") scheduleRefresh();
+  });
   await refresh();
 }
 

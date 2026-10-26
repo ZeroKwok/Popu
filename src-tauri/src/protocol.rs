@@ -336,6 +336,13 @@ pub struct Request {
     pub timeout_seconds: u64,
     #[serde(default = "default_notification_duration")]
     pub duration_ms: u64,
+    /// Only notifications may declare a reading requirement, including false.
+    #[serde(default, deserialize_with = "deserialize_requires_read", skip_serializing_if = "Option::is_none")]
+    pub requires_read: Option<bool>,
+}
+
+fn deserialize_requires_read<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<bool>, D::Error> {
+    bool::deserialize(deserializer).map(Some)
 }
 
 impl Request {
@@ -374,6 +381,9 @@ impl Request {
 
         match self.mode {
             Mode::Dialog => {
+                if self.requires_read.is_some() {
+                    return Err(ProtocolError::Invalid("requires_read is only valid for notify".into()));
+                }
                 if self.actions.is_empty() {
                     return Err(ProtocolError::Invalid(
                         "dialog requires at least one action".into(),

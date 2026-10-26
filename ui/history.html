@@ -4,7 +4,11 @@
   <body>
     <header><h1>Notification history</h1><button id="clear" class="popu-button popu-button-secondary">Clear history</button></header>
     <main id="history">
-      <aside class="history-list-pane" aria-label="Notification history"><div id="history-list" role="list"></div></aside>
+      <aside class="history-list-pane" aria-label="Notification history">
+        <p id="history-counts" role="status"></p>
+        <p id="history-error" role="alert"></p>
+        <div id="history-list" role="list"></div>
+      </aside>
       <section id="history-detail" class="popu-shell" aria-live="polite"><p class="empty">Select a notification to view its contents.</p></section>
     </main>
     <script type="module" src="history.js"></script>

@@ -101,6 +101,7 @@ class Notification:
         message: str = "",
         position: Position = Position.BOTTOM_RIGHT,
         duration_ms: int = 8_000,
+        requires_read: bool = False,
         screen: Screen = Screen.CURSOR,
         area: ScreenArea = ScreenArea.WORK_AREA,
         width: WindowDimension | None = None,
@@ -116,6 +117,7 @@ class Notification:
                     screen=screen, area=area, width=width, height=height
                 ),
                 "duration_ms": duration_ms,
+                "requires_read": requires_read,
                 "content": {
                     "severity": "success",
                     "title": title,

@@ -19,3 +19,11 @@ client.dismiss(receipt.request_id)
 ```
 
 `Client.create`, `update`, `dismiss`, `status`, and `wait` expose Host-generated `request_id`, revision, queue state, and duplicate information. `popu` is resolved from `PATH` unless `Client(executable=...)` is supplied.
+
+Notifications accept `requires_read=True` (default: `False`):
+
+```python
+client.notify(Notification.success(title="Review backup results", requires_read=True))
+```
+
+After timeout, all notifications remain unread in history, but only those requiring reading keep the tray reminder active. Viewing an individual detail in the foreground history window marks it read; opening the window does not acknowledge the whole list. Reading does not change the request's terminal state. Dialogs do not accept this field.

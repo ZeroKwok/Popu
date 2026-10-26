@@ -50,7 +50,7 @@ pub fn run() -> i32 {
     let managed = Arc::clone(&state);
     let app = tauri::Builder::default()
         .manage(managed)
-        .invoke_handler(tauri::generate_handler![get_bootstrap, submit, finish, render_failed, ui_presented, history_list, history_clear])
+        .invoke_handler(tauri::generate_handler![get_bootstrap, submit, finish, render_failed, ui_presented, history_list, history_clear, history_mark_read])
         .on_window_event(handle_window_event)
         .setup(move |app| {
             start_effect_worker(app.handle().clone(), Arc::clone(&state));
@@ -81,7 +81,8 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let clear_history_item = MenuItem::with_id(app, "clear_history", "Clear history", true, None::<&str>)?;
     let exit = MenuItem::with_id(app, "exit", "Exit Popu Host", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &clear_current, &clear_history_item, &exit])?;
-    let tray = TrayIconBuilder::with_id("popu").menu(&menu).tooltip("Popu — 0 notifications").icon(tray::frame(tray::IDLE_FRAME));
+    let tray = TrayIconBuilder::with_id("popu").menu(&menu).show_menu_on_left_click(false)
+        .tooltip("Popu — 0 notifications").icon(tray::frame(tray::IDLE_FRAME));
     tray.on_menu_event(|app, event| match event.id().as_ref() {
         "history" => open_history(app),
         "clear_current" => clear_current_notifications(app),
@@ -103,13 +104,13 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 }
 
 fn open_history(app: &AppHandle) {
-    let opened = if let Some(window) = app.get_webview_window("history") {
-        if window.show().is_err() { false } else { let _ = window.set_focus(); true }
+    let result = if let Some(window) = app.get_webview_window("history") {
+        window.unminimize().and_then(|_| window.show()).and_then(|_| window.set_focus())
     } else {
         WebviewWindowBuilder::new(app, "history", WebviewUrl::App("history.html".into()))
-            .title("Popu notification history").inner_size(960.0, 620.0).min_inner_size(640.0, 420.0).resizable(true).build().is_ok()
+            .title("Popu notification history").inner_size(960.0, 620.0).min_inner_size(640.0, 420.0).resizable(true).build().map(|_| ())
     };
-    if opened { acknowledge_history(app); }
+    if let Err(error) = result { eprintln!("Popu could not open history: {error}"); }
 }
 
 fn clear_current_notifications(app: &AppHandle) {
@@ -398,7 +399,7 @@ fn start_tray_animation(app: AppHandle, state: Arc<HostState>) {
         while !state.stopping.load(Ordering::SeqCst) {
             std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
             let (notifications, attention) = tray_status(&state);
-            let active = notifications > 0 || attention;
+            let active = notifications > 0 || attention > 0;
             if let Some(frame) = animator.advance(active) { renderer.render(frame); }
             deadline += interval;
             if deadline < Instant::now() { deadline = Instant::now() + interval; }
@@ -420,6 +421,21 @@ fn get_bootstrap(window: WebviewWindow, state: State<'_, Arc<HostState>>) -> Res
 fn history_list(state: State<'_, Arc<HostState>>) -> Result<Value, String> {
     let history = state.history.lock().unwrap(); let store = history.as_ref().ok_or("history unavailable")?;
     serde_json::to_value(store.list().map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn history_mark_read(window: WebviewWindow, app: AppHandle, state: State<'_, Arc<HostState>>, request_id: Uuid) -> Result<Option<i64>, String> {
+    if window.label() != "history" { return Err("only the history window may mark notifications read".into()); }
+    if !window.is_focused().map_err(|e| e.to_string())?
+        || !window.is_visible().map_err(|e| e.to_string())?
+        || window.is_minimized().map_err(|e| e.to_string())? { return Ok(None); }
+    let read_at_ms = {
+        let mut history = state.history.lock().unwrap();
+        history.as_mut().ok_or("history unavailable")?.mark_read(&request_id.to_string()).map_err(|e| e.to_string())?
+    };
+    emit_history_changed(&app);
+    update_tray_tooltip(&app, state.inner());
+    Ok(Some(read_at_ms))
 }
 
 #[tauri::command]
@@ -477,10 +493,6 @@ fn complete_failed(app: &AppHandle, state: &Arc<HostState>, id: Uuid) {
 }
 
 fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
-    if window.label() == "history" && matches!(event, WindowEvent::Focused(true)) {
-        acknowledge_history(window.app_handle());
-        return;
-    }
     if !matches!(event, WindowEvent::CloseRequested { .. }) { return; }
     let Ok(id) = Uuid::parse_str(window.label()) else { return }; let app = window.app_handle(); let state = app.state::<Arc<HostState>>();
     let result = { let mut registry = state.registry.lock().unwrap();
@@ -495,32 +507,20 @@ fn clear_history(state: &Arc<HostState>) -> Result<usize, String> {
     history.as_mut().ok_or("history unavailable")?.clear().map_err(|error| error.to_string())
 }
 
-fn acknowledge_history(app: &AppHandle) {
-    let state = app.state::<Arc<HostState>>();
-    let acknowledged = state.history.lock().unwrap().as_mut()
-        .map(|history| history.acknowledge_attention())
-        .transpose();
-    match acknowledged {
-        Ok(Some(true)) => update_tray_tooltip(app, state.inner()),
-        Ok(_) => {}
-        Err(error) => eprintln!("Popu history error: {error}"),
-    }
-}
-
-fn tray_status(state: &Arc<HostState>) -> (usize, bool) {
+fn tray_status(state: &Arc<HostState>) -> (usize, usize) {
     let notifications = state.registry.lock().unwrap().active_notification_count();
     let attention = state.history.lock().unwrap().as_ref()
-        .and_then(|history| history.needs_attention().ok())
-        .unwrap_or(false);
+        .and_then(|history| history.pending_read_count().ok())
+        .unwrap_or(0);
     (notifications, attention)
 }
 
-fn tray_tooltip_from_status(notifications: usize, attention: bool) -> String {
+fn tray_tooltip_from_status(notifications: usize, attention: usize) -> String {
     match (notifications, attention) {
-        (0, false) => "Popu — no active notifications".into(),
-        (0, true) => "Popu — notification history needs review".into(),
-        (count, false) => format!("Popu — {count} active notifications"),
-        (count, true) => format!("Popu — {count} active notifications; history needs review"),
+        (0, 0) => "Popu — no active notifications".into(),
+        (0, pending) => format!("Popu — {pending} awaiting reading"),
+        (count, 0) => format!("Popu — {count} active notifications"),
+        (count, pending) => format!("Popu — {count} active notifications; {pending} awaiting reading"),
     }
 }
 
