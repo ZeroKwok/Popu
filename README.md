@@ -30,7 +30,7 @@ Popu 是一个面向自动化脚本和 AI Agent 的轻量本机交互窗口。�
 
 历史窗口左侧以圆点和加粗标题表示未读，需要阅读的未读条目额外显示 “Awaiting reading” 标记。顶部同时显示待阅读数和全部未读数。只有详情在历史窗口前台完成展示后，该条记录才标记为已读；后台刷新和最小化不会批量清除未读。新记录到达时保留当前选择。
 
-托盘左键单击或双击打开／恢复历史窗口，右键显示菜单。有活跃通知，或存在 `requires_read: true` 且未读的历史记录时，托盘持续提醒；阅读其中一条不会清除其他待阅读记录的提醒。阅读状态会在 Host 重启后保留，历史最多保存最近 500 条。
+托盘左键单击或双击打开／恢复历史窗口，右键显示菜单。托盘仅在存在 `requires_read: true` 且未读的历史记录时持续提醒，正在显示或排队的通知不触发提醒；阅读其中一条不会清除其他待阅读记录的提醒。无待阅读历史时提示文字为 “Popu”，有待阅读历史时显示对应数量。阅读状态会在 Host 重启后保留，历史最多保存最近 500 条。
 
 可以运行 `just test notification-requires-read.json` 和 `just test notification-ordinary-unread.json` 对比两类未读行为。Python 调用使用 `Notification.success(title="Review result", requires_read=True)`。
 

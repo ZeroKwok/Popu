@@ -82,7 +82,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let exit = MenuItem::with_id(app, "exit", "Exit Popu Host", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &clear_current, &clear_history_item, &exit])?;
     let tray = TrayIconBuilder::with_id("popu").menu(&menu).show_menu_on_left_click(false)
-        .tooltip("Popu — 0 notifications").icon(tray::frame(tray::IDLE_FRAME));
+        .tooltip("Popu").icon(tray::frame(tray::IDLE_FRAME));
     tray.on_menu_event(|app, event| match event.id().as_ref() {
         "history" => open_history(app),
         "clear_current" => clear_current_notifications(app),
@@ -290,9 +290,9 @@ fn apply_effects(app: &AppHandle, state: &Arc<HostState>, effects: Vec<Effect>) 
 }
 
 fn update_tray_tooltip(app: &AppHandle, state: &Arc<HostState>) {
-    let (count, attention) = tray_status(state);
+    let pending = pending_history_read_count(state);
     if let Some(tray) = app.tray_by_id("popu") {
-        let _ = tray.set_tooltip(Some(tray_tooltip_from_status(count, attention)));
+        let _ = tray.set_tooltip(Some(tray_tooltip(pending)));
     }
 }
 
@@ -398,8 +398,7 @@ fn start_tray_animation(app: AppHandle, state: Arc<HostState>) {
         let mut deadline = Instant::now() + interval;
         while !state.stopping.load(Ordering::SeqCst) {
             std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
-            let (notifications, attention) = tray_status(&state);
-            let active = notifications > 0 || attention > 0;
+            let active = pending_history_read_count(&state) > 0;
             if let Some(frame) = animator.advance(active) { renderer.render(frame); }
             deadline += interval;
             if deadline < Instant::now() { deadline = Instant::now() + interval; }
@@ -507,20 +506,16 @@ fn clear_history(state: &Arc<HostState>) -> Result<usize, String> {
     history.as_mut().ok_or("history unavailable")?.clear().map_err(|error| error.to_string())
 }
 
-fn tray_status(state: &Arc<HostState>) -> (usize, usize) {
-    let notifications = state.registry.lock().unwrap().active_notification_count();
-    let attention = state.history.lock().unwrap().as_ref()
+fn pending_history_read_count(state: &Arc<HostState>) -> usize {
+    state.history.lock().unwrap().as_ref()
         .and_then(|history| history.pending_read_count().ok())
-        .unwrap_or(0);
-    (notifications, attention)
+        .unwrap_or(0)
 }
 
-fn tray_tooltip_from_status(notifications: usize, attention: usize) -> String {
-    match (notifications, attention) {
-        (0, 0) => "Popu — no active notifications".into(),
-        (0, pending) => format!("Popu — {pending} awaiting reading"),
-        (count, 0) => format!("Popu — {count} active notifications"),
-        (count, pending) => format!("Popu — {count} active notifications; {pending} awaiting reading"),
+fn tray_tooltip(pending: usize) -> String {
+    match pending {
+        0 => "Popu".into(),
+        count => format!("Popu — {count} awaiting reading"),
     }
 }
 

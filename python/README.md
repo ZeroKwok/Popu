@@ -26,4 +26,4 @@ Notifications accept `requires_read=True` (default: `False`):
 client.notify(Notification.success(title="Review backup results", requires_read=True))
 ```
 
-After timeout, all notifications remain unread in history, but only those requiring reading keep the tray reminder active. Viewing an individual detail in the foreground history window marks it read; opening the window does not acknowledge the whole list. Reading does not change the request's terminal state. Dialogs do not accept this field.
+After timeout, all notifications remain unread in history, but only those requiring reading keep the tray reminder active. Displayed or queued notifications do not trigger the tray reminder; it represents only unread history requiring reading. Viewing an individual detail in the foreground history window marks it read; opening the window does not acknowledge the whole list. Reading does not change the request's terminal state. Dialogs do not accept this field.
