@@ -31,6 +31,16 @@ const statusLabels = {
 
 const severityIcons = { info: "i", success: "✓", warning: "!", error: "×" };
 
+function createSeverityIcon(severity = "info") {
+  const icon = document.createElement("span");
+  icon.className = "popu-icon";
+  icon.dataset.severity = severity;
+  icon.textContent = severityIcons[severity] ?? "i";
+  icon.setAttribute("role", "img");
+  icon.setAttribute("aria-label", severity);
+  return icon;
+}
+
 function formatStatus(state) {
   return statusLabels[state] ?? state.replaceAll("_", " ");
 }
@@ -53,11 +63,7 @@ function renderDetail(item) {
   const content = item.content ?? {};
   const heading = document.createElement("div");
   heading.className = "popu-heading";
-  const icon = document.createElement("div");
-  const severity = content.severity ?? "info";
-  icon.className = "popu-icon";
-  icon.dataset.severity = severity;
-  icon.textContent = severityIcons[severity] ?? "i";
+  const icon = createSeverityIcon(content.severity);
   const title = document.createElement("h2");
   title.className = "popu-title";
   title.textContent = content.title ?? "Untitled notification";
@@ -114,24 +120,29 @@ function renderList() {
     const required = unread && item.requires_read;
     row.toggleAttribute("data-unread", unread);
     row.toggleAttribute("data-required", required);
-    row.setAttribute("aria-label", `${item.content?.title ?? "Untitled notification"}${unread ? (required ? ", awaiting reading" : ", unread") : ", read"}`);
-    const heading = document.createElement("div");
-    heading.className = "history-item-heading";
+    const severity = item.content?.severity ?? "info";
+    row.setAttribute("aria-label", `${severity}, ${item.content?.title ?? "Untitled notification"}${unread ? (required ? ", awaiting reading" : ", unread") : ", read"}`);
+    const icon = createSeverityIcon(severity);
+    icon.classList.add("history-severity-icon");
+    const text = document.createElement("span");
+    text.className = "history-item-text";
     const dot = document.createElement("span");
     dot.className = "history-unread-dot";
     dot.setAttribute("aria-hidden", "true");
     const title = document.createElement("strong");
     title.textContent = item.content?.title ?? "Untitled notification";
+    title.title = title.textContent;
     const summary = document.createElement("span");
+    summary.className = "history-summary";
     summary.textContent = `${formatStatus(item.state)} · ${formatTime(item.ended_at_ms)}`;
-    heading.append(dot, title);
+    text.append(title, summary);
     if (required) {
       const badge = document.createElement("span");
       badge.className = "history-required-badge";
       badge.textContent = "Awaiting reading";
-      heading.append(badge);
+      text.append(badge);
     }
-    row.append(heading, summary);
+    row.append(icon, text, dot);
     row.addEventListener("click", () => {
       selectedId = item.request_id;
       renderList();
