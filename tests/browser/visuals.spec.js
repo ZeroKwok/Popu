@@ -4,14 +4,14 @@ import { test, expect } from "@playwright/test";
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 const examples = readdirSync("protocol/examples").filter((name) => /^(dialog|notification)-visual-.*\.json$/.test(name));
 
-async function mockHost(page, fixture, history = [], foreground = true) {
+async function mockHost(page, fixture, history = [], foreground = true, opened = true) {
   fixture = { ...fixture, actions: (fixture.actions ?? []).map((action) => ({ style: "primary", submit: false, ...action })) };
   const mode = fixture.mode === "notify" ? "notification" : "confirm";
   const template = {
     html: readFileSync(`ui/templates/${mode}/template.html`, "utf8"),
     css: readFileSync(`ui/templates/${mode}/template.css`, "utf8"),
   };
-  await page.addInitScript(({ fixture, template, history, foreground }) => {
+  await page.addInitScript(({ fixture, template, history, foreground, opened }) => {
     window.__reads = [];
     window.__submitted = null;
     window.__presented = false;
@@ -19,23 +19,29 @@ async function mockHost(page, fixture, history = [], foreground = true) {
     window.__historyForeground = foreground;
     window.__detailRequests = [];
     window.__dragStarts = 0;
+    window.__historyPresented = false;
+    window.__readAttempts = 0;
+    window.__listRequests = 0;
+    window.__historyListeners = {};
     window.__TAURI__ = {
       core: { invoke: async (command, args) => {
         if (command === "get_bootstrap") return { request: fixture, template, maximized: false };
         if (command === "ui_presented") { window.__presented = true; return; }
         if (command === "render_failed") { window.__failed = args.message; return; }
-        if (command === "history_list") return history.map((item) => ({ ...structuredClone(item), content: { title: item.content.title, severity: item.content.severity } }));
+        if (command === "history_presented") { window.__historyPresented = true; return opened; }
+        if (command === "history_trace") return;
+        if (command === "history_list") { window.__listRequests++; return history.map((item) => ({ ...structuredClone(item), content: { title: item.content.title, severity: item.content.severity } })); }
         if (command === "history_get") { window.__detailRequests.push(args.requestId); return structuredClone(history.find((item) => item.request_id === args.requestId)); }
-        if (command === "history_mark_read") { if (!window.__historyForeground) return null; window.__reads.push(args.requestId); return Date.now(); }
+        if (command === "history_mark_read") { window.__readAttempts++; if (!window.__historyForeground) return null; window.__reads.push(args.requestId); return Date.now(); }
         if (command === "submit") { window.__submitted = args; return; }
         if (command === "history_clear") return 0;
         if (command === "finish") return;
         throw new Error(`Unexpected command: ${command}`);
       } },
       window: { getCurrentWindow: () => ({ startDragging: async () => { window.__dragStarts++; } }) },
-      webviewWindow: { getCurrentWebviewWindow: () => ({ listen: async () => () => {}, onFocusChanged: async (callback) => { window.__focusCallback = callback; return () => {}; } }) },
+      webviewWindow: { getCurrentWebviewWindow: () => ({ listen: async (name, callback) => { window.__historyListeners[name] = callback; return () => {}; }, onFocusChanged: async (callback) => { window.__focusCallback = callback; return () => {}; } }) },
     };
-  }, { fixture, template, history, foreground });
+  }, { fixture, template, history, foreground, opened });
 }
 
 for (const name of examples) {
@@ -120,6 +126,54 @@ test("cached background history is acknowledged on focus without reloading its g
   await page.evaluate(() => { window.__focusCallback({ payload: false }); window.__historyForeground = true; window.__focusCallback({ payload: true }); });
   await expect.poll(() => page.evaluate(() => window.__reads)).toEqual(["0"]);
   expect(await page.evaluate(() => window.__detailRequests)).toEqual(["0"]);
+});
+
+test("history shell appears while chart dependencies are still blocked", async ({ page }) => {
+  const fixture = readJson("protocol/examples/notification-visual-line.json");
+  let release;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  await page.route("**/vendor/*.js", async (route) => { await blocked; await route.continue(); });
+  await mockHost(page, fixture, [{ request_id: "0", state: "expired", revision: 1, content: fixture.content, ended_at_ms: 1000, read_at_ms: null, requires_read: true }]);
+  await page.goto("/history.html");
+  try {
+    await expect(page.getByRole("heading", { name: "Notification history", exact: true })).toBeVisible();
+    await expect(page.locator(".history-item")).toHaveCount(1);
+    expect(await page.evaluate(() => window.__historyPresented)).toBe(true);
+    expect(await page.evaluate(() => window.__reads)).toEqual([]);
+    await expect(page.locator('.popu-chart[data-ready="true"]')).toHaveCount(0);
+  } finally { release(); }
+  await expect.poll(() => page.evaluate(() => window.__reads)).toEqual(["0"]);
+});
+
+test("initial native focus rejection recovers without switching history rows", async ({ page }) => {
+  const fixture = readJson("protocol/examples/notification-visual-image.json");
+  await mockHost(page, fixture, [{ request_id: "0", state: "expired", revision: 1, content: fixture.content, ended_at_ms: 1000, read_at_ms: null, requires_read: true }], false);
+  await page.goto("/history.html");
+  await expect.poll(() => page.evaluate(() => window.__readAttempts)).toBeGreaterThan(0);
+  await page.evaluate(() => { window.__historyForeground = true; });
+  await expect.poll(() => page.evaluate(() => window.__reads)).toEqual(["0"]);
+  expect(await page.evaluate(() => window.__detailRequests)).toEqual(["0"]);
+});
+
+test("history can present its shell when a hidden WebView suspends animation frames", async ({ page }) => {
+  await mockHost(page, readJson("protocol/examples/notification-visual-image.json"));
+  await page.addInitScript(() => {
+    window.requestAnimationFrame = () => 1;
+    window.cancelAnimationFrame = () => {};
+  });
+  await page.goto("/history.html");
+  await expect.poll(() => page.evaluate(() => window.__historyPresented)).toBe(true);
+  await expect(page.getByText("No notification history", { exact: true })).toBeVisible();
+});
+
+test("hidden prewarming defers history queries and detail rendering until opened", async ({ page }) => {
+  const fixture = readJson("protocol/examples/notification-visual-line.json");
+  await mockHost(page, fixture, [{ request_id: "0", state: "expired", revision: 1, content: fixture.content, ended_at_ms: 1000, read_at_ms: null, requires_read: true }], true, false);
+  await page.goto("/history.html");
+  await expect.poll(() => page.evaluate(() => window.__historyPresented)).toBe(true);
+  expect(await page.evaluate(() => [window.__listRequests, window.__detailRequests.length, window.__reads.length])).toEqual([0, 0, 0]);
+  await page.evaluate(() => window.__historyListeners["history-opened"]());
+  await expect.poll(() => page.evaluate(() => window.__reads)).toEqual(["0"]);
 });
 
 test("bar tooltips show formatted values, stay out of window dragging and are disposed on update", async ({ page }, testInfo) => {

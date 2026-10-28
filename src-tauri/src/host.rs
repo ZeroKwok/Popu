@@ -25,11 +25,22 @@ pub struct HostState {
     changed: Condvar,
     stopping: AtomicBool,
     history: Mutex<Option<HistoryStore>>,
-    effect_sender: Mutex<Option<Sender<Vec<Effect>>>>,
+    effect_sender: Mutex<Option<Sender<WindowTask>>>,
+    history_window: Mutex<Option<HistoryWindowSession>>,
 }
 
+enum WindowTask { Effects(Vec<Effect>), History { show: bool } }
+
+struct HistoryWindowSession { started: Instant, ready: bool, detail_ready: bool, open_requested: bool }
+
 impl Default for HostState {
-    fn default() -> Self { Self { registry: Mutex::new(RequestRegistry::default()), changed: Condvar::new(), stopping: AtomicBool::new(false), history: Mutex::new(HistoryStore::open_default().ok()), effect_sender: Mutex::new(None) } }
+    fn default() -> Self { Self::with_history(HistoryStore::open_default().ok()) }
+}
+
+impl HostState {
+    fn with_history(history: Option<HistoryStore>) -> Self {
+        Self { registry: Mutex::new(RequestRegistry::default()), changed: Condvar::new(), stopping: AtomicBool::new(false), history: Mutex::new(history), effect_sender: Mutex::new(None), history_window: Mutex::new(None) }
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -48,16 +59,14 @@ struct UpdateParams { request_id: Uuid, expected_revision: u64, content: Content
 pub fn run() -> i32 {
     let state = Arc::new(HostState::default());
     let managed = Arc::clone(&state);
-    let app = tauri::Builder::default()
-        .manage(managed)
-        .invoke_handler(tauri::generate_handler![get_bootstrap, submit, finish, render_failed, ui_presented, history_list, history_get, history_clear, history_mark_read])
-        .on_window_event(handle_window_event)
+    let app = host_builder(managed)
         .setup(move |app| {
             start_effect_worker(app.handle().clone(), Arc::clone(&state));
             start_listener(app.handle().clone(), Arc::clone(&state))?;
             build_tray(app.handle())?;
             start_timer(app.handle().clone(), Arc::clone(&state));
             start_tray_animation(app.handle().clone(), Arc::clone(&state));
+            schedule_history(app.handle(), false);
             Ok(())
         })
         .build(tauri::generate_context!());
@@ -73,6 +82,12 @@ pub fn run() -> i32 {
         }
         Err(error) => { eprintln!("Popu Host startup error: {error}"); runtime::EXIT_ERROR }
     }
+}
+
+fn host_builder(state: Arc<HostState>) -> tauri::Builder<tauri::Wry> {
+    tauri::Builder::default().manage(state)
+        .invoke_handler(tauri::generate_handler![get_bootstrap, submit, finish, render_failed, ui_presented, history_presented, history_trace, history_list, history_get, history_clear, history_mark_read])
+        .on_window_event(handle_window_event)
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
@@ -104,11 +119,45 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 }
 
 fn open_history(app: &AppHandle) {
+    schedule_history(app, true);
+}
+
+fn schedule_history(app: &AppHandle, show: bool) {
+    let state = app.state::<Arc<HostState>>();
+    // Share the notification worker: never build a WebView inside a tray/event
+    // loop callback, or concurrently with another window builder.
+    let sender = state.effect_sender.lock().unwrap().clone();
+    if let Some(sender) = sender { let _ = sender.send(WindowTask::History { show }); }
+}
+
+fn show_history(window: &WebviewWindow) -> tauri::Result<()> {
+    window.unminimize()?;
+    window.show()?;
+    window.set_focus()?;
+    // The outer HWND and the WebView2 controller have separate focus. Without
+    // this, document.hasFocus() can stay false after showing a hidden WebView.
+    tauri::Webview::set_focus(window.as_ref())?;
+    window.emit("history-opened", ())
+}
+
+fn open_history_on_worker(app: &AppHandle, state: &Arc<HostState>, show: bool) {
     let result = if let Some(window) = app.get_webview_window("history") {
-        window.unminimize().and_then(|_| window.show()).and_then(|_| window.set_focus())
+        let ready = {
+            let mut session = state.history_window.lock().unwrap();
+            session.as_mut().is_some_and(|session| { session.open_requested |= show; session.ready })
+        };
+        if ready && show { show_history(&window) } else { Ok(()) }
     } else {
+        let started = Instant::now();
+        *state.history_window.lock().unwrap() = Some(HistoryWindowSession { started, ready: false, detail_ready: false, open_requested: show });
+        eprintln!("Popu history: create-start 0ms");
         WebviewWindowBuilder::new(app, "history", WebviewUrl::App("history.html".into()))
-            .title("Popu notification history").inner_size(960.0, 620.0).min_inner_size(640.0, 420.0).resizable(true).build().map(|_| ())
+            .title("Popu notification history").inner_size(960.0, 620.0).min_inner_size(640.0, 420.0).resizable(true)
+            .visible(false).focused(false)
+            .on_page_load(move |_, payload| {
+                eprintln!("Popu history: navigation-{:?} {}ms", payload.event(), started.elapsed().as_millis());
+            })
+            .build().map(|_| { eprintln!("Popu history: create-finished {}ms", started.elapsed().as_millis()); })
     };
     if let Err(error) = result { eprintln!("Popu could not open history: {error}"); }
 }
@@ -249,8 +298,11 @@ fn start_effect_worker(app: AppHandle, state: Arc<HostState>) {
     let (sender, receiver) = mpsc::channel();
     *state.effect_sender.lock().unwrap() = Some(sender);
     std::thread::spawn(move || {
-        while let Ok(effects) = receiver.recv() {
-            apply_effects(&app, &state, effects);
+        while let Ok(task) = receiver.recv() {
+            match task {
+                WindowTask::Effects(effects) => apply_effects(&app, &state, effects),
+                WindowTask::History { show } => open_history_on_worker(&app, &state, show),
+            }
         }
     });
 }
@@ -259,7 +311,7 @@ fn schedule(_app: &AppHandle, state: Arc<HostState>, effects: Vec<Effect>) {
     if effects.is_empty() { return; }
     let sender = state.effect_sender.lock().unwrap().clone();
     if let Some(sender) = sender {
-        if sender.send(effects).is_err() { eprintln!("Popu effect worker stopped unexpectedly"); }
+        if sender.send(WindowTask::Effects(effects)).is_err() { eprintln!("Popu effect worker stopped unexpectedly"); }
     } else {
         eprintln!("Popu effect worker is not ready");
     }
@@ -429,12 +481,45 @@ fn history_list(state: State<'_, Arc<HostState>>) -> Result<Value, String> {
     serde_json::to_value(store.list().map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
 
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum HistoryPhase { ShellReady, ListReady, DetailReady, ReadCheck }
+
+fn trace_history(state: &HostState, phase: HistoryPhase, page_ms: f64) {
+    if let Some(session) = state.history_window.lock().unwrap().as_mut() {
+        if phase == HistoryPhase::DetailReady { session.detail_ready = true; }
+        eprintln!("Popu history: {phase:?} {}ms (page {page_ms:.0}ms)", session.started.elapsed().as_millis());
+    }
+}
+
+#[tauri::command]
+async fn history_presented(window: WebviewWindow, state: State<'_, Arc<HostState>>, page_ms: f64) -> Result<bool, String> {
+    if window.label() != "history" { return Err("invalid history window".into()); }
+    trace_history(&state, HistoryPhase::ShellReady, page_ms);
+    let show = {
+        let mut session = state.history_window.lock().unwrap();
+        let session = session.as_mut().ok_or("history window session unavailable")?;
+        session.ready = true;
+        session.open_requested
+    };
+    if show { show_history(&window).map_err(|e| e.to_string())?; }
+    Ok(show)
+}
+
+#[tauri::command]
+async fn history_trace(window: WebviewWindow, state: State<'_, Arc<HostState>>, phase: HistoryPhase, page_ms: f64, visible: Option<bool>, focused: Option<bool>) -> Result<(), String> {
+    if window.label() != "history" { return Err("invalid history window".into()); }
+    trace_history(&state, phase, page_ms);
+    if let (Some(visible), Some(focused)) = (visible, focused) {
+        eprintln!("Popu history: read-check DOM visible={visible} focused={focused}; native foreground={}", runtime::is_window_foreground(&window)?);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn history_mark_read(window: WebviewWindow, app: AppHandle, state: State<'_, Arc<HostState>>, request_id: Uuid) -> Result<Option<i64>, String> {
     if window.label() != "history" { return Err("only the history window may mark notifications read".into()); }
-    if !window.is_focused().map_err(|e| e.to_string())?
-        || !window.is_visible().map_err(|e| e.to_string())?
-        || window.is_minimized().map_err(|e| e.to_string())? { return Ok(None); }
+    if !runtime::is_window_foreground(&window)? { return Ok(None); }
     let read_at_ms = {
         let mut history = state.history.lock().unwrap();
         history.as_mut().ok_or("history unavailable")?.mark_read(&request_id.to_string()).map_err(|e| e.to_string())?
@@ -506,6 +591,14 @@ fn complete_failed(app: &AppHandle, state: &Arc<HostState>, id: Uuid) {
 }
 
 fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
+    // Keep the WebView warm across opens. Shutdown still exits the app.
+    if window.label() == "history" {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            if let Err(error) = window.hide() { eprintln!("Popu could not hide history: {error}"); }
+        }
+        return;
+    }
     if !matches!(event, WindowEvent::CloseRequested { .. }) { return; }
     let Ok(id) = Uuid::parse_str(window.label()) else { return }; let app = window.app_handle(); let state = app.state::<Arc<HostState>>();
     let result = { let mut registry = state.registry.lock().unwrap();

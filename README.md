@@ -131,6 +131,10 @@ Windows 下构建调试版后，还可运行 `npm run test:native` 验证实际 
 
 历史列表只查询标题、severity 和阅读状态等摘要；选中记录后通过 `history_get`（RPC 为 `history.get`）读取完整图表和图片，避免一次加载全部历史图片。
 
+Host 启动时在后台窗口队列中预热隐藏的历史页面；用户打开后才查询列表和渲染详情，列表先绘制、图表随后加载。关闭历史窗口会隐藏并保留 WebView，下次从托盘打开时直接复用；Host 退出时释放。只有前台可见且选中内容已渲染完成才标记已读，短暂的焦点检查失败会自动重试，失焦或隐藏时暂停。
+
+Host 的标准错误输出包含 `Popu history:` 阶段计时，用于区分建窗、导航、基础页面、列表、首条详情和阅读资格检查的耗时。Windows 下可执行 `cargo test --manifest-path src-tauri/Cargo.toml --test history_window history_window_lifecycle -- --ignored --nocapture` 运行真实 WebView2 历史窗口测试，覆盖隐藏预热、图表渲染、后台未读保护、快速重复打开与关闭后复用。该测试使用内存历史库；需要解锁桌面，系统允许测试窗口前台激活时还会验证首次已读确认，否则明确输出跳过该项。
+
 调试 WebView2 时，可在 Debug 构建中设置 `POPU_DEVTOOLS=1` 后运行请求；这会自动打开浏览器开发者工具。该开关在 Release 构建中无效。
 
 ## CLI

@@ -10,6 +10,8 @@ function harness(markRead = async () => 123) {
   const calls = [];
   const acknowledged = [];
   const errors = [];
+  const retries = new Map();
+  let nextRetry = 0;
   let foreground = true;
   const tracker = createReadTracker({
     afterPaint: () => new Promise((resolve) => paints.push(resolve)),
@@ -17,11 +19,15 @@ function harness(markRead = async () => 123) {
     markRead: (id) => { calls.push(id); return markRead(id); },
     onRead: (id, timestamp) => acknowledged.push([id, timestamp]),
     onError: (error) => errors.push(error),
+    scheduleRetry: (callback) => { const id = ++nextRetry; retries.set(id, callback); return id; },
+    cancelRetry: (id) => retries.delete(id),
   });
   return {
     tracker, calls, acknowledged, errors,
     setForeground(value) { foreground = value; },
     async paint() { paints.splice(0).forEach((resolve) => resolve()); await setImmediate(); },
+    async retry() { const callbacks = [...retries.values()]; retries.clear(); callbacks.forEach((callback) => callback()); await setImmediate(); },
+    get retries() { return retries.size; },
   };
 }
 
@@ -101,4 +107,76 @@ test("already read details do not submit another write", async () => {
   h.tracker.present({ ...item("read"), read_at_ms: 42 });
   await h.paint();
   assert.deepEqual(h.calls, []);
+});
+
+test("native focus rejection retries the same detail without another selection or focus event", async () => {
+  let eligible = false;
+  const h = harness(async () => eligible ? 456 : null);
+  const selected = item("selected");
+  h.tracker.present(selected);
+  await h.paint();
+  assert.equal(h.retries, 1);
+  eligible = true;
+  await h.retry();
+  await h.paint();
+  assert.equal(selected.read_at_ms, 456);
+  assert.deepEqual(h.calls, ["selected", "selected"]);
+  assert.equal(h.retries, 0);
+});
+
+test("missing initial DOM focus recovers automatically", async () => {
+  const h = harness();
+  h.setForeground(false);
+  h.tracker.present(item("selected"));
+  await h.paint();
+  assert.equal(h.retries, 1);
+  h.setForeground(true);
+  await h.retry();
+  await h.paint();
+  assert.deepEqual(h.calls, ["selected"]);
+});
+
+test("blur cancels retries and focus resumes the retained selection", async () => {
+  const h = harness(async () => null);
+  h.tracker.present(item("selected"));
+  await h.paint();
+  h.tracker.setActive(false);
+  assert.equal(h.retries, 0);
+  await h.retry();
+  await h.paint();
+  assert.deepEqual(h.calls, ["selected"]);
+  h.tracker.setActive(true);
+  await h.paint();
+  assert.deepEqual(h.calls, ["selected", "selected"]);
+});
+
+test("switching selection during a rejected write retries only the new selection", async () => {
+  let rejectFirst;
+  const h = harness((id) => id === "first" ? new Promise((resolve) => { rejectFirst = resolve; }) : Promise.resolve(999));
+  const first = item("first");
+  const second = item("second");
+  h.tracker.present(first);
+  await h.paint();
+  h.tracker.present(second);
+  rejectFirst(null);
+  await h.paint();
+  await h.retry();
+  await h.paint();
+  assert.equal(first.read_at_ms, null);
+  assert.equal(second.read_at_ms, 999);
+  assert.deepEqual(h.calls, ["first", "second"]);
+});
+
+test("clearing or disposing cancels retries, including an in-flight rejection", async () => {
+  let reject;
+  const h = harness(() => new Promise((resolve) => { reject = resolve; }));
+  h.tracker.present(item("selected"));
+  await h.paint();
+  h.tracker.dispose();
+  reject(null);
+  await setImmediate();
+  assert.equal(h.retries, 0);
+  h.tracker.recheck();
+  await h.paint();
+  assert.deepEqual(h.calls, ["selected"]);
 });

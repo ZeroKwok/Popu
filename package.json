@@ -6,7 +6,7 @@
   "scripts": {
     "build": "npm run build:ui && cargo build --release --manifest-path src-tauri/Cargo.toml",
     "build:ui": "node scripts/build-ui.mjs",
-    "check:ui": "node --check ui/app.js && node --check ui/history.js && node --check ui/history-reading.js && node --check ui/content-renderer.js && node --check ui/visual-renderer.js",
+    "check:ui": "node --check ui/app.js && node --check ui/history.js && node --check ui/history-reading.js && node --check ui/presentation.js && node --check ui/content-renderer.js && node --check ui/visual-renderer.js",
     "test:ui": "node --test tests/history-reading.test.js",
     "test:visuals": "npm run build:ui && playwright test",
     "test:native": "node scripts/native-visual-smoke.mjs"

@@ -8,6 +8,22 @@ use crate::protocol::{Request, Screen, ScreenArea};
 pub const EXIT_OK: i32 = 0;
 pub const EXIT_ERROR: i32 = 12;
 
+/// WebView2 can own keyboard focus in a child HWND while Tao's cached outer
+/// window focus is false. Check the actual foreground top-level window.
+#[cfg(windows)]
+pub(crate) fn is_window_foreground(window: &WebviewWindow) -> Result<bool, String> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsIconic, IsWindowVisible};
+    let hwnd = windows_hwnd(window)?;
+    Ok(unsafe { GetForegroundWindow() == hwnd && IsWindowVisible(hwnd) != 0 && IsIconic(hwnd) == 0 })
+}
+
+#[cfg(not(windows))]
+pub(crate) fn is_window_foreground(window: &WebviewWindow) -> Result<bool, String> {
+    Ok(window.is_focused().map_err(|e| e.to_string())?
+        && window.is_visible().map_err(|e| e.to_string())?
+        && !window.is_minimized().map_err(|e| e.to_string())?)
+}
+
 #[cfg(windows)]
 pub(crate) fn configure_frameless_windows_window(window: &WebviewWindow, maximized: bool) -> Result<(), String> {
     use windows_sys::Win32::Graphics::Gdi::{CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn};

@@ -1,6 +1,7 @@
 import { renderReadOnlyBlocks, disposeContentBlocks } from "./content-renderer.js";
 import { createReadTracker } from "./history-reading.js";
 import { renderContentIcon } from "./visual-renderer.js";
+import { waitForPresentationFrame } from "./presentation.js";
 
 const invoke = window.__TAURI__.core.invoke;
 const list = document.getElementById("history-list");
@@ -13,9 +14,21 @@ let refreshQueued = false;
 let detailVersion = 0;
 let detailKey = null;
 let readyDetail = null;
+let historyOpened = false;
+const traced = new Set();
+function trace(phase, fields = {}) {
+  if (traced.has(phase)) return;
+  traced.add(phase);
+  invoke("history_trace", { phase, pageMs: performance.now(), ...fields }).catch(console.error);
+}
 const readTracker = createReadTracker({
-  afterPaint: () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-  isForeground: () => document.visibilityState === "visible" && document.hasFocus(),
+  afterPaint: waitForPresentationFrame,
+  isForeground: () => {
+    const visible = document.visibilityState === "visible";
+    const focused = document.hasFocus();
+    trace("read_check", { visible, focused });
+    return visible && focused;
+  },
   markRead: (requestId) => invoke("history_mark_read", { requestId }),
   onRead: (requestId, timestamp) => {
     const item = items.find((item) => item.request_id === requestId);
@@ -123,7 +136,11 @@ function renderDetailContent(item, version) {
   }
   detail.append(heading, metadata, body);
   Promise.all([iconReady, contentReady]).then(() => {
-    if (version === detailVersion && body.isConnected) { readyDetail = item; readTracker.present(item); }
+    if (version === detailVersion && body.isConnected) {
+      trace("detail_ready");
+      readyDetail = item;
+      readTracker.present(item);
+    }
   }).catch((error) => { if (version === detailVersion) { detailKey = null; showError(error); } });
 }
 
@@ -193,6 +210,9 @@ async function refresh() {
     document.getElementById("history-error").textContent = "";
     if (!items.some((item) => item.request_id === selectedId)) selectedId = items[0]?.request_id ?? null;
     renderList();
+    trace("list_ready");
+    // Paint the populated sidebar before loading/compiling graphics.
+    await waitForPresentationFrame();
     renderDetail(items.find((item) => item.request_id === selectedId));
   } finally {
     refreshing = false;
@@ -221,16 +241,36 @@ async function initialize() {
   // Register before the first query so a tray action immediately after opening
   // this window cannot arrive before its listener exists.
   const historyWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
-  await historyWindow.listen("history-changed", scheduleRefresh);
+  await historyWindow.listen("history-changed", () => {
+    if (historyOpened && document.visibilityState === "visible") scheduleRefresh();
+  });
+  const activateHistory = () => {
+    historyOpened = true;
+    scheduleRefresh();
+    readTracker.setActive(true);
+  };
+  await historyWindow.listen("history-opened", activateHistory);
   await historyWindow.onFocusChanged(({ payload: focused }) => {
-    if (focused) { scheduleRefresh(); readTracker.recheck(); }
-    else readTracker.present(null);
+    if (focused) activateHistory();
+    // On Windows, moving focus into the WebView child can report an outer
+    // window blur. DOM focus and the native foreground check are authoritative.
+    else readTracker.recheck();
   });
-  window.addEventListener("focus", () => { scheduleRefresh(); readTracker.recheck(); });
+  window.addEventListener("focus", activateHistory);
+  window.addEventListener("blur", () => readTracker.setActive(false));
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") scheduleRefresh();
+    const visible = document.visibilityState === "visible";
+    readTracker.setActive(visible);
+    if (visible && historyOpened) scheduleRefresh();
   });
-  await refresh();
+  window.addEventListener("pagehide", () => readTracker.dispose(), { once: true });
+  await waitForPresentationFrame();
+  const opened = await invoke("history_presented", { pageMs: performance.now() });
+  // The initial focus event can precede listener registration. Foreground
+  // checks and the native command remain authoritative on each retry.
+  historyOpened ||= opened;
+  readTracker.setActive(historyOpened && document.visibilityState === "visible");
+  if (historyOpened) await refresh();
 }
 
 initialize().catch(showError);

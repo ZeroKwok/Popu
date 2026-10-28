@@ -31,7 +31,7 @@ impl HistoryStore {
         Self::from_connection(Connection::open(path)?)
     }
 
-    fn from_connection(mut connection: Connection) -> rusqlite::Result<Self> {
+    pub(crate) fn from_connection(mut connection: Connection) -> rusqlite::Result<Self> {
         let transaction = connection.transaction()?;
         transaction.execute_batch("CREATE TABLE IF NOT EXISTS notification_history (
           request_id TEXT PRIMARY KEY, state TEXT NOT NULL, revision INTEGER NOT NULL,
