@@ -13,7 +13,7 @@ Popu 是一个面向自动化脚本和 AI Agent 的轻量本机交互窗口。�
 ## 功能
 
 - JSON 的 `mode: "dialog"`：等待用户提交、取消、关闭或超时，向 stdout 返回 JSON。
-- JSON 的 `mode: "notify"`：窗口创建后返回，通知到期自动退出。
+- JSON 的 `mode: "notify"`：请求接受后返回，通知到期自动退出。
 - 内置 `confirm`、`form`、`notification` 三种模板。
 - 可信本地 HTML/CSS 模板替换；模板不执行自带 JavaScript。
 - 可选鼠标所在屏幕或主屏；尺寸支持逻辑像素与百分比，同一尺寸配置适用于 1080p、2K 和 4K 屏幕；`"100%" × "100%"` 填满所选工作区或物理屏幕。
@@ -21,14 +21,14 @@ Popu 是一个面向自动化脚本和 AI Agent 的轻量本机交互窗口。�
 - 无边框透明圆角窗口；Windows 圆角外部区域鼠标穿透到底层窗口。
 - `data-popu-drag-region` 定义拖拽背景，`data-popu-selectable` 定义可复制文本；内置模板默认允许复制所有展示内容。
 - Host 生成 UUID `request_id`，支持 `coalesce_key`、revision 冲突检测和完整内容快照更新。
-- dialog 全局 FIFO 单活跃；notification 在主显示器最多显示三个，溢出后 FIFO 排队。
+- dialog 全局 FIFO 单活跃；notification 在主显示器工作区最多显示三个，按实际高度检查空间，严格 FIFO 排队。通知仅支持 `window.area: "work_area"`。
 - notification 可设置 `requires_read: true` 声明需要用户阅读，默认 `false`；dialog 不允许携带该字段。超时或展示失败的通知保留未读状态，只有需要阅读且未读的历史记录会持续触发托盘提醒。
 
 ## 通知阅读与历史
 
 通知的请求终态和阅读状态独立：超时仍为 `expired`，阅读历史不会改变终态。主动关闭通知视为已知悉；调用方撤销或“Clear current notifications”也不留下待阅读提醒。
 
-历史窗口左侧以圆点和加粗标题表示未读，需要阅读的未读条目额外显示 “Awaiting reading” 标记。顶部同时显示待阅读数和全部未读数。只有详情在历史窗口前台完成展示后，该条记录才标记为已读；后台刷新和最小化不会批量清除未读。新记录到达时保留当前选择。
+历史窗口左侧标题始终加粗，以右侧圆点表示未读，需要阅读的未读条目额外显示 “Awaiting reading” 标记。顶部同时显示待阅读数和全部未读数。只有详情在历史窗口前台完成展示后，该条记录才标记为已读；后台刷新和最小化不会批量清除未读。新记录到达时保留当前选择。
 
 托盘左键单击或双击打开／恢复历史窗口，右键显示菜单。托盘仅在存在 `requires_read: true` 且未读的历史记录时持续提醒，正在显示或排队的通知不触发提醒；阅读其中一条不会清除其他待阅读记录的提醒。无待阅读历史时提示文字为 “Popu”，有待阅读历史时显示对应数量。阅读状态会在 Host 重启后保留，历史最多保存最近 500 条。
 
@@ -128,6 +128,12 @@ just build-test dialog-visual
 验证命令为 `npm run check:ui`、`npm run test:ui`、`npm run test:visuals`（使用本机 Microsoft Edge 无头浏览器）以及 `cargo test --manifest-path src-tauri/Cargo.toml`。浏览器测试覆盖明暗主题、高 DPI、离线渲染、表单提交及历史已读行为。
 
 Windows 下构建调试版后，还可运行 `npm run test:native` 验证实际 WebView2 加载。运行前应退出已有 Host；测试会短暂显示通知和自动超时的 dialog，使用 `test-results/native-*` 下的隔离历史库，结束后关闭自己启动的 Host，不清理或改写用户历史。
+
+通知请求按 `queued → preparing → ready → shown → 终态` 推进。协调器是请求状态的唯一写入者；同时只准备一条通知，队首放不下时后续通知不绕过。准备窗口有 15 秒时限，图片和图表完成后按内容 revision 确认就绪；原生揭示并校验后才开始通知计时。关闭旧窗口时先确认隐藏并压紧现有通知，再准备下一条。展示后每秒检查隐藏、DWM cloak 和 WebView 可见性，有限恢复失败才记录未读失败历史；普通遮挡和失焦不会触发回收。
+
+Windows 下可执行 `cargo test --manifest-path src-tauri/Cargo.toml --test notification_window notification_window_lifecycle -- --ignored --nocapture` 验证真实窗口的隐藏准备、版本过期回调、准备超时、严格 FIFO、展示后隐藏恢复、异常销毁补位和连续八轮混合尺寸显示。测试需要解锁桌面，使用独立 Named Pipe 和内存历史库，并在同一测试 Host 内完成全部轮次，不连接用户正在运行的 Host。若现有 Host 占用默认构建产物，可给 Cargo 添加 `--target-dir src-tauri/target/notification-refactor`。
+
+通知排布的职责、事件流、几何规则及诊断方法见 [通知窗口协调与排布](docs/notification-layout.md)。`popu host status` 分别输出活动总数、各生命周期状态数量、请求摘要、实际原生窗口状态和布局版本；这些计数与托盘历史待阅读数独立。
 
 历史列表只查询标题、severity 和阅读状态等摘要；选中记录后通过 `history_get`（RPC 为 `history.get`）读取完整图表和图片，避免一次加载全部历史图片。
 

@@ -161,7 +161,7 @@ mod tests {
             let request = Request::parse(&std::fs::read_to_string(&path).unwrap()).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
             let content = request.content.clone();
             let mut registry = crate::core::RequestRegistry::default();
-            let (created, _) = registry.create(request, None);
+            let created = registry.create(request, None);
             registry.update(created.request_id, 1, content.clone()).unwrap();
             let snapshot = registry.snapshot(created.request_id).unwrap();
             assert_eq!(snapshot.revision, 2);

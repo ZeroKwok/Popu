@@ -7,16 +7,20 @@ use std::time::{Duration, Instant};
 use interprocess::local_socket::traits::ListenerExt as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use tauri::{window::Color, AppHandle, Emitter, Manager, PhysicalPosition, RunEvent, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use uuid::Uuid;
 
-use crate::core::{Effect, RequestRegistry};
+use crate::core::RequestRegistry;
 use crate::ipc::{self, RpcRequest, RpcResponse, RPC_VERSION};
 use crate::history::HistoryStore;
-use crate::protocol::{Content, Mode, Position, Request, ResponseStatus, Screen};
+use crate::protocol::{Content, Mode, Request, ResponseStatus};
 use crate::{placement, runtime};
+
+#[path = "host/coordinator.rs"] mod coordinator;
+#[path = "host/windows.rs"] mod windows;
+use coordinator::{Command, Task};
 use crate::templates::{self, TemplateAssets};
 use crate::tray;
 
@@ -25,11 +29,9 @@ pub struct HostState {
     changed: Condvar,
     stopping: AtomicBool,
     history: Mutex<Option<HistoryStore>>,
-    effect_sender: Mutex<Option<Sender<WindowTask>>>,
+    sender: Mutex<Option<Sender<Task>>>,
     history_window: Mutex<Option<HistoryWindowSession>>,
 }
-
-enum WindowTask { Effects(Vec<Effect>), History { show: bool } }
 
 struct HistoryWindowSession { started: Instant, ready: bool, detail_ready: bool, open_requested: bool }
 
@@ -39,12 +41,12 @@ impl Default for HostState {
 
 impl HostState {
     fn with_history(history: Option<HistoryStore>) -> Self {
-        Self { registry: Mutex::new(RequestRegistry::default()), changed: Condvar::new(), stopping: AtomicBool::new(false), history: Mutex::new(history), effect_sender: Mutex::new(None), history_window: Mutex::new(None) }
+        Self { registry: Mutex::new(RequestRegistry::default()), changed: Condvar::new(), stopping: AtomicBool::new(false), history: Mutex::new(history), sender: Mutex::new(None), history_window: Mutex::new(None) }
     }
 }
 
 #[derive(Clone, Serialize)]
-struct Bootstrap { request: Request, template: TemplateAssets, maximized: bool }
+struct Bootstrap { request: Request, revision: u64, template: TemplateAssets, maximized: bool }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -61,10 +63,9 @@ pub fn run() -> i32 {
     let managed = Arc::clone(&state);
     let app = host_builder(managed)
         .setup(move |app| {
-            start_effect_worker(app.handle().clone(), Arc::clone(&state));
+            coordinator::start(app.handle().clone(), Arc::clone(&state));
             start_listener(app.handle().clone(), Arc::clone(&state))?;
             build_tray(app.handle())?;
-            start_timer(app.handle().clone(), Arc::clone(&state));
             start_tray_animation(app.handle().clone(), Arc::clone(&state));
             schedule_history(app.handle(), false);
             Ok(())
@@ -86,7 +87,7 @@ pub fn run() -> i32 {
 
 fn host_builder(state: Arc<HostState>) -> tauri::Builder<tauri::Wry> {
     tauri::Builder::default().manage(state)
-        .invoke_handler(tauri::generate_handler![get_bootstrap, submit, finish, render_failed, ui_presented, history_presented, history_trace, history_list, history_get, history_clear, history_mark_read])
+        .invoke_handler(tauri::generate_handler![get_bootstrap, submit, finish, render_failed, ui_ready, history_presented, history_trace, history_list, history_get, history_clear, history_mark_read])
         .on_window_event(handle_window_event)
 }
 
@@ -126,8 +127,7 @@ fn schedule_history(app: &AppHandle, show: bool) {
     let state = app.state::<Arc<HostState>>();
     // Share the notification worker: never build a WebView inside a tray/event
     // loop callback, or concurrently with another window builder.
-    let sender = state.effect_sender.lock().unwrap().clone();
-    if let Some(sender) = sender { let _ = sender.send(WindowTask::History { show }); }
+    let _ = coordinator::send(&state, Task::History { show });
 }
 
 fn show_history(window: &WebviewWindow) -> tauri::Result<()> {
@@ -163,19 +163,15 @@ fn open_history_on_worker(app: &AppHandle, state: &Arc<HostState>, show: bool) {
 }
 
 fn clear_current_notifications(app: &AppHandle) {
-    let state = app.state::<Arc<HostState>>(); let ids = state.registry.lock().unwrap().active_notification_ids();
-    let mut effects = vec![];
-    for id in ids {
-        let result = { state.registry.lock().unwrap().dismiss(id) };
-        if let Ok(mut next) = result { effects.append(&mut next); persist_terminal(app, state.inner(), id); }
-    }
-    state.changed.notify_all(); schedule(app, state.inner().clone(), effects);
+    let state = app.state::<Arc<HostState>>();
+    let (reply, _) = mpsc::channel();
+    let _ = coordinator::send(&state, Task::Command(Command::Clear, reply));
 }
 
 fn stop_from_tray(app: &AppHandle) {
-    let state = app.state::<Arc<HostState>>(); state.stopping.store(true, Ordering::SeqCst);
-    let ids = state.registry.lock().unwrap().shutdown(); for id in ids { persist_terminal(app, state.inner(), id); }
-    state.changed.notify_all(); app.exit(0);
+    let state = app.state::<Arc<HostState>>();
+    let (reply, _) = mpsc::channel();
+    let _ = coordinator::send(&state, Task::Command(Command::Stop, reply));
 }
 
 fn start_listener(app: AppHandle, state: Arc<HostState>) -> Result<(), Box<dyn std::error::Error>> {
@@ -213,38 +209,15 @@ fn dispatch(rpc: RpcRequest, app: &AppHandle, state: &Arc<HostState>) -> RpcResp
             params.request.validate().map_err(invalid)?;
             params.template = params.template.map(|path| path.canonicalize()).transpose().map_err(invalid)?;
             if let Some(path) = params.template.as_deref() { templates::resolve(&params.request, Some(path)).map_err(invalid)?; }
-            let (created, effects) = {
-                let mut registry = state.registry.lock().unwrap();
-                let (mut created, mut effects) = registry.create(params.request, params.template);
-                if created.state == crate::core::RequestState::Shown
-                    && registry.request(created.request_id).is_some_and(|request| request.mode == Mode::Notify)
-                    && notification_fits_in_registry(&registry, created.request_id).is_ok_and(|fits| !fits)
-                {
-                    registry.defer_notification(created.request_id).map_err(invalid)?;
-                    created.state = crate::core::RequestState::Queued;
-                    effects.clear();
-                }
-                (created, effects)
-            };
-            state.changed.notify_all(); schedule(app, Arc::clone(state), effects);
-            serde_json::to_value(created).map_err(invalid)
+            coordinator::call(state, Command::Create(params))
         }
         "request.update" => {
             let params: UpdateParams = serde_json::from_value(rpc.params).map_err(invalid)?;
-            let mut registry = state.registry.lock().unwrap();
-            let effects = registry.update(params.request_id, params.expected_revision, params.content).map_err(|e| serde_json::to_value(e).unwrap())?;
-            let snapshot = registry.snapshot(params.request_id).unwrap(); drop(registry);
-            state.changed.notify_all(); schedule(app, Arc::clone(state), effects);
-            serde_json::to_value(snapshot).map_err(invalid)
+            coordinator::call(state, Command::Update(params))
         }
         "request.dismiss" => {
             let params: IdParams = serde_json::from_value(rpc.params).map_err(invalid)?;
-            let mut registry = state.registry.lock().unwrap();
-            let effects = registry.dismiss(params.request_id).map_err(|e| serde_json::to_value(e).unwrap())?;
-            let snapshot = registry.snapshot(params.request_id).unwrap(); drop(registry);
-            persist_terminal(app, state, params.request_id);
-            state.changed.notify_all(); schedule(app, Arc::clone(state), effects);
-            serde_json::to_value(snapshot).map_err(invalid)
+            coordinator::call(state, Command::Dismiss(params.request_id))
         }
         "request.get" => {
             let params: IdParams = serde_json::from_value(rpc.params).map_err(invalid)?;
@@ -260,7 +233,7 @@ fn dispatch(rpc: RpcRequest, app: &AppHandle, state: &Arc<HostState>) -> RpcResp
                 registry = state.changed.wait(registry).unwrap();
             }
         }
-        "host.status" => Ok(json!({"status":"running","notifications":state.registry.lock().unwrap().active_notification_count()})),
+        "host.status" => coordinator::call(state, Command::Status),
         "history.list" => {
             let history = state.history.lock().unwrap();
             let items = history.as_ref().ok_or_else(|| json!({"code":"history_unavailable"}))?.list().map_err(invalid)?;
@@ -279,13 +252,7 @@ fn dispatch(rpc: RpcRequest, app: &AppHandle, state: &Arc<HostState>) -> RpcResp
             update_tray_tooltip(app, state);
             Ok(json!({"status":"cleared","count":count}))
         }
-        "host.stop" => {
-            state.stopping.store(true, Ordering::SeqCst);
-            let ids = state.registry.lock().unwrap().shutdown(); state.changed.notify_all();
-            for id in &ids { persist_terminal(app, state, *id); }
-            let app = app.clone(); std::thread::spawn(move || { std::thread::sleep(Duration::from_millis(30)); let exit_app = app.clone(); let _ = app.run_on_main_thread(move || exit_app.exit(0)); });
-            Ok(json!({"status":"stopping","cancelled":ids.len()}))
-        }
+        "host.stop" => coordinator::call(state, Command::Stop),
         _ => Err(json!({"code":"method_not_found","message":format!("unknown RPC method: {}", rpc.method)})),
     })();
     match result { Ok(value) => RpcResponse::success(value).unwrap(), Err(error) => RpcResponse { version: RPC_VERSION.into(), ok: false, result: None, error: Some(error) } }
@@ -294,159 +261,11 @@ fn dispatch(rpc: RpcRequest, app: &AppHandle, state: &Arc<HostState>) -> RpcResp
 fn invalid(error: impl std::fmt::Display) -> Value { json!({"code":"invalid_request","message":error.to_string()}) }
 fn failure(code: &str, message: String) -> RpcResponse { RpcResponse::failure(json!({"code":code,"message":message})).unwrap() }
 
-fn start_effect_worker(app: AppHandle, state: Arc<HostState>) {
-    let (sender, receiver) = mpsc::channel();
-    *state.effect_sender.lock().unwrap() = Some(sender);
-    std::thread::spawn(move || {
-        while let Ok(task) = receiver.recv() {
-            match task {
-                WindowTask::Effects(effects) => apply_effects(&app, &state, effects),
-                WindowTask::History { show } => open_history_on_worker(&app, &state, show),
-            }
-        }
-    });
-}
-
-fn schedule(_app: &AppHandle, state: Arc<HostState>, effects: Vec<Effect>) {
-    if effects.is_empty() { return; }
-    let sender = state.effect_sender.lock().unwrap().clone();
-    if let Some(sender) = sender {
-        if sender.send(WindowTask::Effects(effects)).is_err() { eprintln!("Popu effect worker stopped unexpectedly"); }
-    } else {
-        eprintln!("Popu effect worker is not ready");
-    }
-}
-
-fn apply_effects(app: &AppHandle, state: &Arc<HostState>, effects: Vec<Effect>) {
-    // WebView2 can synchronously pump messages while a window is being built.
-    // Running builders or destroys in an app.run_on_main_thread callback can
-    // therefore re-enter Wry while its WebContextStore mutex is held. Keep a
-    // single FIFO worker off the UI thread; Tauri dispatches each native
-    // operation to its event loop without blocking that loop re-entrantly.
-    // New notifications are positioned as they are created. Reflow only after
-    // a notification leaves the stack, so a user's drag is not overwritten by
-    // timer ticks, content updates, or unrelated dialog activity.
-    let reflow_notifications = {
-        let registry = state.registry.lock().unwrap();
-        effects.iter().any(|effect| match effect {
-            Effect::Close(id) => registry.request(*id).is_some_and(|request| request.mode == Mode::Notify),
-            Effect::Show(_) | Effect::Update(_) => false,
-        })
-    };
-    for effect in effects {
-        match effect {
-            Effect::Show(id) => if let Err(error) = show_window(app, state, id) { eprintln!("Popu window error: {error}"); complete_failed(app, state, id); },
-            Effect::Update(id) => if let Some(window) = app.get_webview_window(&id.to_string()) {
-                if let Some(content) = state.registry.lock().unwrap().request(id).map(|r| r.content.clone()) {
-                    if let Ok(value) = serde_json::to_string(&content) { let _ = window.eval(format!("window.popuApplyUpdate?.({value})")); }
-                }
-            },
-            Effect::Close(id) => if let Some(window) = app.get_webview_window(&id.to_string()) { let _ = window.destroy(); },
-        }
-    }
-    if reflow_notifications { reposition_notifications(app, state); }
-    update_tray_tooltip(app, state);
-}
-
 fn update_tray_tooltip(app: &AppHandle, state: &Arc<HostState>) {
     let pending = pending_history_read_count(state);
     if let Some(tray) = app.tray_by_id("popu") {
         let _ = tray.set_tooltip(Some(tray_tooltip(pending)));
     }
-}
-
-fn stacked_notification_request(mut request: Request) -> Request {
-    request.window.screen = Screen::Primary;
-    request.position = Position::BottomRight;
-    request
-}
-
-fn stacked_notification_placement(request: &Request, preceding: &[Request]) -> Result<placement::WindowPlacement, String> {
-    let request = stacked_notification_request(request.clone());
-    let mut placement = runtime::resolve_window_placement(&request)?;
-    let preceding_heights = preceding.iter().cloned().map(stacked_notification_request)
-        .map(|notification| runtime::resolve_window_placement(&notification).map(|placement| placement.size.1))
-        .collect::<Result<Vec<_>, _>>()?;
-    placement.position.y = placement.position.y.saturating_sub(placement::notification_stack_offset(preceding_heights));
-    Ok(placement)
-}
-
-fn notification_placement_in_registry(registry: &RequestRegistry, id: Uuid) -> Result<placement::WindowPlacement, String> {
-    let request = registry.request(id).cloned().ok_or("request not found")?;
-    if request.mode != Mode::Notify { return Err("request is not a notification".into()); }
-    let preceding: Vec<_> = registry.notification_slot(id).into_iter().flat_map(|slot| {
-        registry.visible_notification_ids().into_iter().take(slot)
-    }).filter_map(|previous_id| registry.request(previous_id).cloned()).collect();
-    stacked_notification_placement(&request, &preceding)
-}
-
-fn notification_fits_in_registry(registry: &RequestRegistry, id: Uuid) -> Result<bool, String> {
-    let request = registry.request(id).cloned().ok_or("request not found")?;
-    if request.mode != Mode::Notify { return Ok(true); }
-    Ok(placement::notification_fits(notification_placement_in_registry(registry, id)?))
-}
-
-fn show_window(app: &AppHandle, state: &Arc<HostState>, id: Uuid) -> Result<(), String> {
-    let (mut request, template_dir, notification_placement) = {
-        let registry = state.registry.lock().unwrap();
-        let request = registry.request(id).cloned().ok_or("request not found")?;
-        let notification_placement = (request.mode == Mode::Notify)
-            .then(|| notification_placement_in_registry(&registry, id))
-            .transpose()?;
-        (request, registry.template_dir(id).map(PathBuf::from), notification_placement)
-    };
-    if request.mode == Mode::Notify { request = stacked_notification_request(request); }
-    let _template = templates::resolve(&request, template_dir.as_deref()).map_err(|e| e.to_string())?;
-    let placement = if let Some(placement) = notification_placement {
-        if !placement::notification_fits(placement) {
-            state.registry.lock().unwrap().defer_notification(id).map_err(|error| error.to_string())?;
-            state.changed.notify_all();
-            return Ok(());
-        }
-        placement
-    } else {
-        runtime::resolve_window_placement(&request)?
-    };
-    let notify = request.mode == Mode::Notify;
-    let window = WebviewWindowBuilder::new(app, id.to_string(), WebviewUrl::App("index.html".into()))
-        // Move the hidden window to the target monitor before setting its
-        // logical size, so Tauri applies that monitor's DPI scale factor.
-        .title(&request.content.title).inner_size(1.0, 1.0)
-        .min_inner_size(1.0, 1.0).decorations(false).transparent(true).resizable(false)
-        .background_color(Color(0, 0, 0, 0))
-        .always_on_top(request.window.always_on_top).skip_taskbar(notify).focused(!notify).visible(false).shadow(false)
-        .build().map_err(|e| e.to_string())?;
-    runtime::position_window(&window, placement)?;
-    runtime::size_window(&window, placement)?;
-    runtime::position_window(&window, placement)?;
-    #[cfg(windows)] runtime::configure_frameless_windows_window(&window, request.window.is_maximized())?;
-    window.show().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn reposition_notification(app: &AppHandle, state: &Arc<HostState>, id: Uuid) {
-    let placement = {
-        let registry = state.registry.lock().unwrap();
-        notification_placement_in_registry(&registry, id)
-    };
-    let Ok(placement) = placement else { return };
-    let Some(window) = app.get_webview_window(&id.to_string()) else { return };
-    if let Err(error) = window.set_position(PhysicalPosition::new(placement.position.x, placement.position.y)) {
-        eprintln!("Popu notification reflow failed for {id}: {error}");
-    }
-}
-
-fn reposition_notifications(app: &AppHandle, state: &Arc<HostState>) {
-    let ids = state.registry.lock().unwrap().visible_notification_ids();
-    for id in ids { reposition_notification(app, state, id); }
-}
-
-fn start_timer(app: AppHandle, state: Arc<HostState>) {
-    std::thread::spawn(move || { while !state.stopping.load(Ordering::SeqCst) {
-        std::thread::sleep(Duration::from_millis(100));
-        let effects = { state.registry.lock().unwrap().expire_due(Instant::now()) };
-        if !effects.is_empty() { for effect in &effects { if let Effect::Close(id) = effect { persist_terminal(&app, &state, *id); } } state.changed.notify_all(); schedule(&app, Arc::clone(&state), effects); }
-    }});
 }
 
 fn start_tray_animation(app: AppHandle, state: Arc<HostState>) {
@@ -471,8 +290,11 @@ fn id_for(window: &WebviewWindow) -> Result<Uuid, String> { Uuid::parse_str(wind
 fn get_bootstrap(window: WebviewWindow, state: State<'_, Arc<HostState>>) -> Result<Bootstrap, String> {
     let id = id_for(&window)?; let registry = state.registry.lock().unwrap();
     let request = registry.request(id).cloned().ok_or("request not found")?;
-    let template = templates::resolve(&request, registry.template_dir(id)).map_err(|e| e.to_string())?;
-    Ok(Bootstrap { maximized: request.window.is_maximized(), request, template })
+    let revision = registry.summary(id).map_err(|e| e.to_string())?.revision;
+    let template_dir = registry.template_dir(id).map(PathBuf::from);
+    drop(registry);
+    let template = templates::resolve(&request, template_dir.as_deref()).map_err(|e| e.to_string())?;
+    Ok(Bootstrap { maximized: request.window.is_maximized(), request, revision, template })
 }
 
 #[tauri::command]
@@ -545,53 +367,30 @@ fn history_clear(app: AppHandle, state: State<'_, Arc<HostState>>) -> Result<usi
 }
 
 #[tauri::command]
-fn ui_presented(window: WebviewWindow, state: State<'_, Arc<HostState>>) -> Result<(), String> {
+async fn ui_ready(window: WebviewWindow, state: State<'_, Arc<HostState>>, revision: u64) -> Result<(), String> {
     let id = id_for(&window)?;
-    runtime::reveal_windows_window(&window)?;
-    let mode = {
-        let mut registry = state.registry.lock().unwrap();
-        registry.mark_shown(id, Instant::now()).map_err(|e| e.to_string())?;
-        registry.request(id).map(|request| request.mode).ok_or("request not found")?
-    };
-    if mode == Mode::Notify { reposition_notification(window.app_handle(), state.inner(), id); }
-    else { window.set_focus().map_err(|e| e.to_string())?; }
-    state.changed.notify_all(); Ok(())
+    let (reply, receiver) = mpsc::channel();
+    coordinator::send(&state, Task::Ready { id, revision, reply })?;
+    tauri::async_runtime::spawn_blocking(move || receiver.recv().map_err(|e| e.to_string()))
+        .await.map_err(|e| e.to_string())??
 }
 
 #[tauri::command]
-fn submit(window: WebviewWindow, app: AppHandle, state: State<'_, Arc<HostState>>, action: String, values: Map<String, Value>) -> Result<(), String> {
-    let id = id_for(&window)?; let mut registry = state.registry.lock().unwrap();
-    let request = registry.request(id).cloned().ok_or("request not found")?;
-    let response = request.submitted_response(&action, values).map_err(|e| e.to_string())?;
-    let code = request.actions.iter().find(|a| a.id == action).and_then(|a| a.exit_code).map(i32::from).unwrap_or(0);
-    let effects = registry.complete(id, response, code).map_err(|e| e.to_string())?; drop(registry);
-    persist_terminal(&app, state.inner(), id);
-    state.changed.notify_all(); schedule(&app, state.inner().clone(), effects); Ok(())
+async fn submit(window: WebviewWindow, state: State<'_, Arc<HostState>>, action: String, values: Map<String, Value>) -> Result<(), String> {
+    coordinator::call_async(Arc::clone(state.inner()), Command::Submit { id: id_for(&window)?, action, values }).await
 }
 
 #[tauri::command]
-fn finish(window: WebviewWindow, app: AppHandle, state: State<'_, Arc<HostState>>, status: ResponseStatus, action: Option<String>) -> Result<(), String> {
-    let id = id_for(&window)?; let mut registry = state.registry.lock().unwrap(); let request = registry.request(id).cloned().ok_or("request not found")?;
-    let response = request.terminal_response(status, action.clone());
-    let code = action.as_deref().and_then(|id| request.actions.iter().find(|a| a.id == id)).and_then(|a| a.exit_code).map(i32::from)
-        .unwrap_or(match status { ResponseStatus::Submitted | ResponseStatus::Confirmed => 0, ResponseStatus::TimedOut => 11, _ => 10 });
-    let effects = registry.complete(id, response, code).map_err(|e| e.to_string())?; drop(registry);
-    persist_terminal(&app, state.inner(), id);
-    state.changed.notify_all(); schedule(&app, state.inner().clone(), effects); Ok(())
+async fn finish(window: WebviewWindow, state: State<'_, Arc<HostState>>, status: ResponseStatus, action: Option<String>) -> Result<(), String> {
+    coordinator::call_async(Arc::clone(state.inner()), Command::Finish { id: id_for(&window)?, status, action }).await
 }
 
 #[tauri::command]
-fn render_failed(window: WebviewWindow, app: AppHandle, state: State<'_, Arc<HostState>>, message: String) {
-    eprintln!("Popu renderer failed: {message}"); if let Ok(id) = id_for(&window) { complete_failed(&app, state.inner(), id); }
-}
-
-fn complete_failed(app: &AppHandle, state: &Arc<HostState>, id: Uuid) {
-    let result = { state.registry.lock().unwrap().fail(id) };
-    if let Ok(effects) = result { persist_terminal(app, state, id); state.changed.notify_all(); schedule(app, Arc::clone(state), effects); }
+fn render_failed(window: WebviewWindow, state: State<'_, Arc<HostState>>, message: String) {
+    if let Ok(id) = id_for(&window) { let _ = coordinator::send(&state, Task::RenderFailed { id, message }); }
 }
 
 fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
-    // Keep the WebView warm across opens. Shutdown still exits the app.
     if window.label() == "history" {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
@@ -599,13 +398,14 @@ fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
         }
         return;
     }
-    if !matches!(event, WindowEvent::CloseRequested { .. }) { return; }
-    let Ok(id) = Uuid::parse_str(window.label()) else { return }; let app = window.app_handle(); let state = app.state::<Arc<HostState>>();
-    let result = { let mut registry = state.registry.lock().unwrap();
-        let Some(request) = registry.request(id).cloned() else { return };
-        if request.mode == Mode::Dialog { registry.complete(id, request.terminal_response(ResponseStatus::Closed, None), 10) } else { registry.dismiss(id) }
+    let Ok(id) = Uuid::parse_str(window.label()) else { return };
+    let task = match event {
+        WindowEvent::CloseRequested { api, .. } => { api.prevent_close(); Task::Closed(id) }
+        WindowEvent::Destroyed => Task::Destroyed(id),
+        _ => return,
     };
-    if let Ok(effects) = result { persist_terminal(app, state.inner(), id); state.changed.notify_all(); schedule(app, state.inner().clone(), effects); }
+    let state = window.app_handle().state::<Arc<HostState>>();
+    let _ = coordinator::send(&state, task);
 }
 
 fn clear_history(state: &Arc<HostState>) -> Result<usize, String> {
@@ -631,8 +431,10 @@ fn persist_terminal(app: &AppHandle, state: &Arc<HostState>, id: Uuid) {
     if snapshot.mode != Mode::Notify || !snapshot.state.is_terminal() { return; }
     let mut history_guard = state.history.lock().unwrap();
     let Some(history) = history_guard.as_mut() else { return };
-    match history.record(&snapshot) {
-        Ok(()) => emit_history_changed(app),
+    let result = history.record(&snapshot);
+    drop(history_guard);
+    match result {
+        Ok(()) => { emit_history_changed(app); update_tray_tooltip(app, state); }
         Err(error) => eprintln!("Popu history error: {error}"),
     }
 }

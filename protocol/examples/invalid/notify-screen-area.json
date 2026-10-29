@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "mode": "notify",
+  "window": { "area": "screen" },
+  "content": { "title": "Notifications share the primary work area" }
+}
