@@ -20,13 +20,20 @@ class ScreenArea(str, Enum):
     SCREEN = "screen"
 
 
+class VerticalAlign(str, Enum):
+    START = "start"
+    CENTER = "center"
+
+
 WindowDimension = int | float | str
 
 
 def _content(severity: str, title: str, message: str,
-             blocks: list[Mapping[str, Any]] | None, icon: Mapping[str, str] | None) -> dict[str, Any]:
+             blocks: list[Mapping[str, Any]] | None, icon: Mapping[str, str] | None,
+             vertical_align: VerticalAlign) -> dict[str, Any]:
     content: dict[str, Any] = {
         "severity": severity, "title": title,
+        "vertical_align": vertical_align.value,
         "blocks": ([{"type": "paragraph", "text": message}] if message else []) + [dict(block) for block in blocks or []],
     }
     if icon is not None:
@@ -40,8 +47,11 @@ def _window_options(
     area: ScreenArea,
     width: WindowDimension | None,
     height: WindowDimension | None,
+    always_on_top: bool = True,
 ) -> dict[str, Any]:
-    options: dict[str, Any] = {"screen": screen.value, "area": area.value}
+    options: dict[str, Any] = {
+        "always_on_top": always_on_top, "screen": screen.value, "area": area.value,
+    }
     if width is not None:
         options["width"] = width
     if height is not None:
@@ -70,6 +80,9 @@ class DialogRequest:
         area: ScreenArea = ScreenArea.WORK_AREA,
         width: WindowDimension | None = None,
         height: WindowDimension | None = None,
+        always_on_top: bool = True,
+        vertical_align: VerticalAlign = VerticalAlign.CENTER,
+        coalesce_key: str | None = None,
     ) -> "DialogRequest":
         return cls(
             {
@@ -78,9 +91,11 @@ class DialogRequest:
                 "template": "confirm",
                 "position": position.value,
                 "window": _window_options(
-                    screen=screen, area=area, width=width, height=height
+                    screen=screen, area=area, width=width, height=height,
+                    always_on_top=always_on_top,
                 ),
-                "content": _content("warning" if dangerous else "info", title, message, blocks, icon),
+                "content": _content("warning" if dangerous else "info", title, message, blocks, icon, vertical_align),
+                **({"coalesce_key": coalesce_key} if coalesce_key is not None else {}),
                 "actions": [
                     {
                         "id": "confirm",
@@ -113,11 +128,15 @@ class Notification:
         position: Position = Position.BOTTOM_RIGHT,
         duration_ms: int = 8_000,
         requires_read: bool = False,
-        screen: Screen = Screen.CURSOR,
+        screen: Screen = Screen.PRIMARY,
         area: ScreenArea = ScreenArea.WORK_AREA,
         width: WindowDimension | None = None,
         height: WindowDimension | None = None,
+        vertical_align: VerticalAlign = VerticalAlign.CENTER,
+        coalesce_key: str | None = None,
     ) -> "Notification":
+        if area != ScreenArea.WORK_AREA:
+            raise ValueError("notify windows use the primary display work_area")
         return cls(
             {
                 "version": "1.0",
@@ -129,7 +148,8 @@ class Notification:
                 ),
                 "duration_ms": duration_ms,
                 "requires_read": requires_read,
-                "content": _content("success", title, message, blocks, icon),
+                "content": _content("success", title, message, blocks, icon, vertical_align),
+                **({"coalesce_key": coalesce_key} if coalesce_key is not None else {}),
             }
         )
 

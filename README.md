@@ -170,9 +170,11 @@ Host 在首次请求时自动启动。notification 被 Host 接受后 CLI 立即
 
 ## Python
 
-新版 `Client` 提供 `create`、`update`、`dismiss`、`status` 和 `wait`，返回 `request_id`、revision、队列状态及 duplicate 信息，不再使用 lifetime pipe。
+Python SDK 需要 Python 3.10+，在仓库根目录运行 `python -m pip install -e ./python` 安装。`Client` 默认从 PATH 查找 `popu`，也可用 `Client(executable="path/to/popu.exe")` 指定本地构建。
 
-Python SDK 已同步 Host 协议。`Client` 提供 `create`、`update`、`dismiss`、`status`、`wait`，并返回 `request_id`、`revision`、队列状态和 `duplicate`。
+`Client.create`／`notify` 返回含 `request_id`、`revision`、队列状态和 `duplicate` 的接受回执；`update`、`dismiss`、`status`、`wait` 返回 Host 完整快照。`show` 等待并返回交互结果。`wait` 始终读取 Host 权威终态，支持跨 Client 管理同一请求；dialog CLI 子进程在后台排空并回收，不再使用 lifetime pipe。
+
+通知 builder 显式提交 `window.always_on_top: true`，默认使用主显示器工作区；dialog builder 支持尺寸、屏幕、区域和置顶配置，两个 builder 均支持 `vertical_align` 与 `coalesce_key`。`create`／`show`／`notify` 支持 `template=` 可信模板目录。安装、错误处理与调用示例见 [Python SDK 文档](python/README.md)。
 
 完整协议与设计边界见 [ARCHITECTURE.md](ARCHITECTURE.md)，JSON Schema 见 [protocol/popu.schema.json](protocol/popu.schema.json)。
 
