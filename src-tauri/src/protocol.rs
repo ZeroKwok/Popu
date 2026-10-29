@@ -430,6 +430,9 @@ impl Request {
                 }
             }
             Mode::Notify => {
+                if self.window.area != ScreenArea::WorkArea {
+                    return Err(ProtocolError::Invalid("notify windows use the primary display work_area".into()));
+                }
                 let has_form_block = self
                     .content
                     .blocks

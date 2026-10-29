@@ -135,7 +135,7 @@ mod tests {
         let mut registry = RequestRegistry::default();
         for index in 0..501 {
             let request = Request::parse(&format!(r#"{{"version":"1.0","mode":"notify","content":{{"title":"Item {index}"}}}}"#)).unwrap();
-            let (created, _) = registry.create(request, None);
+            let created = registry.create(request, None);
             registry.dismiss(created.request_id).unwrap();
             store.record(&registry.snapshot(created.request_id).unwrap()).unwrap();
         }
@@ -152,7 +152,7 @@ mod tests {
             r#"{"version":"1.0","mode":"notify","content":{"title":"Completed"}}"#,
         )
         .unwrap();
-        let (created, _) = registry.create(request, None);
+        let created = registry.create(request, None);
         let request = registry.request(created.request_id).unwrap().clone();
         registry
             .complete(
@@ -169,7 +169,7 @@ mod tests {
     fn terminal(requires_read: bool, state: RequestState) -> RequestSnapshot {
         let mut registry = RequestRegistry::default();
         let request = Request::parse(&format!(r#"{{"version":"1.0","mode":"notify","requires_read":{requires_read},"content":{{"title":"History item"}}}}"#)).unwrap();
-        let (created, _) = registry.create(request.clone(), None);
+        let created = registry.create(request.clone(), None);
         match state {
             RequestState::Failed => { registry.fail(created.request_id).unwrap(); }
             RequestState::Cancelled => { registry.dismiss(created.request_id).unwrap(); }
@@ -273,7 +273,7 @@ mod tests {
             let request = Request::parse(&std::fs::read_to_string(examples.join(name)).unwrap()).unwrap();
             let expected = serde_json::to_value(&request.content).unwrap();
             let mut registry = RequestRegistry::default();
-            let (created, _) = registry.create(request, None);
+            let created = registry.create(request, None);
             registry.fail(created.request_id).unwrap();
             store.record(&registry.snapshot(created.request_id).unwrap()).unwrap();
             let items = store.list().unwrap();

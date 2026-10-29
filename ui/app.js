@@ -194,10 +194,24 @@ function renderContent(content, preserveForm = false) {
   return pendingContent;
 }
 
-window.popuApplyUpdate = (content) => {
+window.popuApplyUpdate = (content, revision) => {
   bootstrap.request.content = content;
-  renderContent(content, bootstrap.request.mode === "dialog").catch(reportRenderFailure);
+  bootstrap.revision = revision;
+  renderContent(content, bootstrap.request.mode === "dialog");
+  announceReady().catch(reportRenderFailure);
 };
+
+async function announceReady() {
+  let ready;
+  let revision;
+  do {
+    ready = pendingContent;
+    revision = bootstrap.revision;
+    await ready;
+    await waitForPresentationFrame();
+  } while (ready !== pendingContent);
+  await invoke("ui_ready", { revision });
+}
 
 async function waitForPresentationFrame() {
   await Promise.race([
@@ -289,7 +303,7 @@ async function start() {
   style.textContent = bootstrap.template.css;
   document.head.append(style);
 
-  const initialContent = renderContent(bootstrap.request.content);
+  renderContent(bootstrap.request.content);
   renderActions(bootstrap.request.actions);
   installDragRegions();
 
@@ -299,10 +313,7 @@ async function start() {
       invoke("finish", { status: "cancelled", action: null });
     }
   });
-  let ready = initialContent;
-  do { ready = pendingContent; await ready; } while (ready !== pendingContent);
-  await waitForPresentationFrame();
-  await invoke("ui_presented");
+  await announceReady();
   document.querySelector("input, textarea, select, button")?.focus();
 }
 

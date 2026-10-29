@@ -15,6 +15,7 @@ async function mockHost(page, fixture, history = [], foreground = true, opened =
     window.__reads = [];
     window.__submitted = null;
     window.__presented = false;
+    window.__readyRevisions = [];
     window.__failed = null;
     window.__historyForeground = foreground;
     window.__detailRequests = [];
@@ -25,8 +26,8 @@ async function mockHost(page, fixture, history = [], foreground = true, opened =
     window.__historyListeners = {};
     window.__TAURI__ = {
       core: { invoke: async (command, args) => {
-        if (command === "get_bootstrap") return { request: fixture, template, maximized: false };
-        if (command === "ui_presented") { window.__presented = true; return; }
+        if (command === "get_bootstrap") return { request: fixture, revision: 1, template, maximized: false };
+        if (command === "ui_ready") { window.__readyRevisions.push(args.revision); window.__presented = true; return; }
         if (command === "render_failed") { window.__failed = args.message; return; }
         if (command === "history_presented") { window.__historyPresented = true; return opened; }
         if (command === "history_trace") return;
@@ -87,6 +88,8 @@ test("history waits for chart rendering before marking only the selected item re
   await expect.poll(() => page.evaluate(() => window.__reads)).toEqual(["0"]);
   await expect(page.locator('#history-detail .popu-chart[data-ready="true"] svg')).toBeVisible();
   await expect(page.locator(".history-item[data-unread]")).toHaveCount(1);
+  await expect(page.locator(".history-item:not([data-unread]) strong")).toHaveCSS("font-weight", "700");
+  await expect(page.locator(".history-item[data-unread] strong")).toHaveCSS("font-weight", "700");
   await expect(page.locator(".history-severity-icon")).toHaveCount(2);
   await page.screenshot({ path: testInfo.outputPath("history.png") });
 });
@@ -100,10 +103,28 @@ test("updating a chart preserves entered form values", async ({ page }) => {
   const previous = await page.locator(".popu-chart svg").evaluate((svg) => svg.outerHTML);
   const content = structuredClone(fixture.content);
   content.blocks[1].spec.data.values[0].ms = 200;
-  await page.evaluate((content) => window.popuApplyUpdate(content), content);
+  await page.evaluate((content) => window.popuApplyUpdate(content, 2), content);
   await expect(page.getByLabel("I have reviewed these measurements")).toBeChecked();
   await expect(page.locator('.popu-chart[data-ready="true"] svg')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__readyRevisions.at(-1))).toBe(2);
   expect(await page.locator(".popu-chart svg").evaluate((svg) => svg.outerHTML)).not.toBe(previous);
+  expect(await page.evaluate(() => window.__failed)).toBeNull();
+});
+
+test("rapid content revisions acknowledge only the latest completed rendering", async ({ page }) => {
+  const fixture = readJson("protocol/examples/notification-visual-line.json");
+  await mockHost(page, fixture);
+  await page.goto("/index.html");
+  await expect.poll(() => page.evaluate(() => window.__readyRevisions)).toEqual([1]);
+  await page.evaluate((content) => {
+    const next = structuredClone(content);
+    next.title = "Intermediate";
+    window.popuApplyUpdate(next, 2);
+    next.title = "Latest";
+    window.popuApplyUpdate(next, 3);
+  }, fixture.content);
+  await expect.poll(() => page.evaluate(() => window.__readyRevisions.at(-1))).toBe(3);
+  expect(await page.evaluate(() => window.__readyRevisions.slice(1).every((revision) => revision === 3))).toBe(true);
   expect(await page.evaluate(() => window.__failed)).toBeNull();
 });
 
@@ -192,7 +213,7 @@ test("bar tooltips show formatted values, stay out of window dragging and are di
   expect(await page.evaluate(() => window.__dragStarts)).toBe(0);
   const content = structuredClone(fixture.content);
   content.blocks[1].spec.data.values[0].ms = 200;
-  await page.evaluate((content) => window.popuApplyUpdate(content), content);
+  await page.evaluate((content) => window.popuApplyUpdate(content, 2), content);
   await expect(page.locator('.popu-chart[data-ready="true"]')).toBeVisible();
   await expect(page.locator(".popu-chart-tooltip")).toHaveCount(1);
   await page.locator('.popu-chart path[aria-label*="Gateway"]').first().hover();

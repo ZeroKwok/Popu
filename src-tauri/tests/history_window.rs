@@ -3,7 +3,7 @@
 #![cfg(windows)]
 #![allow(dead_code)]
 
-pub use popu_lib::{core, ipc, placement, protocol, templates};
+pub use popu_lib::{core, ipc, notifications, placement, protocol, templates};
 #[path = "../src/history.rs"]
 mod history;
 #[path = "../src/runtime.rs"]
@@ -89,7 +89,7 @@ mod host {
             ))
             .unwrap();
             request.requires_read = Some(true);
-            let (created, _) = registry.create(request.clone(), None);
+            let created = registry.create(request.clone(), None);
             registry
                 .complete(
                     created.request_id,
@@ -106,7 +106,7 @@ mod host {
                 .any_thread()
                 .setup(move |app| {
                     let handle = app.handle().clone();
-                    start_effect_worker(handle.clone(), Arc::clone(&state));
+                    coordinator::start(handle.clone(), Arc::clone(&state));
                     std::thread::spawn(move || {
                         let result = (|| -> Result<(), String> {
                             let opened = Instant::now();
@@ -201,7 +201,7 @@ mod host {
                                 "../../protocol/examples/notification-visual-line.json"
                             ))
                             .unwrap();
-                            let (created, _) = registry.create(request.clone(), None);
+                            let created = registry.create(request.clone(), None);
                             registry
                                 .complete(
                                     created.request_id,

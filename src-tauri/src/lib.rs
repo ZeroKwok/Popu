@@ -3,6 +3,7 @@ mod history;
 mod host;
 pub mod ipc;
 pub mod placement;
+pub mod notifications;
 pub mod protocol;
 mod runtime;
 pub mod templates;

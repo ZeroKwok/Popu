@@ -4,6 +4,7 @@ use tauri::{LogicalSize, PhysicalPosition, WebviewWindow};
 
 use crate::placement::WindowPlacement;
 use crate::protocol::{Request, Screen, ScreenArea};
+use crate::placement::Display;
 
 pub const EXIT_OK: i32 = 0;
 pub const EXIT_ERROR: i32 = 12;
@@ -81,16 +82,24 @@ fn set_window_cloaked(hwnd: windows_sys::Win32::Foundation::HWND, cloaked: bool)
 #[cfg(not(windows))]
 pub(crate) fn reveal_windows_window(_window: &WebviewWindow) -> Result<(), String> { Ok(()) }
 
-#[cfg(windows)]
 pub(crate) fn resolve_window_placement(request: &Request) -> Result<WindowPlacement, String> {
+    Ok(resolve_display(request.window.screen, request.window.area)?.resolve(request))
+}
+
+pub(crate) fn notification_display() -> Result<Display, String> {
+    resolve_display(Screen::Primary, ScreenArea::WorkArea)
+}
+
+#[cfg(windows)]
+fn resolve_display(screen: Screen, area_kind: ScreenArea) -> Result<Display, String> {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY};
     use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
     use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
     let mut cursor = POINT { x: 0, y: 0 };
     unsafe {
-        if request.window.screen == Screen::Cursor && GetCursorPos(&mut cursor) == 0 { return Err("GetCursorPos failed".into()); }
-        let point = if request.window.screen == Screen::Primary { POINT { x: i32::MIN, y: i32::MIN } } else { cursor };
+        if screen == Screen::Cursor && GetCursorPos(&mut cursor) == 0 { return Err("GetCursorPos failed".into()); }
+        let point = if screen == Screen::Primary { POINT { x: i32::MIN, y: i32::MIN } } else { cursor };
         let monitor = MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY);
         let mut dpi_x = 0_u32;
         let mut dpi_y = 0_u32;
@@ -99,16 +108,16 @@ pub(crate) fn resolve_window_placement(request: &Request) -> Result<WindowPlacem
         }
         let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, rcMonitor: Default::default(), rcWork: Default::default(), dwFlags: 0 };
         if GetMonitorInfoW(monitor, &mut info) == 0 { return Err("GetMonitorInfoW failed".into()); }
-        let rect = match request.window.area { ScreenArea::WorkArea => info.rcWork, ScreenArea::Screen => info.rcMonitor };
+        let rect = match area_kind { ScreenArea::WorkArea => info.rcWork, ScreenArea::Screen => info.rcMonitor };
         let area = crate::placement::Rect { x: rect.left, y: rect.top, width: (rect.right - rect.left).max(0) as u32, height: (rect.bottom - rect.top).max(0) as u32 };
         if area.width == 0 || area.height == 0 { return Err("target display area is empty".into()); }
-        Ok(crate::placement::resolve(request, area, dpi_x as f64 / 96.0, 16))
+        Ok(Display { area, scale: dpi_x as f64 / 96.0 })
     }
 }
 
 #[cfg(not(windows))]
-pub(crate) fn resolve_window_placement(request: &Request) -> Result<WindowPlacement, String> {
-    Ok(crate::placement::resolve(request, crate::placement::Rect { x: 0, y: 0, width: 1920, height: 1080 }, 1.0, 16))
+fn resolve_display(_screen: Screen, _area: ScreenArea) -> Result<Display, String> {
+    Ok(Display { area: crate::placement::Rect { x: 0, y: 0, width: 1920, height: 1080 }, scale: 1.0 })
 }
 
 pub(crate) fn position_window(window: &WebviewWindow, placement: WindowPlacement) -> Result<(), String> {

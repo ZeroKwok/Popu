@@ -1,7 +1,5 @@
 use crate::protocol::{Position, Request};
 
-pub const NOTIFICATION_STACK_GAP: u32 = 12;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rect {
     pub x: i32,
@@ -25,6 +23,19 @@ pub struct WindowPlacement {
     /// The native window size in physical pixels.
     pub size: (u32, u32),
     pub position: Point,
+}
+
+/// One immutable physical display/DPI snapshot for a complete layout pass.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Display {
+    pub area: Rect,
+    pub scale: f64,
+}
+
+impl Display {
+    pub fn resolve(self, request: &Request) -> WindowPlacement {
+        resolve(request, self.area, self.scale, 16)
+    }
 }
 
 pub fn select_monitor(monitors: &[Rect], cursor: Point) -> Option<Rect> {
@@ -73,23 +84,6 @@ pub fn resolve(
         size,
         position,
     }
-}
-
-/// Returns the vertical distance needed to place a notification above all of
-/// its older visible siblings. Heights are physical pixels because native
-/// window coordinates are physical.
-pub fn notification_stack_offset(preceding_heights: impl IntoIterator<Item = u32>) -> i32 {
-    preceding_heights.into_iter().fold(0_i32, |offset, height| {
-        offset
-            .saturating_add(i32::try_from(height).unwrap_or(i32::MAX))
-            .saturating_add(NOTIFICATION_STACK_GAP as i32)
-    })
-}
-
-/// Returns whether a vertically stacked notification remains fully inside its
-/// selected display area.
-pub fn notification_fits(placement: WindowPlacement) -> bool {
-    placement.position.y >= placement.area.y
 }
 
 fn contains(rect: Rect, point: Point) -> bool {
@@ -191,43 +185,4 @@ mod tests {
         assert_eq!(placement.position, Point { x: 3088, y: 1768 });
     }
 
-    #[test]
-    fn notification_stack_offset_accounts_for_each_preceding_height() {
-        let bottom = 1_024_i32;
-        let heights = [620_u32, 180, 180];
-        let positions: Vec<_> = heights
-            .iter()
-            .enumerate()
-            .map(|(index, height)| {
-                bottom - *height as i32 - notification_stack_offset(heights[..index].iter().copied())
-            })
-            .collect();
-
-        assert_eq!(positions, [404, 212, 20]);
-        for (positions, heights) in positions.windows(2).zip(heights.windows(2)) {
-            assert_eq!(
-                positions[1] + heights[1] as i32 + NOTIFICATION_STACK_GAP as i32,
-                positions[0]
-            );
-        }
-    }
-
-    #[test]
-    fn notification_that_would_cross_the_work_area_top_does_not_fit() {
-        let area = Rect { x: 0, y: 0, width: 1920, height: 800 };
-        let first = Request::parse(
-            r#"{"version":"1.0","mode":"notify","position":"bottom_right","window":{"height":520},"content":{"title":"First"}}"#,
-        ).unwrap();
-        let next = Request::parse(
-            r#"{"version":"1.0","mode":"notify","position":"bottom_right","window":{"height":360},"content":{"title":"Next"}}"#,
-        ).unwrap();
-        let first_placement = resolve(&first, area, 1.0, 16);
-        let mut next_placement = resolve(&next, area, 1.0, 16);
-        next_placement.position.y = next_placement.position.y.saturating_sub(
-            notification_stack_offset([first_placement.size.1]),
-        );
-
-        assert!(notification_fits(first_placement));
-        assert!(!notification_fits(next_placement));
-    }
 }
