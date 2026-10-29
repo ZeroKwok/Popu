@@ -21,6 +21,7 @@ Tauri Host ── RequestRegistry ── request_id → WebviewWindow
 - States are `queued`, `shown`, `confirmed`, `cancelled`, `closed`, `expired`, and `failed`.
 - Dialogs are globally FIFO with one active window. A dialog CLI waits for a terminal response and adopts its action exit code.
 - Notifications use the primary display, never wait behind dialogs, show at most three, and remain alive after the submitting client exits. `duration_ms` starts at `ui_ready`.
+- Notification windows are always on top without requesting focus. Omitting `window.always_on_top` defaults to `true`; explicitly setting it to `false` is rejected by request validation and JSON Schema. Dialogs may still set it to `false`.
 - Closing or expiring a visible request promotes queued work and reflows the notification stack.
 - Host shutdown terminalizes active requests, wakes waiters, destroys windows, and exits the process.
 

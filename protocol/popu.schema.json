@@ -49,6 +49,11 @@
       "else": {
         "properties": {
           "actions": { "maxItems": 0 },
+          "window": {
+            "properties": {
+              "always_on_top": { "const": true }
+            }
+          },
           "content": {
             "properties": {
               "blocks": {

@@ -22,6 +22,7 @@ Popu 是一个面向自动化脚本和 AI Agent 的轻量本机交互窗口。�
 - `data-popu-drag-region` 定义拖拽背景，`data-popu-selectable` 定义可复制文本；内置模板默认允许复制所有展示内容。
 - Host 生成 UUID `request_id`，支持 `coalesce_key`、revision 冲突检测和完整内容快照更新。
 - dialog 全局 FIFO 单活跃；notification 在主显示器工作区最多显示三个，按实际高度检查空间，严格 FIFO 排队。通知仅支持 `window.area: "work_area"`。
+- notification 始终置顶但不主动抢占焦点；`window.always_on_top` 省略时默认 `true`，显式设置为 `false` 会被拒绝。dialog 仍可配置为非置顶。
 - notification 可设置 `requires_read: true` 声明需要用户阅读，默认 `false`；dialog 不允许携带该字段。超时或展示失败的通知保留未读状态，只有需要阅读且未读的历史记录会持续触发托盘提醒。
 
 ## 通知阅读与历史

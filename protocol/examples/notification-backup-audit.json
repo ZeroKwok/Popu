@@ -6,7 +6,7 @@
   "position": "bottom_right",
   "duration_ms": 300000,
   "window": {
-    "always_on_top": false,
+    "always_on_top": true,
     "screen": "primary",
     "area": "work_area",
     "width": 580,
