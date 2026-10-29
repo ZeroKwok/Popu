@@ -1,6 +1,6 @@
 # Contributing
 
-欢迎提交 issue 和 pull request。修改应保持 Popu 的 v1 边界：无常驻服务、无持久化、一次调用对应一个独立窗口。
+欢迎提交 issue 和 pull request。修改应遵循当前单实例常驻 Host 架构：CLI 与 Python SDK 是客户端，Host 统一管理请求、窗口和队列；仅通知终态写入本机历史，dialog 及其表单值不持久化。
 
 提交前请运行：
 
