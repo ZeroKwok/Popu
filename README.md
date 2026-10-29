@@ -1,184 +1,174 @@
 # Popu
 
-> 当前架构：单实例常驻 Tauri Host。CLI 与 Python SDK 通过 `interprocess::local_socket`（Windows Named Pipe / Unix Domain Socket）提交和管理请求；Host 统一拥有 UUID、窗口、FIFO 队列、revision 与终态。
+> 面向自动化脚本和 AI Agent 的本机通知管理与轻量交互窗口。
 
-Host 在首次请求时自动启动。notification 被接受后独立存活；dialog 等待终态。管理命令包括 `popu update <id> <update.json>`、`dismiss`、`status`、`wait`、`host status` 和 `host stop`。请求可设置 `coalesce_key`，更新文件必须携带最新 `expected_revision` 和完整 `content`。
+[English](README.en.md)
 
-Popu 是一个面向自动化脚本和 AI Agent 的轻量本机交互窗口。任务需要人工决定时显示对话框；只需告知结果时显示短暂通知。
+Popu 让脚本和 Agent 能够在需要时通知用户、请求确认、收集少量结构化输入，并在任务结束后保留可追溯的通知历史。它运行在本机，不需要网络服务；CLI 和 Python SDK 由常驻 Host 统一管理窗口、队列、状态、历史和托盘提醒。
 
-当前版本使用 Tauri 2 + WebView2 的单实例常驻 Host。Rust CLI 与 Python SDK 通过 `interprocess::local_socket` 连接 Host；Windows 使用 Named Pipe，Unix 使用 Unix Domain Socket。Host 统一拥有窗口、队列、更新和请求终态。
+## 为什么使用 Popu
 
-原型阶段默认**不提供向后兼容**：除非需求明确要求，CLI、SDK 和协议接口可以直接重构，调用方应随版本同步更新。
+自动化任务通常需要把结果告诉人，或者在继续执行前等待一个明确决定。Popu 适合以下场景：
 
-## 功能
+- 备份、构建、部署等任务完成后发送通知；
+- AI Agent 执行高风险操作前请求确认；
+- 长时间任务展示进度、关键事实和结果摘要；
+- 多个脚本同时运行时统一管理通知；
+- 通知超时或提交进程退出后，仍可在历史中查找结果。
 
-- JSON 的 `mode: "dialog"`：等待用户提交、取消、关闭或超时，向 stdout 返回 JSON。
-- JSON 的 `mode: "notify"`：请求接受后返回，通知到期自动退出。
-- 内置 `confirm`、`form`、`notification` 三种模板。
-- 可信本地 HTML/CSS 模板替换；模板不执行自带 JavaScript。
-- 可选鼠标所在屏幕或主屏；尺寸支持逻辑像素与百分比，同一尺寸配置适用于 1080p、2K 和 4K 屏幕；`"100%" × "100%"` 填满所选工作区或物理屏幕。
-- 当宽高均为 `"100%"` 时，窗口不允许拖动，并移除圆角与阴影；超长内容仅在中间内容区滚动。
-- 无边框透明圆角窗口；Windows 圆角外部区域鼠标穿透到底层窗口。
-- `data-popu-drag-region` 定义拖拽背景，`data-popu-selectable` 定义可复制文本；内置模板默认允许复制所有展示内容。
-- Host 生成 UUID `request_id`，支持 `coalesce_key`、revision 冲突检测和完整内容快照更新。
-- dialog 全局 FIFO 单活跃；notification 在主显示器工作区最多显示三个，按实际高度检查空间，严格 FIFO 排队。通知仅支持 `window.area: "work_area"`。
-- notification 始终置顶但不主动抢占焦点；`window.always_on_top` 省略时默认 `true`，显式设置为 `false` 会被拒绝。dialog 仍可配置为非置顶。
-- notification 可设置 `requires_read: true` 声明需要用户阅读，默认 `false`；dialog 不允许携带该字段。超时或展示失败的通知保留未读状态，只有需要阅读且未读的历史记录会持续触发托盘提醒。
+## 核心能力
 
-## 通知阅读与历史
+### 通知管理
 
-通知的请求终态和阅读状态独立：超时仍为 `expired`，阅读历史不会改变终态。主动关闭通知视为已知悉；调用方撤销或“Clear current notifications”也不留下待阅读提醒。
+- 常驻 Host 统一管理通知生命周期；
+- 通知严格 FIFO 排队，主显示器工作区最多显示三条；
+- 支持提交回执、状态查询、完整内容更新、撤销和等待终态；
+- 支持 `coalesce_key`，避免同一个业务位置重复创建通知；
+- 支持通知历史、未读状态和托盘提醒；
+- 通知始终置顶，但不会主动抢占当前应用焦点；
+- 提交 CLI 或 Python 进程退出后，通知仍由 Host 独立管理。
 
-历史窗口左侧标题始终加粗，以右侧圆点表示未读，需要阅读的未读条目额外显示 “Awaiting reading” 标记。顶部同时显示待阅读数和全部未读数。只有详情在历史窗口前台完成展示后，该条记录才标记为已读；后台刷新和最小化不会批量清除未读。新记录到达时保留当前选择。
+### 轻量交互
 
-托盘左键单击或双击打开／恢复历史窗口，右键显示菜单。托盘仅在存在 `requires_read: true` 且未读的历史记录时持续提醒，正在显示或排队的通知不触发提醒；阅读其中一条不会清除其他待阅读记录的提醒。无待阅读历史时提示文字为 “Popu”，有待阅读历史时显示对应数量。阅读状态会在 Host 重启后保留，历史最多保存最近 500 条。
+- `dialog` 确认对话框和轻量表单；
+- 结构化 action、表单值、终态和退出码；
+- 段落、属性、列表、进度、图片和 Vega-Lite 图表；
+- 内容更新和 revision 冲突检测；
+- 无边框、透明的本机窗口，尺寸由请求配置。
 
-可以运行 `just test notification-requires-read.json` 和 `just test notification-ordinary-unread.json` 对比两类未读行为。Python 调用使用 `Notification.success(title="Review result", requires_read=True)`。
+### 集成方式
 
-既有历史内容会保留，并按新字段默认值处理为普通未读；不恢复旧全局提醒标志的含义，不提供新旧协议或阅读状态的兼容层。
+- JSON CLI；
+- Python SDK；
+- 本地 Named Pipe（Windows）或 Unix Domain Socket（Unix）；
+- 不提供网络监听端口，不需要外部服务。
 
-## 组织展示内容
+## 快速开始
 
-先确定用户完成当前判断或操作必须看到哪些信息，再按阅读顺序组织 `content.blocks`。不要把日志结构原样搬进窗口。
+以下命令在项目根目录运行。请先按照[构建与测试](#构建与测试)生成 `popu` 可执行文件，并将其所在目录加入 `PATH`。
 
-| 要展示的数据 | 选择的 block |
+### CLI
+
+提交一个通知：
+
+```powershell
+popu request protocol/examples/notification-success.json
+```
+
+提交一个确认对话框：
+
+```powershell
+popu request protocol/examples/dialog-confirm.json
+```
+
+请求文件是 JSON，完整协议见 [JSON Schema](protocol/popu.schema.json) 和 [协议架构说明](ARCHITECTURE.md)。
+
+### Python SDK
+
+需要 Python 3.10 或更高版本，并确保 `popu` 可执行文件位于 `PATH`：
+
+```powershell
+python -m pip install -e ./python
+```
+
+发送通知：
+
+```python
+from popu import Client, Notification
+
+client = Client()
+receipt = client.notify(
+    Notification.success(
+        title="Backup completed",
+        message="All files were backed up successfully.",
+    )
+)
+
+print(receipt.request_id)
+```
+
+请求用户确认：
+
+```python
+from popu import Client, DialogRequest
+
+result = Client().show(
+    DialogRequest.confirm(
+        title="Deploy release?",
+        message="Production deployment is ready.",
+    )
+)
+
+if result.status == "submitted":
+    print("confirmed")
+```
+
+Python SDK 详细说明见 [python/README.md](python/README.md)。
+
+## 工作方式
+
+```text
+CLI / Python SDK
+        │
+        ▼
+Persistent Popu Host
+        │
+        ├── notification queue
+        ├── dialog queue
+        ├── request registry
+        ├── notification history
+        └── tray reminder
+```
+
+Host 在首次请求时自动启动。调用方提交请求后获得 Host 生成的 `request_id` 和 revision：
+
+| CLI 入口或请求模式 | 行为 |
 | --- | --- |
-| 一段结论、影响或简短说明 | `paragraph` |
-| 具有稳定标签的关键事实，如目标、数量、耗时、策略 | `properties` |
-| 没有先后关系的并列事项 | `unordered_list` |
-| 有执行顺序、优先级或阶段关系的事项 | `ordered_list` |
-| 0–100 的完成百分比 | `progress` |
-| 图片、截图、调用方生成的 SVG 图形 | `image` |
-| 数据驱动的折线图、柱状图、热力图或组合图 | `chart`，使用 Vega-Lite 配置 |
-| 需要用户填写或确认的少量结构化值 | `form`；仅用于 dialog |
+| `popu request <file>`，`mode: "notify"` | 返回接受回执，通知由 Host 继续管理 |
+| `popu request <file>`，`mode: "dialog"` | 输出接受回执，再等待并输出确认、取消、关闭或超时等终态的响应 |
+| `popu update <id> <update.json>` | 使用最新 revision 替换完整 `content` |
+| `popu dismiss <id>` | 撤销排队或展示中的请求 |
+| `popu status <id>` | 查询请求当前完整快照 |
+| `popu wait <id>` | 等待请求进入终态并读取 Host 快照 |
 
-建议按“结论 → 关键事实 → 影响或步骤 → 当前进度 → 必要输入”的顺序排列。每个 block 都可使用简短 `title` 分组；没有标题时直接省略，不要重复窗口主标题。
+通知的 `duration_ms` 从内容准备完成并正式展示后开始计算。dialog 的终态和结构化响应不会依赖提交进程继续存活；通知在提交进程退出后也不会消失。
 
-`properties.items` 的 `label` 与 `text` 都可省略或留空，但每项至少一侧必须有可见内容；仅有 `label` 时跨两列展示，仅有 `text` 时仍从 text 列左对齐。`form.fields[].label` 是可选展示信息，省略或留空时不会创建标签元素，字段的 `id` 与 `type` 仍是必填关键字段。
+通知终态会保存到历史；dialog 及其表单值不会持久化。只有 `requires_read: true` 且仍未阅读的历史通知会持续触发托盘提醒。
 
-`content.vertical_align` 可设为 `center`（默认）或 `start`。居中模式只在正文短于可用区域时生效；内容溢出后仍从顶部开始并正常滚动。
+## 通知与窗口规则
 
-内容较多时应压缩表达，但必须保留会改变判断或操作结果的信息：
+- 通知使用主显示器工作区，最多同时展示三条；
+- 通知窗口始终 `always_on_top: true`，显式提交 `false` 会被拒绝；
+- 通知默认不抢占焦点；
+- dialog 可独立配置屏幕、工作区或物理屏幕、尺寸和是否置顶；
+- 宽高支持逻辑像素或百分比，不需要根据 DPI 手动换算；
+- 通知和 dialog 都支持可复制文本、图片和图表；
+- 大量日志、完整报告和复杂编辑界面应留在调用方产品中，Popu 负责展示摘要和必要输入。
 
-- 保留结论、影响对象、范围、数量和单位、下一步，以及必要的错误原因或关联 ID。
-- 将大量重复项压缩为“总数 + 范围 + 少量代表项”，例如“Documents 中的 1,248 个文件”，不要逐项列出。
-- 路径只有在区分目标或避免误操作时才保留；否则使用有意义的目录名或文件名。
-- 省略重复元数据、完整日志、堆栈、实现细节和不影响当前决定的信息。
-- 表格、树、长报告、复杂编辑或完整日志应交给调用方产品界面，Popu 只展示摘要和下一步。
+## 文档导航
 
-## 构建
+- [English README](README.en.md)
+- [完整架构说明](ARCHITECTURE.md)
+- [通知窗口协调与排布](docs/notification-layout.md)
+- [Python SDK](python/README.md)
+- [JSON Schema](protocol/popu.schema.json)
+- [贡献指南](CONTRIBUTING.md)
+- [安全说明](SECURITY.md)
 
-需要 Rust stable、Node.js 20+、Windows 10/11 和 WebView2 Runtime。Node.js 用于将图表引擎打包为离线资源，运行 Popu 时无需 Node.js 或网络。
+## 构建与测试
+
+当前主要在 Windows 10/11、Rust stable、Node.js 20+ 和 WebView2 Runtime 上验证。协议与 IPC 设计包含 Unix Domain Socket 路径，具体窗口能力取决于目标平台。
+
+安装前端依赖并构建：
 
 ```powershell
 npm ci
 npm run build
 ```
 
-也可在安装了 Rust 与 `just` 的 Windows、macOS 或 Linux 环境中运行：
+Windows 可执行文件位于 `src-tauri/target/release/popu.exe`。将该目录加入 `PATH`，或直接使用此路径调用；Python 也可通过 `Client(executable="src-tauri/target/release/popu.exe")` 指定它。Python SDK 是 CLI 客户端，安装 SDK 不会安装 Rust 可执行文件。
 
-```powershell
-just test dialog-long-content.json
-just test dialog-ultra-long-content.json
-```
-
-开发期也可直接生成未打包的可执行文件：
-
-```powershell
-npm run build:ui
-cargo build --manifest-path src-tauri/Cargo.toml
-```
-
-产物位于 `src-tauri/target/debug/popu.exe` 或 `src-tauri/target/release/popu.exe`。
-
-`just build` 和 `just build-release` 会自动执行 `build-ui`；初次使用先运行 `npm ci`。`ui/vendor` 是生成物，不提交到版本库。图表依赖和许可证一起打包到可执行文件中，不从 CDN 加载。
-
-## 图片、自定义图标与通用图表
-
-dialog、notification 和历史详情共用渲染器。`content.icon` 可提供 `{ "src": "data:image/...;base64,...", "alt": "图标说明" }` 替换标题旁的默认图标；severity 仍保留，历史列表仍显示 severity 图标。
-
-图片块使用 `{ "type": "image", "source": { "src": "data:image/svg+xml;base64,...", "alt": "说明" }, "caption": "可选说明", "height": 240 }`。支持 SVG、PNG、JPEG 和 WebP；资源必须内嵌，不能使用本地路径或远程 URL。SVG 作为图片加载，支持静态样式、渐变和本地片段引用，不支持脚本、事件或外部资源。图片自动保持比例并限制在可用宽度内，`height` 是图片显示高度上限。
-
-图表块使用 `{ "type": "chart", "engine": "vega_lite", "spec": { ... }, "height": 220 }`。`spec` 是 Vega-Lite 6 配置，折线、柱状、热力、分层等图形共用同一个协议类型；数据通过 `data.values` 或内嵌 `datasets` 提供。`height` 是图表总显示高度，宽度随容器变化重新排版。图表使用交互 SVG，默认悬停显示编码字段的具体值；通过 `encoding.tooltip` 配置字段、标题和数值格式，设为 `null` 或 `mark.tooltip: false` 可关闭提示。
-
-Vega-Lite 的 `spec.params` 可声明悬停高亮、最近点、图例选择以及绑定坐标轴的缩放和平移。Popu 不自动把所有图表变成可缩放图表；这些行为由配置决定，不需要新增协议字段。图表区域不会触发窗口拖拽，提示框保持在窗口范围内，并适配明暗主题。更新或切换历史条目时会销毁旧图表、事件和提示框。交互状态用于本次辅助阅读，不改变请求结果，也不回写历史数据；通知仍按 `duration_ms` 到期，需要长时间探索时可打开历史。
-
-修改完整 `content` 可以更新数据与图表并保留 dialog 表单输入。配置编译在独立工作线程中进行，5 秒超时；页面中的本地 Vega 运行实例负责 SVG 绘制和交互，使用 CSP 兼容解释器，不开启 `unsafe-eval`，不从网络加载资源。`image` 块仍作为静态图片展示。
-
-默认图片高度上限为 320，默认图表高度为 220，可设置范围为 64–1200。单张图片 data URI 不超过 256 KiB，栅格图片每边最多 4096 像素；图表配置不超过 128 KiB，嵌套不超过 32 层，配置节点不超过 20000；完整 content 不超过 768 KiB。SVG 节点最多 10000。图表配置禁止 `url`、`href` 属性，数据及资源不从网络加载。图片和图表就绪后才开始通知计时；历史详情就绪后才提交已读。
-
-典型示例（行情数据均为模拟）：
-
-| 文件 | 展示内容 |
-| --- | --- |
-| `notification-visual-line.json` | 自定义图标、模拟贵金属折线图 |
-| `notification-visual-heatmap.json` | 模拟板块热力图、待阅读通知 |
-| `notification-visual-image.json` | 内嵌 SVG 图片与说明 |
-| `dialog-visual-bars.json` | 柱状图与必填确认表单 |
-| `dialog-visual-heatmap.json` | 热力图叠加数字标签 |
-| `dialog-visual-image.json` | 自定义图标、图片与属性说明 |
-| `dialog-visual-interactive.json` | 图例选择、悬停取值、滚轮缩放与拖动平移 |
-
-```powershell
-just test notification-visual-line.json
-just test dialog-visual-bars.json
-just build-test notification-visual
-just build-test dialog-visual
-```
-
-验证命令为 `npm run check:ui`、`npm run test:ui`、`npm run test:visuals`（使用本机 Microsoft Edge 无头浏览器）以及 `cargo test --manifest-path src-tauri/Cargo.toml`。浏览器测试覆盖明暗主题、高 DPI、离线渲染、表单提交及历史已读行为。
-
-Windows 下构建调试版后，还可运行 `npm run test:native` 验证实际 WebView2 加载。运行前应退出已有 Host；测试会短暂显示通知和自动超时的 dialog，使用 `test-results/native-*` 下的隔离历史库，结束后关闭自己启动的 Host，不清理或改写用户历史。
-
-通知请求按 `queued → preparing → ready → shown → 终态` 推进。协调器是请求状态的唯一写入者；同时只准备一条通知，队首放不下时后续通知不绕过。准备窗口有 15 秒时限，图片和图表完成后按内容 revision 确认就绪；原生揭示并校验后才开始通知计时。关闭旧窗口时先确认隐藏并压紧现有通知，再准备下一条。展示后每秒检查隐藏、DWM cloak 和 WebView 可见性，有限恢复失败才记录未读失败历史；普通遮挡和失焦不会触发回收。
-
-Windows 下可执行 `cargo test --manifest-path src-tauri/Cargo.toml --test notification_window notification_window_lifecycle -- --ignored --nocapture` 验证真实窗口的隐藏准备、版本过期回调、准备超时、严格 FIFO、展示后隐藏恢复、异常销毁补位和连续八轮混合尺寸显示。测试需要解锁桌面，使用独立 Named Pipe 和内存历史库，并在同一测试 Host 内完成全部轮次，不连接用户正在运行的 Host。若现有 Host 占用默认构建产物，可给 Cargo 添加 `--target-dir src-tauri/target/notification-refactor`。
-
-通知排布的职责、事件流、几何规则及诊断方法见 [通知窗口协调与排布](docs/notification-layout.md)。`popu host status` 分别输出活动总数、各生命周期状态数量、请求摘要、实际原生窗口状态和布局版本；这些计数与托盘历史待阅读数独立。
-
-历史列表只查询标题、severity 和阅读状态等摘要；选中记录后通过 `history_get`（RPC 为 `history.get`）读取完整图表和图片，避免一次加载全部历史图片。
-
-Host 启动时在后台窗口队列中预热隐藏的历史页面；用户打开后才查询列表和渲染详情，列表先绘制、图表随后加载。关闭历史窗口会隐藏并保留 WebView，下次从托盘打开时直接复用；Host 退出时释放。只有前台可见且选中内容已渲染完成才标记已读，短暂的焦点检查失败会自动重试，失焦或隐藏时暂停。
-
-Host 的标准错误输出包含 `Popu history:` 阶段计时，用于区分建窗、导航、基础页面、列表、首条详情和阅读资格检查的耗时。Windows 下可执行 `cargo test --manifest-path src-tauri/Cargo.toml --test history_window history_window_lifecycle -- --ignored --nocapture` 运行真实 WebView2 历史窗口测试，覆盖隐藏预热、图表渲染、后台未读保护、快速重复打开与关闭后复用。该测试使用内存历史库；需要解锁桌面，系统允许测试窗口前台激活时还会验证首次已读确认，否则明确输出跳过该项。
-
-调试 WebView2 时，可在 Debug 构建中设置 `POPU_DEVTOOLS=1` 后运行请求；这会自动打开浏览器开发者工具。该开关在 Release 构建中无效。
-
-## CLI
-
-```powershell
-popu request protocol/examples/dialog-confirm.json
-popu request protocol/examples/notification-success.json
-popu request protocol/examples/notification-custom-template.json --template .\protocol\examples\templates\minimal-notification
-popu update <request-id> update.json
-popu dismiss <request-id>
-popu status <request-id>
-popu wait <request-id>
-popu host status
-popu host stop
-popu templates list
-popu templates validate --path path/to/my-template
-```
-
-布局手工验收可使用 `dialog-unordered-list.json`、`dialog-ordered-list.json`、`dialog-all-elements.json`、`notification-success.json`、`dialog-ultra-long-content.json` 和 `dialog-fullscreen-screen.json`；它们分别验证两种列表、六类内容块与全部表单控件、通知进度、长内容滚动，以及物理屏幕全屏。
-
-可替换模板示例位于 `protocol/examples/templates/minimal-notification`。
-
-Host 在首次请求时自动启动。notification 被 Host 接受后 CLI 立即返回；它不依赖提交进程继续存活。dialog 则保持等待直到终态，并采用终态中的 action 退出码。
-
-默认退出码：`0` 提交、确认成功或通知已显示，`10` 取消/关闭，`11` 超时，`12` 请求、模板或运行时错误。dialog action 可用 `exit_code: 0..255` 覆盖自身默认码；即使与默认码重合，也应结合 stdout response 判断业务结果。stdout 只输出机器可读 JSON，诊断写入 stderr。
-
-## Python
-
-Python SDK 需要 Python 3.10+，在仓库根目录运行 `python -m pip install -e ./python` 安装。`Client` 默认从 PATH 查找 `popu`，也可用 `Client(executable="path/to/popu.exe")` 指定本地构建。
-
-`Client.create`／`notify` 返回含 `request_id`、`revision`、队列状态和 `duplicate` 的接受回执；`update`、`dismiss`、`status`、`wait` 返回 Host 完整快照。`show` 等待并返回交互结果。`wait` 始终读取 Host 权威终态，支持跨 Client 管理同一请求；dialog CLI 子进程在后台排空并回收，不再使用 lifetime pipe。
-
-通知 builder 显式提交 `window.always_on_top: true`，默认使用主显示器工作区；dialog builder 支持尺寸、屏幕、区域和置顶配置，两个 builder 均支持 `vertical_align` 与 `coalesce_key`。`create`／`show`／`notify` 支持 `template=` 可信模板目录。安装、错误处理与调用示例见 [Python SDK 文档](python/README.md)。
-
-完整协议与设计边界见 [ARCHITECTURE.md](ARCHITECTURE.md)，JSON Schema 见 [protocol/popu.schema.json](protocol/popu.schema.json)。
-
-## 测试
+运行测试：
 
 ```powershell
 cargo test --manifest-path src-tauri/Cargo.toml
@@ -186,8 +176,21 @@ node --check ui/app.js
 python -m pytest python/tests -q
 ```
 
-物理多屏、DPI、键盘可访问性和人工点击流程仍需按架构文档中的 Windows 验收矩阵执行。
+开发期也可以分别构建 UI 和 Rust 可执行文件：
+
+```powershell
+npm run build:ui
+cargo build --manifest-path src-tauri/Cargo.toml
+```
+
+欢迎通过 issue 和 pull request 参与改进，详见[贡献指南](CONTRIBUTING.md)。原生通知窗口生命周期测试见[通知窗口协调与排布](docs/notification-layout.md)；运行这些测试需要解锁的 Windows 桌面。
+
+## 项目边界
+
+Popu 是本机人机交互层，不是任务调度器、日志系统、远程推送服务或完整业务界面。调用方负责任务执行和业务数据，Popu 负责把需要用户看到或决定的摘要可靠地呈现出来。
+
+项目当前处于持续演进阶段，除非需求明确要求，不承诺 CLI、SDK 和协议接口的向后兼容。
 
 ## 许可证
 
-Apache License 2.0。参见 [LICENSE](LICENSE)。
+Apache License 2.0，详见 [LICENSE](LICENSE)。
