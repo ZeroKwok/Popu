@@ -430,6 +430,11 @@ impl Request {
                 }
             }
             Mode::Notify => {
+                if !self.window.always_on_top {
+                    return Err(ProtocolError::Invalid(
+                        "notify window.always_on_top must be true".into(),
+                    ));
+                }
                 if self.window.area != ScreenArea::WorkArea {
                     return Err(ProtocolError::Invalid("notify windows use the primary display work_area".into()));
                 }
@@ -1004,6 +1009,39 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("notify cannot contain"));
+    }
+
+    #[test]
+    fn notify_defaults_to_always_on_top_and_accepts_explicit_true() {
+        for window in [None, Some(json!({})), Some(json!({"always_on_top": true}))] {
+            let mut value = json!({
+                "version": "1.0", "mode": "notify", "content": {"title": "Done"}
+            });
+            if let Some(window) = window {
+                value["window"] = window;
+            }
+            let request = Request::parse(&value.to_string()).unwrap();
+            assert!(request.window.always_on_top);
+        }
+    }
+
+    #[test]
+    fn notify_rejects_non_topmost_windows() {
+        let error = Request::parse(
+            r#"{"version":"1.0","mode":"notify","window":{"always_on_top":false},"content":{"title":"Done"}}"#,
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("notify window.always_on_top must be true"));
+    }
+
+    #[test]
+    fn dialog_accepts_non_topmost_windows() {
+        let mut value = serde_json::to_value(request()).unwrap();
+        value["window"]["always_on_top"] = json!(false);
+        let request = Request::parse(&value.to_string()).unwrap();
+        assert!(!request.window.always_on_top);
     }
 
     #[test]
