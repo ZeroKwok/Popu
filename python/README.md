@@ -2,6 +2,18 @@
 
 The Python package is a client for the persistent local Popu Host. It invokes the installed `popu` CLI, parses accepted receipts and terminal snapshots, and never manages notification child processes or lifetime pipes.
 
+## Installation
+
+Requires Python 3.10+ and a matching `popu` executable. From the repository root:
+
+```powershell
+python -m pip install -e ./python
+```
+
+Set `Client(executable="path/to/popu.exe")` to use a local build. A command sequence such as `["path/to/popu.exe"]` is also accepted. The SDK targets the current Host protocol and does not accept pre-Host response formats.
+
+## Requests and results
+
 ```python
 from popu import Client, DialogRequest, Notification
 
@@ -18,7 +30,34 @@ snapshot = client.update(receipt.request_id, receipt.revision, {
 client.dismiss(receipt.request_id)
 ```
 
-`Client.create`, `update`, `dismiss`, `status`, and `wait` expose Host-generated `request_id`, revision, queue state, and duplicate information. `popu` is resolved from `PATH` unless `Client(executable=...)` is supplied.
+`create` and `notify` return `RequestReceipt` (`NotificationReceipt` is an alias) with `status="accepted"`, a Host-generated `request_id`, `state`, `revision`, and `duplicate`. Acceptance can mean `queued`; it does not mean the window has already appeared. `create` returns after acceptance for dialogs as well as notifications; `show` waits and returns an `InteractionResult` containing `status`, `action`, and `values`.
+
+`status`, `update`, `dismiss`, and `wait` return Host snapshot dictionaries. `wait` always reads the authoritative terminal snapshot, including `revision`, `mode`, `content`, timestamps, optional `response`, and `exit_code`. The same request can be managed from another `Client` instance or Python process using its ID. Updating requires the latest revision and replaces the entire `content`; it does not restart the display timer. Revision conflicts, missing IDs, validation failures, and subprocess/JSON errors raise `PopuError`.
+
+Cancelled, closed, and timed-out dialogs are normal `InteractionResult` outcomes. A custom dialog action may use exit code `12` (or any other code from 0–255); the SDK reads the Host result rather than treating that business exit code as a transport error. If a terminal dialog has no response, `show` raises `PopuError` with its terminal state.
+
+`Client.create`, `Client.show`, `Client.notify`, and the module-level `show`/`notify` helpers accept `template=Path(...)` for a trusted custom template directory. `popu` is resolved from `PATH` unless `Client(executable=...)` is supplied. CLI communication uses UTF-8 on Windows and other platforms. After accepting a dialog, the SDK drains and reaps its CLI subprocess in the background even if `wait` is never called; the Host owns the request lifetime.
+
+## Window options
+
+Notifications are always submitted with `window.always_on_top=True`; `Notification.success` does not expose a non-topmost option. It defaults to the primary display work area and rejects `area=ScreenArea.SCREEN`. Raw request dictionaries are validated by the CLI/Host, which reject notification `always_on_top=False`.
+
+Dialog builders support `always_on_top`, `screen`, `area`, `width`, and `height`. Sizes are logical pixels or percentage strings, without manual DPI multiplication. Both builders support `vertical_align` and `coalesce_key`:
+
+```python
+from popu import Screen, ScreenArea, VerticalAlign
+
+request = DialogRequest.confirm(
+    title="Review", always_on_top=False,
+    screen=Screen.PRIMARY, area=ScreenArea.SCREEN,
+    width="80%", height="80%", vertical_align=VerticalAlign.START,
+)
+receipt = client.notify(Notification.success(title="Backup", coalesce_key="job:backup"))
+```
+
+For other severities, forms, or custom dialog actions, pass a complete protocol request dictionary to `create`, `show`, or `notify`. No separate Python transport or renderer is required.
+
+## Reading requirements
 
 Notifications accept `requires_read=True` (default: `False`):
 

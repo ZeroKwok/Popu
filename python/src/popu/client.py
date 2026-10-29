@@ -8,7 +8,7 @@ import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, TextIO
 
 from .models import DialogRequest, InteractionResult, Notification
 
@@ -27,7 +27,20 @@ class RequestReceipt:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "RequestReceipt":
-        return cls(str(value["request_id"]), str(value["state"]), int(value["revision"]), bool(value.get("duplicate", False)), str(value.get("status", "accepted")))
+        if (
+            value.get("status") != "accepted"
+            or not isinstance(value.get("request_id"), str)
+            or not value["request_id"]
+            or not isinstance(value.get("state"), str)
+            or type(value.get("revision")) is not int
+            or value["revision"] < 1
+            or type(value.get("duplicate")) is not bool
+        ):
+            raise PopuError("popu returned an invalid Host acceptance receipt")
+        return cls(
+            value["request_id"], value["state"], value["revision"],
+            value["duplicate"], value["status"],
+        )
 
 
 NotificationReceipt = RequestReceipt
@@ -44,50 +57,67 @@ class Client:
             self._command = [os.fspath(executable)]
         else:
             self._command = [os.fspath(item) for item in executable]
-        self._owned: dict[str, subprocess.Popen[str]] = {}
-        self._lock = threading.Lock()
+        if not self._command:
+            raise ValueError("executable command must not be empty")
 
     def create(self, request: DialogRequest | Notification | Mapping[str, Any], *, template: str | os.PathLike[str] | None = None) -> RequestReceipt:
         payload = request.as_dict() if hasattr(request, "as_dict") else dict(request)
         path = _write_json(payload)
-        command = self._command + ["request", str(path)]
-        if template is not None:
-            command += ["--template", os.fspath(template)]
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        line = process.stdout.readline() if process.stdout else ""
-        path.unlink(missing_ok=True)
-        if not line:
-            stderr = process.stderr.read() if process.stderr else ""
-            process.wait()
-            raise PopuError(stderr.strip() or "popu did not accept the request")
-        value = json.loads(line)
-        # Compatibility with pre-Host test doubles and older executables.
-        if "request_id" not in value:
-            process.wait()
-            receipt = RequestReceipt("", "confirmed", 1, False, str(value.get("status", "accepted")))
-            object.__setattr__(receipt, "_terminal", value)
+        process: subprocess.Popen[str] | None = None
+        diagnostics: TextIO | None = None
+        try:
+            command = self._command + ["request", str(path)]
+            if template is not None:
+                command += ["--template", os.fspath(template)]
+            # A file prevents stderr from filling a pipe while we wait for the
+            # receipt. stdout has only one reader; dialog output is drained in
+            # the background after acceptance, even if callers never wait().
+            diagnostics = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
+            process = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=diagnostics,
+                text=True, encoding="utf-8",
+            )
+            line = process.stdout.readline() if process.stdout else ""
+            if not line:
+                process.wait()
+                raise PopuError(_diagnostic(diagnostics) or "popu did not accept the request")
+            receipt = RequestReceipt.from_dict(_json_object(line))
+            if payload.get("mode") == "dialog":
+                threading.Thread(
+                    target=_reap_request, args=(process, diagnostics), daemon=True,
+                ).start()
+                process = None
+                diagnostics = None
+            else:
+                process.communicate()
+                if process.returncode != 0:
+                    raise PopuError(
+                        _diagnostic(diagnostics) or f"popu exited with code {process.returncode}"
+                    )
             return receipt
-        receipt = RequestReceipt.from_dict(value)
-        if payload.get("mode") == "dialog":
-            with self._lock:
-                self._owned[receipt.request_id] = process
-        else:
-            process.wait()
-        return receipt
+        except (OSError, UnicodeError) as error:
+            raise PopuError(f"could not submit Popu request: {error}") from error
+        finally:
+            if process is not None:
+                if process.poll() is None:
+                    process.terminate()
+                if process.stdout is not None:
+                    process.stdout.close()
+                process.wait()
+            if diagnostics is not None:
+                diagnostics.close()
+            path.unlink(missing_ok=True)
 
-    def show(self, request: DialogRequest | Mapping[str, Any]) -> InteractionResult:
-        receipt = self.create(request)
-        terminal = getattr(receipt, "_terminal", None)
-        if terminal is not None:
-            return InteractionResult.from_dict(terminal)
+    def show(self, request: DialogRequest | Mapping[str, Any], *, template: str | os.PathLike[str] | None = None) -> InteractionResult:
+        receipt = self.create(request, template=template)
         snapshot = self.wait(receipt.request_id)
         response = snapshot.get("response")
         if not isinstance(response, Mapping):
             raise PopuError(f"request ended without a response: {snapshot.get('state')}")
         return InteractionResult.from_dict(response)
 
-    def notify(self, notification: Notification | Mapping[str, Any]) -> NotificationReceipt:
-        return self.create(notification)
+    def notify(self, notification: Notification | Mapping[str, Any], *, template: str | os.PathLike[str] | None = None) -> NotificationReceipt:
+        return self.create(notification, template=template)
 
     def update(self, request_id: str, expected_revision: int, content: Mapping[str, Any]) -> Mapping[str, Any]:
         path = _write_json({"expected_revision": expected_revision, "content": dict(content)})
@@ -103,29 +133,42 @@ class Client:
         return self._run_json(["status", request_id])
 
     def wait(self, request_id: str) -> Mapping[str, Any]:
-        with self._lock:
-            process = self._owned.pop(request_id, None)
-        if process is None:
-            return self._run_json(["wait", request_id])
-        stdout, stderr = process.communicate()
-        if process.returncode == 12:
-            raise PopuError(stderr.strip() or "Popu Host failed")
-        lines = [line for line in stdout.splitlines() if line.strip()]
-        if not lines:
-            raise PopuError(stderr.strip() or "popu returned no terminal result")
-        # `request` prints the public Response after its accepted receipt.
-        response = json.loads(lines[-1])
-        state = {"submitted": "confirmed", "confirmed": "confirmed", "cancelled": "cancelled", "closed": "closed", "timed_out": "expired"}.get(response.get("status"), response.get("status"))
-        return {"request_id": request_id, "state": state, "response": response, "exit_code": process.returncode}
+        # Always fetch the authoritative snapshot, including revision, content,
+        # timestamps and any business exit_code (which may legitimately be 12).
+        return self._run_json(["wait", request_id])
 
     def _run_json(self, args: Sequence[str]) -> Mapping[str, Any]:
-        result = subprocess.run(self._command + list(args), capture_output=True, text=True)
+        try:
+            result = subprocess.run(
+                self._command + list(args), capture_output=True, text=True, encoding="utf-8",
+            )
+        except (OSError, UnicodeError) as error:
+            raise PopuError(f"could not run Popu command: {error}") from error
         if result.returncode != 0:
             raise PopuError(result.stderr.strip() or f"popu exited with code {result.returncode}")
-        try:
-            return json.loads(result.stdout.splitlines()[-1])
-        except (IndexError, json.JSONDecodeError) as error:
-            raise PopuError("popu returned invalid JSON") from error
+        return _json_object(result.stdout)
+
+
+def _json_object(text: str) -> Mapping[str, Any]:
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise PopuError("popu returned invalid JSON") from error
+    if not isinstance(value, dict):
+        raise PopuError("popu returned a JSON value instead of an object")
+    return value
+
+
+def _diagnostic(stream: TextIO) -> str:
+    stream.seek(0)
+    return stream.read().strip()
+
+
+def _reap_request(process: subprocess.Popen[str], diagnostics: TextIO) -> None:
+    try:
+        process.communicate()
+    finally:
+        diagnostics.close()
 
 
 def _write_json(payload: Mapping[str, Any]) -> Path:
@@ -140,9 +183,9 @@ def _write_json(payload: Mapping[str, Any]) -> Path:
         raise
 
 
-def show(request: DialogRequest | Mapping[str, Any]) -> InteractionResult:
-    return Client().show(request)
+def show(request: DialogRequest | Mapping[str, Any], *, template: str | os.PathLike[str] | None = None) -> InteractionResult:
+    return Client().show(request, template=template)
 
 
-def notify(notification: Notification | Mapping[str, Any]) -> NotificationReceipt:
-    return Client().notify(notification)
+def notify(notification: Notification | Mapping[str, Any], *, template: str | os.PathLike[str] | None = None) -> NotificationReceipt:
+    return Client().notify(notification, template=template)

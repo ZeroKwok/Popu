@@ -101,3 +101,7 @@ The internal `popu host run` command is hidden. Exit codes are 0 for success/con
 - `protocol.rs`: versioned request/response validation and logical window-dimension semantics.
 
 The Python SDK invokes the public CLI and exposes create/update/dismiss/status/wait. It does not implement a second server or a notification lifetime pipe.
+
+The SDK requires Python 3.10+ and the current Host CLI. Acceptance receipts are parsed strictly; pre-Host response compatibility is not provided. After a dialog is accepted, a background reader drains and reaps its CLI subprocess. Every SDK `wait` invokes the public `wait` command and returns the full Host snapshot, so results do not depend on which Python client submitted the request. Business action exit codes, including 12, are read from that snapshot rather than interpreted as transport errors. CLI streams use UTF-8, and temporary request/update files are removed after use or submission failure.
+
+Python notification builders explicitly emit topmost windows on the primary work area; dialog builders retain configurable topmost/display/area/size options. Both builders expose content alignment and live coalescing keys. Complete request mappings remain available for forms, arbitrary severities, and custom actions.
