@@ -1,6 +1,7 @@
 pub mod core;
 mod history;
 mod host;
+mod host_process;
 pub mod ipc;
 pub mod placement;
 pub mod notifications;
@@ -13,7 +14,6 @@ mod visual;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -129,10 +129,7 @@ fn rpc_with_start(method: &str, params: serde_json::Value) -> Result<serde_json:
         Ok(response) => return unwrap_rpc(response),
         Err(_) => {}
     }
-    let mut command = Command::new(std::env::current_exe()?);
-    command.args(["host", "run"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    #[cfg(windows)] { use std::os::windows::process::CommandExt; command.creation_flags(0x0800_0000); }
-    let _child = command.spawn()?;
+    host_process::spawn()?;
     let mut last = None;
     for _ in 0..60 {
         thread::sleep(Duration::from_millis(50));

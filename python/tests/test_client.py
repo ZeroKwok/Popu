@@ -15,7 +15,7 @@ def _stub(tmp_path: Path, scenario: str = "") -> Path:
     path = tmp_path / "stub.py"
     path.write_text(
         f"SCENARIO = {scenario!r}\n" + r'''
-import json, sys, time
+import json, subprocess, sys, time
 from pathlib import Path
 
 root = Path(__file__).parent
@@ -35,6 +35,11 @@ def output(value):
 def fail(message):
     sys.stderr.buffer.write(message.encode("utf-8"))
     sys.exit(12)
+
+def retain_output_handles():
+    # The submitting CLI exits, but its long-lived child keeps stdout/stderr.
+    code = "import sys,time; from pathlib import Path; root=Path(sys.argv[1]); (root/'holder-started').touch(); deadline=time.monotonic()+5\nwhile not (root/'holder-release').exists() and time.monotonic()<deadline: time.sleep(0.01)\n(root/'holder-exited').touch()"
+    subprocess.Popen([sys.executable, "-c", code, str(root)], stdout=sys.stdout, stderr=sys.stderr)
 
 if command == "request":
     source = Path(sys.argv[2])
@@ -67,6 +72,8 @@ if command == "request":
     if request["mode"] == "dialog" and SCENARIO != "pending":
         status = SCENARIO if SCENARIO in ("cancelled", "closed", "timed_out") else "submitted"
         response = {"version": "1.0", "status": status, "action": "confirm", "values": {"name": "中文结果"}}
+        if SCENARIO == "large_terminal":
+            response["values"]["name"] = "中文结果" * 20000
         snapshot.update(
             state={"submitted": "confirmed", "timed_out": "expired"}.get(status, status),
             response=response, revision=3, ended_at={"secs_since_epoch": 2, "nanos_since_epoch": 0},
@@ -76,6 +83,10 @@ if command == "request":
         # Write both lines together to catch stdout buffering regressions.
         sys.stdout.buffer.write((json.dumps(receipt) + "\n" + json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8"))
         sys.stdout.buffer.flush()
+        if SCENARIO == "large_terminal":
+            (root / "reaped").touch()
+        if SCENARIO == "inherited_stdout":
+            retain_output_handles()
         sys.exit(snapshot["exit_code"])
     save(snapshot)
     output(receipt)
@@ -87,6 +98,8 @@ if command == "request":
         output({"version": "1.0", "status": "cancelled", "action": None, "values": {}})
     if SCENARIO == "notify_exit_error":
         fail("提交进程失败")
+    if SCENARIO == "inherited_stdout":
+        retain_output_handles()
 else:
     if SCENARIO == "management_json":
         output([])
@@ -111,6 +124,8 @@ else:
         save(snapshot)
         (root / "release").touch()
     output(snapshot)
+    if SCENARIO == "management_inherited_stdout":
+        retain_output_handles()
 ''',
         encoding="utf-8",
     )
@@ -229,6 +244,17 @@ def test_pending_dialog_is_accepted_without_waiting_and_reaped(tmp_path: Path) -
     assert (tmp_path / "reaped").exists()
 
 
+def test_large_dialog_output_is_drained_and_large_host_snapshot_is_read(tmp_path: Path) -> None:
+    client = _client(tmp_path, "large_terminal")
+    receipt = client.create(DialogRequest.confirm(title="Large response"))
+    deadline = time.monotonic() + 3
+    while not (tmp_path / "reaped").exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert (tmp_path / "reaped").exists(), "dialog CLI blocked writing its terminal output"
+    snapshot = client.wait(receipt.request_id)
+    assert snapshot["response"]["values"]["name"] == "中文结果" * 20000
+
+
 @pytest.mark.parametrize("method", ["show", "notify"])
 def test_template_option_and_request_file_cleanup(tmp_path: Path, method: str) -> None:
     client = _client(tmp_path)
@@ -256,6 +282,32 @@ def test_invalid_submissions_raise_and_clean_up(tmp_path: Path, scenario: str, m
 
 def test_stderr_does_not_block_acceptance(tmp_path: Path) -> None:
     assert _client(tmp_path, "stderr_burst").notify(Notification.success(title="Done")).request_id
+
+
+@pytest.mark.parametrize("method", ["notify", "status"])
+def test_cli_exit_does_not_wait_for_descendants_to_close_output_handles(tmp_path: Path, method: str) -> None:
+    scenario = "inherited_stdout" if method == "notify" else "management_inherited_stdout"
+    client = _client(tmp_path, scenario)
+    try:
+        if method == "status":
+            receipt = client.notify(Notification.success(title="Existing host"))
+        started = time.monotonic()
+        if method == "notify":
+            result = client.notify(Notification.success(title="Cold host"))
+            assert result.request_id
+        else:
+            assert client.status(receipt.request_id)["state"] == "queued"
+        assert time.monotonic() - started < 2
+        deadline = time.monotonic() + 2
+        while not (tmp_path / "holder-started").exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert (tmp_path / "holder-started").exists()
+        assert not (tmp_path / "holder-exited").exists()
+    finally:
+        (tmp_path / "holder-release").touch()
+        deadline = time.monotonic() + 2
+        while (tmp_path / "holder-started").exists() and not (tmp_path / "holder-exited").exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
 
 
 def test_management_errors_are_reported(tmp_path: Path) -> None:
