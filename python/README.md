@@ -55,7 +55,7 @@ The default template displays occurrence time, refreshed on every accepted repor
 
 Cancelled, closed, and timed-out dialogs are normal `InteractionResult` outcomes. A custom dialog action may use exit code `12` (or any other code from 0–255); the SDK reads the Host result rather than treating that business exit code as a transport error. If a terminal dialog has no response, `show` raises `PopuError` with its terminal state.
 
-`Client.create`, `Client.show`, `Client.notify`, and the module-level `show`/`notify` helpers accept `template=Path(...)` for a trusted custom template directory. `popu` is resolved from `PATH` unless `Client(executable=...)` is supplied. CLI communication uses UTF-8 on Windows and other platforms. After accepting a dialog, the SDK drains and reaps its CLI subprocess in the background even if `wait` is never called; the Host owns the request lifetime.
+`Client.create`, `Client.show`, `Client.notify`, and the module-level `show`/`notify` helpers accept `template=Path(...)` for a trusted custom template directory. `popu` is resolved from `PATH` unless `Client(executable=...)` is supplied. CLI communication uses UTF-8 JSON lines through a stdout pipe; there is no stdout temporary file or receipt polling. Notifications and management commands read their response line before waiting for the CLI to exit, without waiting for trailing pipe EOF. Stderr uses a temporary file so diagnostic bursts cannot block receipt delivery. After accepting a dialog, the SDK drains remaining stdout in bounded chunks and reaps its CLI in the background even if `wait` is never called; the Host owns the request lifetime and is launched without inherited CLI handles.
 
 ## Window options
 

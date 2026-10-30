@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, TextIO
@@ -63,49 +64,30 @@ class Client:
     def create(self, request: DialogRequest | Notification | Mapping[str, Any], *, template: str | os.PathLike[str] | None = None) -> RequestReceipt:
         payload = request.as_dict() if hasattr(request, "as_dict") else dict(request)
         path = _write_json(payload)
-        process: subprocess.Popen[str] | None = None
-        diagnostics: TextIO | None = None
+        invocation: _CliInvocation | None = None
         try:
             command = self._command + ["request", str(path)]
             if template is not None:
                 command += ["--template", os.fspath(template)]
-            # A file prevents stderr from filling a pipe while we wait for the
-            # receipt. stdout has only one reader; dialog output is drained in
-            # the background after acceptance, even if callers never wait().
-            diagnostics = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
-            process = subprocess.Popen(
-                command, stdout=subprocess.PIPE, stderr=diagnostics,
-                text=True, encoding="utf-8",
-            )
-            line = process.stdout.readline() if process.stdout else ""
+            invocation = _CliInvocation(command)
+            line = invocation.read_line()
             if not line:
-                process.wait()
-                raise PopuError(_diagnostic(diagnostics) or "popu did not accept the request")
+                invocation.wait()
+                raise PopuError(invocation.diagnostic() or "popu did not accept the request")
             receipt = RequestReceipt.from_dict(_json_object(line))
             if payload.get("mode") == "dialog":
                 threading.Thread(
-                    target=_reap_request, args=(process, diagnostics), daemon=True,
+                    target=_reap_request, args=(invocation,), daemon=True,
                 ).start()
-                process = None
-                diagnostics = None
+                invocation = None
             else:
-                process.communicate()
-                if process.returncode != 0:
-                    raise PopuError(
-                        _diagnostic(diagnostics) or f"popu exited with code {process.returncode}"
-                    )
+                invocation.wait_for_success()
             return receipt
         except (OSError, UnicodeError) as error:
             raise PopuError(f"could not submit Popu request: {error}") from error
         finally:
-            if process is not None:
-                if process.poll() is None:
-                    process.terminate()
-                if process.stdout is not None:
-                    process.stdout.close()
-                process.wait()
-            if diagnostics is not None:
-                diagnostics.close()
+            if invocation is not None:
+                invocation.close()
             path.unlink(missing_ok=True)
 
     def show(self, request: DialogRequest | Mapping[str, Any], *, template: str | os.PathLike[str] | None = None) -> InteractionResult:
@@ -149,15 +131,62 @@ class Client:
         return self._run_json(["wait", request_id])
 
     def _run_json(self, args: Sequence[str]) -> Mapping[str, Any]:
+        invocation: _CliInvocation | None = None
         try:
-            result = subprocess.run(
-                self._command + list(args), capture_output=True, text=True, encoding="utf-8",
-            )
+            invocation = _CliInvocation(self._command + list(args))
+            # A full snapshot can exceed pipe capacity. Read its JSON line
+            # before waiting, without waiting for inherited pipe EOF.
+            line = invocation.read_line()
+            invocation.wait_for_success()
+            return _json_object(line)
         except (OSError, UnicodeError) as error:
             raise PopuError(f"could not run Popu command: {error}") from error
-        if result.returncode != 0:
-            raise PopuError(result.stderr.strip() or f"popu exited with code {result.returncode}")
-        return _json_object(result.stdout)
+        finally:
+            if invocation is not None:
+                invocation.close()
+
+
+class _CliInvocation:
+    """Own CLI streams and process cleanup; stdout carries JSON lines."""
+
+    def __init__(self, command: Sequence[str]) -> None:
+        self._resources = ExitStack()
+        try:
+            self._diagnostics = self._resources.enter_context(tempfile.TemporaryFile(mode="w+", encoding="utf-8"))
+            self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=self._diagnostics)
+            assert self.process.stdout is not None
+            self._stdout = self._resources.enter_context(self.process.stdout)
+        except BaseException:
+            self._resources.close()
+            raise
+
+    def read_line(self) -> str:
+        return self._stdout.readline().decode("utf-8")
+
+    def wait(self) -> int:
+        return self.process.wait()
+
+    def wait_for_success(self) -> None:
+        code = self.wait()
+        if code != 0:
+            raise PopuError(self.diagnostic() or f"popu exited with code {code}")
+
+    def drain(self) -> None:
+        # Dialog output may fill the pipe before the CLI can exit. Keep a
+        # bounded buffer; the Host snapshot is read separately by Client.wait.
+        while self._stdout.read(64 * 1024):
+            pass
+
+    def diagnostic(self) -> str:
+        return _diagnostic(self._diagnostics)
+
+    def close(self) -> None:
+        try:
+            if self.process.poll() is None:
+                self.process.terminate()
+            self.process.wait()
+        finally:
+            self._resources.close()
 
 
 def _json_object(text: str) -> Mapping[str, Any]:
@@ -175,11 +204,12 @@ def _diagnostic(stream: TextIO) -> str:
     return stream.read().strip()
 
 
-def _reap_request(process: subprocess.Popen[str], diagnostics: TextIO) -> None:
+def _reap_request(invocation: _CliInvocation) -> None:
     try:
-        process.communicate()
+        invocation.drain()
+        invocation.wait()
     finally:
-        diagnostics.close()
+        invocation.close()
 
 
 def _write_json(payload: Mapping[str, Any]) -> Path:
