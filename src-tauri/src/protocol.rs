@@ -369,6 +369,9 @@ pub struct Request {
     /// Only notifications may declare a reading requirement, including false.
     #[serde(default, deserialize_with = "deserialize_requires_read", skip_serializing_if = "Option::is_none")]
     pub requires_read: Option<bool>,
+    /// Notifications must opt in before accepting any content updates.
+    #[serde(default)]
+    pub updatable: bool,
 }
 
 fn deserialize_requires_read<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<bool>, D::Error> {
@@ -415,6 +418,9 @@ impl Request {
 
         match self.mode {
             Mode::Dialog => {
+                if self.updatable {
+                    return Err(ProtocolError::Invalid("updatable is only valid for notify".into()));
+                }
                 if self.requires_read.is_some() {
                     return Err(ProtocolError::Invalid("requires_read is only valid for notify".into()));
                 }

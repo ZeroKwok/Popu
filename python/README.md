@@ -20,11 +20,11 @@ from popu import Client, DialogRequest, Notification
 client = Client()
 result = client.show(DialogRequest.confirm(title="Continue?"))
 
-receipt = client.notify(Notification.success(title="Done"))
+receipt = client.notify(Notification.success(title="Backup running", updatable=True))
 snapshot = client.status(receipt.request_id)
 snapshot = client.update(receipt.request_id, receipt.revision, {
     "severity": "success",
-    "title": "Still done",
+    "title": "Backup 50%",
     "blocks": [],
 })
 client.dismiss(receipt.request_id)
@@ -32,7 +32,26 @@ client.dismiss(receipt.request_id)
 
 `create` and `notify` return `RequestReceipt` (`NotificationReceipt` is an alias) with `status="accepted"`, a Host-generated `request_id`, `state`, `revision`, and `duplicate`. Acceptance can mean `queued`; it does not mean the window has already appeared. `create` returns after acceptance for dialogs as well as notifications; `show` waits and returns an `InteractionResult` containing `status`, `action`, and `values`.
 
-`status`, `update`, `dismiss`, and `wait` return Host snapshot dictionaries. `wait` always reads the authoritative terminal snapshot, including `revision`, `mode`, `content`, timestamps, optional `response`, and `exit_code`. The same request can be managed from another `Client` instance or Python process using its ID. Updating requires the latest revision and replaces the entire `content`; it does not restart the display timer. Revision conflicts, missing IDs, validation failures, and subprocess/JSON errors raise `PopuError`.
+`status`, `update`, `dismiss`, and `wait` return Host snapshot dictionaries. `wait` reads the authoritative terminal snapshot, including revision, content, timestamps, response and exit code; a hidden updatable notification is not terminal. The same request can be managed from another client using its ID. Updating requires the latest revision and replaces the entire content. Ordinary updates preserve the timer; an explicit `duration_ms` restarts it. Revision conflicts, missing IDs, validation failures, sealed updates and subprocess/JSON errors raise `PopuError`.
+
+## Live notifications
+
+Notifications default to `updatable=False` and reject updates. Opt in at creation for progress reports. Update omission preserves this flag; the last report sets `updatable=False`, atomically saving the final contents and rejecting further updates. There is no `final` field. Dialog content updates do not use notification options.
+
+```python
+receipt = client.notify(Notification.success(title="Backing up", updatable=True))
+snapshot = client.update(receipt.request_id, receipt.revision, {
+    "title": "Backup 50%", "blocks": [{"type": "progress", "value": 50}],
+})
+snapshot = client.update(receipt.request_id, snapshot["revision"], {
+    "severity": "success", "title": "Backup completed",
+    "blocks": [{"type": "paragraph", "text": "2,000 files verified."}],
+}, updatable=False, reshow=True, duration_ms=10000)
+```
+
+User close hides progress and silences ordinary updates. An explicit `reshow=True` permits one further presentation by default; `reshow_suppressed` reports a consumed budget without rejecting the content. Automatic display timeout hides the card, and the next report shows it again unless the user previously closed it. `dismiss` is caller cancellation and ends the notification outright.
+
+The default template displays occurrence time, refreshed on every accepted report. Hidden contents remain current in history. After 12 hours without a successful report, the notification becomes `stale` and rejects updates. Host restart restores live records hidden without resetting this deadline. See the [complete lifecycle](../docs/live-notifications.md) and [runnable backup demo](examples/README.md).
 
 Cancelled, closed, and timed-out dialogs are normal `InteractionResult` outcomes. A custom dialog action may use exit code `12` (or any other code from 0–255); the SDK reads the Host result rather than treating that business exit code as a transport error. If a terminal dialog has no response, `show` raises `PopuError` with its terminal state.
 

@@ -1,5 +1,6 @@
 import { renderContentBlocks } from "./content-renderer.js";
 import { renderContentIcon } from "./visual-renderer.js";
+import { renderNotificationTime } from "./notification-time.js";
 
 const invoke = window.__TAURI__.core.invoke;
 
@@ -194,9 +195,11 @@ function renderContent(content, preserveForm = false) {
   return pendingContent;
 }
 
-window.popuApplyUpdate = (content, revision) => {
+window.popuApplyUpdate = (content, revision, occurredAtMs) => {
   bootstrap.request.content = content;
   bootstrap.revision = revision;
+  bootstrap.occurred_at_ms = occurredAtMs ?? bootstrap.occurred_at_ms;
+  renderNotificationTime(element("timestamp"), bootstrap.occurred_at_ms);
   renderContent(content, bootstrap.request.mode === "dialog");
   announceReady().catch(reportRenderFailure);
 };
@@ -304,6 +307,11 @@ async function start() {
   document.head.append(style);
 
   renderContent(bootstrap.request.content);
+  renderNotificationTime(element("timestamp"), bootstrap.occurred_at_ms);
+  if (bootstrap.request.mode === "notify") {
+    const clock = setInterval(() => renderNotificationTime(element("timestamp"), bootstrap.occurred_at_ms), 1000);
+    window.addEventListener("pagehide", () => clearInterval(clock), { once: true });
+  }
   renderActions(bootstrap.request.actions);
   installDragRegions();
 

@@ -85,9 +85,9 @@ fn run_inner() -> Result<i32, Box<dyn std::error::Error>> {
         }
         Commands::Update { request_id, update } => {
             let value: serde_json::Value = serde_json::from_str(&fs::read_to_string(update)?)?;
-            let expected = value.get("expected_revision").cloned().ok_or("update requires expected_revision")?;
-            let content = value.get("content").cloned().ok_or("update requires content")?;
-            print_rpc(rpc_with_start("request.update", serde_json::json!({"request_id":request_id,"expected_revision":expected,"content":content}))?)
+            let mut params = value.as_object().cloned().ok_or("update must be an object")?;
+            params.insert("request_id".into(), serde_json::json!(request_id));
+            print_rpc(rpc_with_start("request.update", serde_json::Value::Object(params))?)
         }
         Commands::Dismiss { request_id } => print_rpc(rpc_with_start("request.dismiss", serde_json::json!({"request_id":request_id}))?),
         Commands::Status { request_id } => print_rpc(rpc_with_start("request.get", serde_json::json!({"request_id":request_id}))?),

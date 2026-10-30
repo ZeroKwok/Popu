@@ -119,8 +119,19 @@ class Client:
     def notify(self, notification: Notification | Mapping[str, Any], *, template: str | os.PathLike[str] | None = None) -> NotificationReceipt:
         return self.create(notification, template=template)
 
-    def update(self, request_id: str, expected_revision: int, content: Mapping[str, Any]) -> Mapping[str, Any]:
-        path = _write_json({"expected_revision": expected_revision, "content": dict(content)})
+    def update(
+        self, request_id: str, expected_revision: int, content: Mapping[str, Any], *,
+        updatable: bool | None = None, reshow: bool = False, duration_ms: int | None = None,
+    ) -> Mapping[str, Any]:
+        """Replace content; optionally seal updates, request reshow, or restart the display timer."""
+        payload: dict[str, Any] = {"expected_revision": expected_revision, "content": dict(content)}
+        if updatable is not None:
+            payload["updatable"] = updatable
+        if reshow:
+            payload["reshow"] = True
+        if duration_ms is not None:
+            payload["duration_ms"] = duration_ms
+        path = _write_json(payload)
         try:
             return self._run_json(["update", request_id, str(path)])
         finally:

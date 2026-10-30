@@ -16,7 +16,7 @@ function harness(markRead = async () => 123) {
   const tracker = createReadTracker({
     afterPaint: () => new Promise((resolve) => paints.push(resolve)),
     isForeground: () => foreground,
-    markRead: (id) => { calls.push(id); return markRead(id); },
+    markRead: (id, revision) => { calls.push(id); return markRead(id, revision); },
     onRead: (id, timestamp) => acknowledged.push([id, timestamp]),
     onError: (error) => errors.push(error),
     scheduleRetry: (callback) => { const id = ++nextRetry; retries.set(id, callback); return id; },
@@ -179,4 +179,21 @@ test("clearing or disposing cancels retries, including an in-flight rejection", 
   h.tracker.recheck();
   await h.paint();
   assert.deepEqual(h.calls, ["selected"]);
+});
+
+test("a late acknowledgement of old progress never reads the new result revision", async () => {
+  const pending = new Map();
+  const h = harness((id, revision) => new Promise((resolve) => pending.set(revision, resolve)));
+  const progress = { ...item("backup"), revision: 1 };
+  const result = { ...item("backup"), revision: 2 };
+  h.tracker.present(progress);
+  await h.paint();
+  h.tracker.present(result);
+  await h.paint();
+  pending.get(1)(123);
+  await setImmediate();
+  assert.equal(result.read_at_ms, null);
+  pending.get(2)(456);
+  await setImmediate();
+  assert.equal(result.read_at_ms, 456);
 });

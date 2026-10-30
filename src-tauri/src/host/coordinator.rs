@@ -23,6 +23,7 @@ pub(super) enum Command {
     },
     Status,
     Clear,
+    ClearHistory,
     Stop,
 }
 
@@ -85,31 +86,19 @@ pub(super) fn start(app: AppHandle, state: Arc<HostState>) {
             next_check: Instant::now(),
         };
         while !worker.state.stopping.load(Ordering::SeqCst) {
-            match receiver.recv_timeout(Duration::from_millis(100)) {
-                Ok(task) => worker.handle(task),
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            let task = match receiver.recv_timeout(Duration::from_millis(100)) {
+                Ok(task) => Some(task),
+                Err(mpsc::RecvTimeoutError::Timeout) => None,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            }
+            };
             let effects = worker
                 .state
                 .registry
                 .lock()
                 .unwrap()
                 .expire_due(Instant::now());
-            let ended: Vec<_> = effects
-                .iter()
-                .filter_map(|effect| {
-                    if let Effect::Close(id) = effect {
-                        Some(*id)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
             worker.apply(effects);
-            for id in ended {
-                persist_terminal(&worker.app, &worker.state, id);
-            }
+            if let Some(task) = task { worker.handle(task); }
             if Instant::now() >= worker.next_check {
                 worker.check_windows();
                 worker.next_check = Instant::now() + Duration::from_secs(1);
@@ -117,6 +106,7 @@ pub(super) fn start(app: AppHandle, state: Arc<HostState>) {
             if !worker.state.stopping.load(Ordering::SeqCst) {
                 worker.drive();
             }
+            if let Err(error) = worker.flush() { eprintln!("Popu persistence error: {error}"); }
             worker.state.changed.notify_all();
         }
     });
@@ -138,7 +128,8 @@ impl Coordinator {
     fn handle(&mut self, task: Task) {
         match task {
             Task::Command(command, reply) => {
-                let result = self.command(command);
+                let mut result = self.command(command);
+                if let Err(error) = self.flush() { result = Err(error); }
                 let _ = reply.send(result);
             }
             Task::Ready {
@@ -156,24 +147,21 @@ impl Coordinator {
             Task::Closed(id) => {
                 let request = self.state.registry.lock().unwrap().request(id).cloned();
                 if let Some(request) = request {
-                    let result = if request.mode == Mode::Dialog {
+                    let result = {
                         self.state.registry.lock().unwrap().complete(
                             id,
                             request.terminal_response(ResponseStatus::Closed, None),
                             10,
                         )
-                    } else {
-                        self.state.registry.lock().unwrap().dismiss(id)
                     };
                     if let Ok(effects) = result {
                         self.apply(effects);
-                        persist_terminal(&self.app, &self.state, id);
                     }
                 }
             }
             Task::Destroyed(id) => {
-                self.closing.remove(&id);
-                self.fail(id, "native window destroyed before request completion");
+                let expected = self.closing.remove(&id).is_some();
+                if !expected { self.fail(id, "native window destroyed before request completion"); }
             }
             Task::History { show } => open_history_on_worker(&self.app, &self.state, show),
         }
@@ -196,7 +184,9 @@ impl Coordinator {
                     .registry
                     .lock()
                     .unwrap()
-                    .update(params.request_id, params.expected_revision, params.content)
+                    .update_with_options(params.request_id, params.expected_revision, params.content, UpdateOptions {
+                        updatable: params.updatable, reshow: params.reshow, duration_ms: params.duration_ms,
+                    })
                     .map_err(invalid_registry)?;
                 self.apply(effects);
                 self.snapshot(params.request_id)
@@ -210,7 +200,6 @@ impl Coordinator {
                     .dismiss(id)
                     .map_err(invalid_registry)?;
                 self.apply(effects);
-                persist_terminal(&self.app, &self.state, id);
                 self.snapshot(id)
             }
             Command::Submit { id, action, values } => {
@@ -240,7 +229,6 @@ impl Coordinator {
                     .complete(id, response, code)
                     .map_err(invalid_registry)?;
                 self.apply(effects);
-                persist_terminal(&self.app, &self.state, id);
                 Ok(Value::Null)
             }
             Command::Finish { id, status, action } => {
@@ -271,7 +259,6 @@ impl Coordinator {
                     .complete(id, response, code)
                     .map_err(invalid_registry)?;
                 self.apply(effects);
-                persist_terminal(&self.app, &self.state, id);
                 Ok(Value::Null)
             }
             Command::Clear => {
@@ -285,10 +272,19 @@ impl Coordinator {
                     let result = self.state.registry.lock().unwrap().dismiss(id);
                     if let Ok(effects) = result {
                         self.apply(effects);
-                        persist_terminal(&self.app, &self.state, id);
                     }
                 }
                 Ok(Value::Null)
+            }
+            Command::ClearHistory => {
+                let ids = self.state.registry.lock().unwrap().hidden_notification_ids();
+                let count = clear_history(&self.state).map_err(invalid)?;
+                // Destroy retained hidden HWNDs as well as their durable records.
+                for id in ids { self.apply(vec![Effect::Close(id)]); }
+                emit_history_changed(&self.app);
+                update_tray_tooltip(&self.app, &self.state);
+                self.state.changed.notify_all();
+                Ok(json!({"status":"cleared","count":count}))
             }
             Command::Status => {
                 let registry = self.state.registry.lock().unwrap();
@@ -311,6 +307,7 @@ impl Coordinator {
                     *count = json!(count.as_u64().unwrap() + 1);
                 }
                 let total = registry.active_notification_count();
+                let hidden = registry.hidden_notification_ids().len();
                 drop(registry);
                 let windows: Vec<_> = ids
                     .iter()
@@ -324,15 +321,13 @@ impl Coordinator {
                     })
                     .collect();
                 Ok(
-                    json!({"status":"running","notifications":total,"notification_states":counts,"requests":requests.into_iter().take(128).collect::<Vec<_>>(),"requests_truncated":total > 128,"windows":windows,"layout_version":self.layout_version,"closing":self.closing.keys().collect::<Vec<_>>()}),
+                    json!({"status":"running","notifications":total,"hidden_notifications":hidden,"notification_states":counts,"requests":requests.into_iter().take(128).collect::<Vec<_>>(),"requests_truncated":total > 128,"windows":windows,"layout_version":self.layout_version,"closing":self.closing.keys().collect::<Vec<_>>()}),
                 )
             }
             Command::Stop => {
                 self.state.stopping.store(true, Ordering::SeqCst);
                 let ids = self.state.registry.lock().unwrap().shutdown();
-                for id in &ids {
-                    persist_terminal(&self.app, &self.state, *id);
-                }
+                if let Err(error) = self.flush() { eprintln!("Popu shutdown persistence error: {error}"); }
                 self.state.changed.notify_all();
                 let app = self.app.clone();
                 std::thread::spawn(move || {
@@ -356,18 +351,37 @@ impl Coordinator {
         .map_err(invalid)
     }
 
+    fn flush(&mut self) -> Result<(), Value> {
+        let ids = self.state.registry.lock().unwrap().take_dirty();
+        let mut failure = None;
+        for id in ids {
+            if let Err(error) = persist_notification(&self.app, &self.state, id) {
+                self.state.registry.lock().unwrap().mark_dirty(id);
+                failure = Some(json!({"code":"persistence_failed","message":error}));
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    }
+
     fn fail(&mut self, id: Uuid, reason: &str) {
         let result = self.state.registry.lock().unwrap().fail(id);
         if let Ok(effects) = result {
             eprintln!("Popu request {id} failed: {reason}");
             self.apply(effects);
-            persist_terminal(&self.app, &self.state, id);
         }
     }
 
     fn apply(&mut self, effects: Vec<Effect>) {
         for effect in effects {
             match effect {
+                Effect::Hide(id) => {
+                    let result = self.app.get_webview_window(&id.to_string())
+                        .map(|window| windows::conceal(&window)).unwrap_or(Ok(()));
+                    self.sizes.remove(&id);
+                    self.unhealthy.remove(&id);
+                    self.dirty = true;
+                    if let Err(error) = result { self.fail(id, &error); }
+                }
                 Effect::Close(id) => {
                     let notification = self
                         .state
@@ -401,11 +415,12 @@ impl Coordinator {
                             .summary(id)
                             .unwrap()
                             .revision;
+                        let occurred_at_ms = timestamp_ms(self.state.registry.lock().unwrap().snapshot(id).unwrap().occurred_at);
                         let result = serde_json::to_string(&content)
                             .map_err(|e| e.to_string())
                             .and_then(|value| {
                                 window
-                                    .eval(format!("window.popuApplyUpdate?.({value}, {revision})"))
+                                    .eval(format!("window.popuApplyUpdate?.({value}, {revision}, {occurred_at_ms})"))
                                     .map_err(|e| e.to_string())
                             });
                         if let Err(error) = result {
@@ -539,6 +554,7 @@ impl Coordinator {
         if snapshot.state.is_terminal() {
             return Err("request already ended".into());
         }
+        if matches!(snapshot.state, crate::core::RequestState::Hidden | crate::core::RequestState::Queued) { return Ok(()); }
         if snapshot.revision != revision {
             self.apply(vec![Effect::Update(id)]);
             return Ok(());
@@ -675,6 +691,10 @@ impl Coordinator {
             )
         };
         if has_window {
+            if self.state.registry.lock().unwrap().is_preparing(id) {
+                self.apply(vec![Effect::Update(id)]);
+                return;
+            }
             if let Err(error) = self.present(id) {
                 self.fail(id, &error);
             }

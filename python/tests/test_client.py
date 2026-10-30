@@ -57,7 +57,7 @@ if command == "request":
         sys.stderr.buffer.flush()
     snapshot = {
         "request_id": request_id, "state": "queued", "revision": 1,
-        "mode": request["mode"], "requires_read": request.get("requires_read", False),
+        "mode": request["mode"], "requires_read": request.get("requires_read", False), "updatable": request.get("updatable", False),
         "content": request["content"], "created_at": {"secs_since_epoch": 1, "nanos_since_epoch": 0},
     }
     receipt = {
@@ -96,6 +96,7 @@ else:
         fail('Host RPC failed: {"code":"not_found"}')
     if command == "update":
         update = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+        (root / "update.json").write_text(json.dumps(update), encoding="utf-8")
         (root / "update-path.txt").write_text(sys.argv[3], encoding="utf-8")
         if update["expected_revision"] != snapshot["revision"]:
             fail('Host RPC failed: {"code":"revision_conflict","current_revision":%d}' % snapshot["revision"])
@@ -168,7 +169,7 @@ def test_duplicate_receipt_preserves_host_identity(tmp_path: Path) -> None:
 
 def test_update_conflicts_and_dismissal(tmp_path: Path) -> None:
     client = _client(tmp_path)
-    receipt = client.notify(Notification.success(title="备份中"))
+    receipt = client.notify(Notification.success(title="备份中", updatable=True))
     content = {"severity": "success", "title": "备份完成", "blocks": []}
     updated = client.update(receipt.request_id, receipt.revision, content)
     assert updated["revision"] == 2
@@ -180,6 +181,40 @@ def test_update_conflicts_and_dismissal(tmp_path: Path) -> None:
     assert client.wait(receipt.request_id)["state"] == "cancelled"
     update_path = Path((tmp_path / "update-path.txt").read_text(encoding="utf-8"))
     assert not update_path.exists()
+
+
+def test_live_notification_options_and_omitted_update_values(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    receipt = client.notify(Notification.success(title="Backup", updatable=True))
+    submitted = json.loads((tmp_path / "input.json").read_text(encoding="utf-8"))
+    assert submitted["request"]["updatable"] is True
+    snapshot = client.update(receipt.request_id, receipt.revision, {"title": "50%"})
+    progress = json.loads((tmp_path / "update.json").read_text(encoding="utf-8"))
+    assert set(progress) == {"expected_revision", "content"}
+    client.update(receipt.request_id, snapshot["revision"], {"title": "Done"}, updatable=False, reshow=True, duration_ms=10000)
+    final = json.loads((tmp_path / "update.json").read_text(encoding="utf-8"))
+    assert final["updatable"] is False
+    assert final["reshow"] is True
+    assert final["duration_ms"] == 10000
+
+
+def test_backup_demo_runs_through_sdk_and_seals_its_last_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("backup_progress", Path(__file__).parents[1] / "examples" / "backup_progress.py")
+    demo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(demo)
+    client = _client(tmp_path)
+    monkeypatch.setattr(demo, "Client", lambda executable: client)
+    monkeypatch.setattr(demo.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(sys, "argv", ["backup_progress.py", "--steps", "2", "--interval", "0.01"])
+    assert demo.main() == 0
+    submitted = json.loads((tmp_path / "input.json").read_text(encoding="utf-8"))
+    final = json.loads((tmp_path / "update.json").read_text(encoding="utf-8"))
+    assert submitted["request"]["updatable"] is True
+    assert final["updatable"] is False
+    assert final["reshow"] is True
+    assert final["content"]["blocks"][-1]["value"] == 100
 
 
 def test_pending_dialog_is_accepted_without_waiting_and_reaped(tmp_path: Path) -> None:

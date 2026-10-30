@@ -57,3 +57,20 @@ fn reading_requirement_is_a_notification_only_boolean() {
         assert!(Request::parse(&notification.to_string()).is_err());
     }
 }
+
+#[test]
+fn updatable_is_opt_in_and_notifications_only() {
+    let mut value = serde_json::json!({"version":"1.0","mode":"notify","content":{"title":"Progress"}});
+    assert!(!Request::parse(&value.to_string()).unwrap().updatable);
+    value["updatable"] = true.into();
+    assert!(Request::parse(&value.to_string()).unwrap().updatable);
+    value["mode"] = "dialog".into();
+    value["actions"] = serde_json::json!([{"id":"ok","label":"OK","submit":true}]);
+    assert!(Request::parse(&value.to_string()).is_err());
+    for invalid in [serde_json::Value::Null, serde_json::json!("true"), serde_json::json!(1)] {
+        value["mode"] = "notify".into();
+        value.as_object_mut().unwrap().remove("actions");
+        value["updatable"] = invalid;
+        assert!(Request::parse(&value.to_string()).is_err());
+    }
+}

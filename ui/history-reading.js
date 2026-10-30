@@ -22,23 +22,24 @@ export function createReadTracker({ afterPaint, isForeground, markRead, onRead, 
   }
 
   async function acknowledge(item, generation) {
-    if (!item || item.read_at_ms !== null || !active || disposed || pending.has(item.request_id)) return;
+    const key = item ? `${item.request_id}:${item.revision}` : null;
+    if (!item || item.read_at_ms !== null || !active || disposed || pending.has(key)) return;
     await afterPaint();
     if (generation !== presentation || !active || disposed) return;
     if (!isForeground()) { retryCurrent(generation); return; }
-    if (pending.has(item.request_id)) return;
-    pending.add(item.request_id);
+    if (pending.has(key)) return;
+    pending.add(key);
     let rejected = false;
     try {
-      const timestamp = await markRead(item.request_id);
+      const timestamp = await markRead(item.request_id, item.revision);
       rejected = timestamp === null;
       if (timestamp !== null) {
         item.read_at_ms = timestamp;
-        if (current?.request_id === item.request_id) current.read_at_ms = timestamp;
-        onRead(item.request_id, timestamp);
+        if (current?.request_id === item.request_id && current?.revision === item.revision) current.read_at_ms = timestamp;
+        onRead(item.request_id, timestamp, item.revision);
       }
     } finally {
-      pending.delete(item.request_id);
+      pending.delete(key);
       // Refresh may replace the object while a native acknowledgement is in
       // flight. Retry the current selection, never a previously selected row.
       if (rejected) retryCurrent(presentation);

@@ -135,6 +135,8 @@ Host 在首次请求时自动启动。调用方提交请求后获得 Host 生成
 
 通知终态会保存到历史；dialog 及其表单值不会持久化。只有 `requires_read: true` 且仍未阅读的历史通知会持续触发托盘提醒。
 
+长时间任务创建通知时声明 `updatable: true`，使用同一 ID 持续更新；最后一次更新设为 `updatable: false`。用户关闭后普通更新静默保存，`reshow: true` 默认允许最后再次展示一次；自动超时后的下次更新会正常再次展示。更新可覆盖 `duration_ms`，默认模板显示通知发生时间。连续 12 小时未上报会自动过期归档。完整规则见[可更新通知](docs/live-notifications.md)，可运行的备份演示见[Python 示例](python/examples/README.md)。
+
 ## 通知与窗口规则
 
 - 通知使用主显示器工作区，最多同时展示三条；
@@ -150,6 +152,7 @@ Host 在首次请求时自动启动。调用方提交请求后获得 Host 生成
 - [English README](README.en.md)
 - [完整架构说明](ARCHITECTURE.md)
 - [通知窗口协调与排布](docs/notification-layout.md)
+- [可更新通知生命周期](docs/live-notifications.md)
 - [Python SDK](python/README.md)
 - [JSON Schema](protocol/popu.schema.json)
 - [贡献指南](CONTRIBUTING.md)

@@ -158,7 +158,8 @@ mod tests {
         for entry in std::fs::read_dir(examples).unwrap() {
             let path = entry.unwrap().path();
             if !path.file_name().unwrap().to_string_lossy().contains("-visual-") { continue; }
-            let request = Request::parse(&std::fs::read_to_string(&path).unwrap()).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+            let mut request = Request::parse(&std::fs::read_to_string(&path).unwrap()).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+            request.updatable = request.mode == crate::protocol::Mode::Notify;
             let content = request.content.clone();
             let mut registry = crate::core::RequestRegistry::default();
             let created = registry.create(request, None);

@@ -22,6 +22,9 @@ pub struct HistoryItem {
     pub response: Option<serde_json::Value>,
     pub requires_read: bool,
     pub read_at_ms: Option<i64>,
+    pub occurred_at_ms: i64,
+    pub updatable: bool,
+    pub hidden_reason: Option<String>,
 }
 
 impl HistoryStore {
@@ -52,25 +55,42 @@ impl HistoryStore {
         if !columns.iter().any(|name| name == "read_at_ms") {
             transaction.execute_batch("ALTER TABLE notification_history ADD COLUMN read_at_ms INTEGER;")?;
         }
+        for (name, declaration) in [
+            ("occurred_at_ms", "INTEGER NOT NULL DEFAULT 0"),
+            ("updatable", "INTEGER NOT NULL DEFAULT 0"),
+            ("hidden_reason", "TEXT"),
+        ] {
+            if !columns.iter().any(|column| column == name) {
+                transaction.execute_batch(&format!("ALTER TABLE notification_history ADD COLUMN {name} {declaration};"))?;
+            }
+        }
+        transaction.execute_batch("UPDATE notification_history SET occurred_at_ms = created_at_ms WHERE occurred_at_ms = 0;
+          CREATE TABLE IF NOT EXISTS live_notifications (request_id TEXT PRIMARY KEY, record_json TEXT NOT NULL);")?;
         transaction.commit()?;
         Ok(Self { connection })
     }
 
     pub fn record(&mut self, snapshot: &RequestSnapshot) -> rusqlite::Result<()> {
-        if snapshot.mode != Mode::Notify || !snapshot.state.is_terminal() { return Ok(()); }
-        let transaction = self.connection.transaction()?;
+        if snapshot.mode != Mode::Notify { return Ok(()); }
+        if !snapshot.updatable && !snapshot.state.is_terminal() && self.get(&snapshot.request_id.to_string()).is_err() { return Ok(()); }
+        let transaction = self.connection.savepoint()?;
         let ended_at_ms = snapshot.ended_at.map(millis).unwrap_or_else(|| millis(SystemTime::now()));
-        let read_at_ms = (!matches!(snapshot.state, RequestState::Expired | RequestState::Failed)).then_some(ended_at_ms);
+        let read_at_ms = (snapshot.acknowledged_revision == snapshot.revision || snapshot.state == RequestState::Confirmed).then_some(ended_at_ms);
         transaction.execute("INSERT INTO notification_history
-          (request_id,state,revision,content_json,created_at_ms,shown_at_ms,ended_at_ms,response_json,requires_read,read_at_ms)
-          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
-          ON CONFLICT(request_id) DO NOTHING", params![snapshot.request_id.to_string(),
+          (request_id,state,revision,content_json,created_at_ms,shown_at_ms,ended_at_ms,response_json,requires_read,read_at_ms,occurred_at_ms,updatable,hidden_reason)
+          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+          ON CONFLICT(request_id) DO UPDATE SET state=excluded.state, revision=excluded.revision,
+          content_json=excluded.content_json, shown_at_ms=excluded.shown_at_ms, ended_at_ms=excluded.ended_at_ms,
+          response_json=excluded.response_json, requires_read=excluded.requires_read,
+          read_at_ms=CASE WHEN notification_history.revision=excluded.revision THEN COALESCE(notification_history.read_at_ms,excluded.read_at_ms) ELSE excluded.read_at_ms END,
+          occurred_at_ms=excluded.occurred_at_ms, updatable=excluded.updatable, hidden_reason=excluded.hidden_reason", params![snapshot.request_id.to_string(),
             serde_json::to_value(snapshot.state).unwrap().as_str().unwrap(), snapshot.revision,
             serde_json::to_string(&snapshot.content).unwrap(), millis(snapshot.created_at),
             snapshot.shown_at.map(millis), ended_at_ms,
-            snapshot.response.as_ref().map(|v| serde_json::to_string(v).unwrap()), snapshot.requires_read, read_at_ms])?;
+            snapshot.response.as_ref().map(|v| serde_json::to_string(v).unwrap()), snapshot.requires_read, read_at_ms,
+            millis(snapshot.occurred_at), snapshot.updatable, snapshot.hidden_reason.map(|state| serde_json::to_value(state).unwrap().as_str().unwrap().to_owned())])?;
         transaction.execute("DELETE FROM notification_history WHERE request_id IN
-          (SELECT request_id FROM notification_history ORDER BY ended_at_ms DESC, rowid DESC LIMIT -1 OFFSET 500)", [])?;
+          (SELECT request_id FROM notification_history WHERE state NOT IN ('queued','preparing','ready','shown','hidden') ORDER BY ended_at_ms DESC, rowid DESC LIMIT -1 OFFSET 500)", [])?;
         transaction.commit()
     }
 
@@ -78,29 +98,75 @@ impl HistoryStore {
         // List only the fields used in the sidebar, never every inline image/spec.
         let mut statement = self.connection.prepare("SELECT request_id,state,revision,
           json_object('title',json_extract(content_json,'$.title'),'severity',COALESCE(json_extract(content_json,'$.severity'),'info')),
-          created_at_ms,shown_at_ms,ended_at_ms,response_json,requires_read,read_at_ms
-          FROM notification_history ORDER BY ended_at_ms DESC, rowid DESC LIMIT 500")?;
+          created_at_ms,shown_at_ms,ended_at_ms,response_json,requires_read,read_at_ms,occurred_at_ms,updatable,hidden_reason
+          FROM notification_history ORDER BY occurred_at_ms DESC, rowid DESC")?;
         let items = statement.query_map([], history_item)?.collect();
         items
     }
 
     pub fn get(&self, request_id: &str) -> rusqlite::Result<HistoryItem> {
-        self.connection.query_row("SELECT request_id,state,revision,content_json,created_at_ms,shown_at_ms,ended_at_ms,response_json,requires_read,read_at_ms
+        self.connection.query_row("SELECT request_id,state,revision,content_json,created_at_ms,shown_at_ms,ended_at_ms,response_json,requires_read,read_at_ms,occurred_at_ms,updatable,hidden_reason
           FROM notification_history WHERE request_id = ?1", [request_id], history_item)
     }
 
     pub fn pending_read_count(&self) -> rusqlite::Result<usize> {
-        self.connection.query_row("SELECT COUNT(*) FROM notification_history WHERE requires_read = 1 AND read_at_ms IS NULL", [], |row| row.get(0))
+        self.connection.query_row("SELECT COUNT(*) FROM notification_history WHERE requires_read = 1 AND read_at_ms IS NULL AND state NOT IN ('queued','preparing','ready','shown')", [], |row| row.get(0))
     }
 
+    #[cfg(test)]
     pub fn mark_read(&mut self, request_id: &str) -> rusqlite::Result<i64> {
+        self.mark_read_revision(request_id, None)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    pub fn mark_read_revision(&mut self, request_id: &str, revision: Option<u64>) -> rusqlite::Result<Option<i64>> {
+        use rusqlite::OptionalExtension;
         let read_at_ms = millis(SystemTime::now());
         self.connection.query_row("UPDATE notification_history SET read_at_ms = COALESCE(read_at_ms, ?2)
-          WHERE request_id = ?1 RETURNING read_at_ms", params![request_id, read_at_ms], |row| row.get(0))
+          WHERE request_id = ?1 AND (?3 IS NULL OR revision = ?3) RETURNING read_at_ms", params![request_id, read_at_ms, revision], |row| row.get(0)).optional()
     }
 
     pub fn clear(&mut self) -> rusqlite::Result<usize> {
-        self.connection.execute("DELETE FROM notification_history", [])
+        self.connection.execute("DELETE FROM notification_history WHERE state NOT IN ('queued','preparing','ready','shown')", [])
+    }
+
+    pub fn clear_with_live(&mut self, ids: &[uuid::Uuid]) -> rusqlite::Result<usize> {
+        self.connection.execute_batch("SAVEPOINT clear_notifications")?;
+        let result = (|| {
+            for id in ids { self.save_live(&id.to_string(), None)?; }
+            self.clear()
+        })();
+        match result {
+            Ok(count) => { self.connection.execute_batch("RELEASE clear_notifications")?; Ok(count) }
+            Err(error) => {
+                let _ = self.connection.execute_batch("ROLLBACK TO clear_notifications; RELEASE clear_notifications");
+                Err(error)
+            }
+        }
+    }
+
+    pub fn save_live(&mut self, id: &str, checkpoint: Option<&str>) -> rusqlite::Result<()> {
+        if let Some(checkpoint) = checkpoint {
+            self.connection.execute("INSERT INTO live_notifications VALUES (?1,?2) ON CONFLICT(request_id) DO UPDATE SET record_json=excluded.record_json", params![id,checkpoint])?;
+        } else {
+            self.connection.execute("DELETE FROM live_notifications WHERE request_id=?1", [id])?;
+        }
+        Ok(())
+    }
+
+    pub fn persist(&mut self, snapshot: &RequestSnapshot, checkpoint: Option<&str>) -> rusqlite::Result<()> {
+        self.connection.execute_batch("SAVEPOINT notification_commit")?;
+        let result = self.record(snapshot).and_then(|_| self.save_live(&snapshot.request_id.to_string(), checkpoint));
+        match result {
+            Ok(()) => self.connection.execute_batch("RELEASE notification_commit"),
+            Err(error) => {
+                let _ = self.connection.execute_batch("ROLLBACK TO notification_commit; RELEASE notification_commit");
+                Err(error)
+            }
+        }
+    }
+
+    pub fn load_live(&self) -> rusqlite::Result<Vec<(String,String)>> {
+        self.connection.prepare("SELECT request_id,record_json FROM live_notifications")?.query_map([], |row| Ok((row.get(0)?,row.get(1)?)))?.collect()
     }
 }
 
@@ -110,7 +176,7 @@ fn history_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryItem> {
     Ok(HistoryItem { request_id: row.get(0)?, state: row.get(1)?, revision: row.get(2)?,
         content: serde_json::from_str(&content).unwrap_or_default(), created_at_ms: row.get(4)?,
         shown_at_ms: row.get(5)?, ended_at_ms: row.get(6)?, response: response.and_then(|v| serde_json::from_str(&v).ok()),
-        requires_read: row.get(8)?, read_at_ms: row.get(9)? })
+        requires_read: row.get(8)?, read_at_ms: row.get(9)?, occurred_at_ms: row.get(10)?, updatable: row.get(11)?, hidden_reason: row.get(12)? })
 }
 
 fn millis(time: SystemTime) -> i64 { time.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().min(i64::MAX as u128) as i64 }
@@ -281,5 +347,52 @@ mod tests {
             let item = store.get(&created.request_id.to_string()).unwrap();
             assert_eq!(item.content, expected);
         }
+    }
+
+    #[test]
+    fn live_history_replaces_progress_and_rejects_a_stale_read_acknowledgement() {
+        let mut store = HistoryStore::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+        let mut registry = RequestRegistry::default();
+        let request = Request::parse(r#"{"version":"1.0","mode":"notify","updatable":true,"requires_read":true,"content":{"title":"Progress"}}"#).unwrap();
+        let id = registry.create(request.clone(), None).request_id;
+        registry.complete(id, request.terminal_response(crate::protocol::ResponseStatus::Closed, None), 10).unwrap();
+        store.persist(&registry.snapshot(id).unwrap(), registry.checkpoint(id).as_deref()).unwrap();
+        assert!(store.get(&id.to_string()).unwrap().read_at_ms.is_some());
+        let mut content = request.content;
+        content.title = "Final report".into();
+        registry.update_with_options(id, 1, content, crate::core::UpdateOptions { updatable: Some(false), ..Default::default() }).unwrap();
+        store.persist(&registry.snapshot(id).unwrap(), registry.checkpoint(id).as_deref()).unwrap();
+        assert_eq!(store.list().unwrap().len(), 1);
+        assert!(store.load_live().unwrap().is_empty());
+        let result = store.get(&id.to_string()).unwrap();
+        assert_eq!(result.content["title"], "Final report");
+        assert!(result.read_at_ms.is_none());
+        assert_eq!(store.mark_read_revision(&id.to_string(), Some(1)).unwrap(), None);
+        assert_eq!(store.pending_read_count().unwrap(), 1);
+        assert!(store.mark_read_revision(&id.to_string(), Some(2)).unwrap().is_some());
+        assert_eq!(store.pending_read_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn live_checkpoints_survive_database_reopening_and_history_clear_preserves_visible_records() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.db");
+        let mut registry = RequestRegistry::default();
+        let request = Request::parse(r#"{"version":"1.0","mode":"notify","updatable":true,"content":{"title":"Running"}}"#).unwrap();
+        let id = registry.create(request, None).request_id;
+        let occurrence = registry.snapshot(id).unwrap().occurred_at;
+        {
+            let mut store = HistoryStore::from_connection(Connection::open(&path).unwrap()).unwrap();
+            store.persist(&registry.snapshot(id).unwrap(), registry.checkpoint(id).as_deref()).unwrap();
+            assert_eq!(store.clear().unwrap(), 0);
+        }
+        let mut store = HistoryStore::from_connection(Connection::open(&path).unwrap()).unwrap();
+        let records = store.load_live().unwrap();
+        assert_eq!(records.len(), 1);
+        let mut restored = RequestRegistry::default();
+        restored.restore(id, &records[0].1).unwrap();
+        assert_eq!(restored.snapshot(id).unwrap().occurred_at, occurrence);
+        store.persist(&restored.snapshot(id).unwrap(), restored.checkpoint(id).as_deref()).unwrap();
+        assert_eq!(store.clear().unwrap(), 1);
     }
 }

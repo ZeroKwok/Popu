@@ -24,9 +24,10 @@ async function mockHost(page, fixture, history = [], foreground = true, opened =
     window.__readAttempts = 0;
     window.__listRequests = 0;
     window.__historyListeners = {};
+    window.__historyRecords = history;
     window.__TAURI__ = {
       core: { invoke: async (command, args) => {
-        if (command === "get_bootstrap") return { request: fixture, revision: 1, template, maximized: false };
+        if (command === "get_bootstrap") return { request: fixture, revision: 1, occurred_at_ms: Date.now() - 15000, template, maximized: false };
         if (command === "ui_ready") { window.__readyRevisions.push(args.revision); window.__presented = true; return; }
         if (command === "render_failed") { window.__failed = args.message; return; }
         if (command === "history_presented") { window.__historyPresented = true; return opened; }
@@ -126,6 +127,35 @@ test("rapid content revisions acknowledge only the latest completed rendering", 
   await expect.poll(() => page.evaluate(() => window.__readyRevisions.at(-1))).toBe(3);
   expect(await page.evaluate(() => window.__readyRevisions.slice(1).every((revision) => revision === 3))).toBe(true);
   expect(await page.evaluate(() => window.__failed)).toBeNull();
+});
+
+test("notification timestamp refreshes with content and keeps an absolute occurrence", async ({ page }, testInfo) => {
+  const fixture = readJson("protocol/examples/notification-success.json");
+  await page.setViewportSize({ width: 440, height: 320 });
+  await mockHost(page, fixture);
+  await page.goto("/index.html");
+  const timestamp = page.locator("[data-popu-slot='timestamp']");
+  await expect(timestamp).toHaveText(/.+/);
+  const previous = await timestamp.getAttribute("datetime");
+  const occurredAt = Date.now();
+  await page.evaluate(({ content, occurredAt }) => window.popuApplyUpdate(content, 2, occurredAt), { content: fixture.content, occurredAt });
+  await expect(timestamp).toHaveAttribute("datetime", new Date(occurredAt).toISOString());
+  expect(await timestamp.getAttribute("datetime")).not.toBe(previous);
+  await expect(timestamp).toHaveAttribute("title", /.+/);
+  await page.screenshot({ path: testInfo.outputPath("notification-timestamp.png") });
+});
+
+test("live history updates its presentation state even without a new content revision", async ({ page }) => {
+  const fixture = readJson("protocol/examples/notification-success.json");
+  await mockHost(page, fixture, [{ request_id: "live", state: "shown", revision: 1, content: fixture.content, occurred_at_ms: Date.now(), read_at_ms: null, updatable: true }], false);
+  await page.goto("/history.html");
+  await expect(page.locator(".history-metadata")).toContainText("Displayed");
+  await page.evaluate(() => {
+    window.__historyRecords[0].state = "hidden";
+    window.__historyListeners["history-changed"]();
+  });
+  await expect(page.locator(".history-metadata")).toContainText("Hidden · accepting updates");
+  await expect(page.locator(".history-item")).toHaveCount(1);
 });
 
 test("a semantically invalid chart reports a render failure instead of starting the timer", async ({ page }) => {

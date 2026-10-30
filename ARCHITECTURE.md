@@ -18,12 +18,12 @@ Tauri Host ── RequestRegistry ── request_id → WebviewWindow
 
 - The first client starts hidden `popu host run` and retries readiness. Listener binding is the single-instance boundary.
 - The Host generates UUID request IDs and starts every request at revision 1.
-- States are `queued`, `shown`, `confirmed`, `cancelled`, `closed`, `expired`, and `failed`.
+- States are `queued`, `preparing`, `ready`, `shown`, `hidden`, `confirmed`, `cancelled`, `closed`, `expired`, `failed`, and `stale`. `hidden` is nonterminal and retains the update channel.
 - Dialogs are globally FIFO with one active window. A dialog CLI waits for a terminal response and adopts its action exit code.
 - Notifications use the primary display, never wait behind dialogs, show at most three, and remain alive after the submitting client exits. `duration_ms` starts at `ui_ready`.
 - Notification windows are always on top without requesting focus. Omitting `window.always_on_top` defaults to `true`; explicitly setting it to `false` is rejected by request validation and JSON Schema. Dialogs may still set it to `false`.
 - Closing or expiring a visible request promotes queued work and reflows the notification stack.
-- Host shutdown terminalizes active requests, wakes waiters, destroys windows, and exits the process.
+- Host shutdown terminalizes ordinary requests and wakes waiters. Updatable notifications retain durable checkpoints and restore hidden on the next start, preserving their idle deadline and user intent.
 
 ## Window sizing and DPI
 
@@ -52,7 +52,9 @@ WebView logical CSS viewport                         Win32 work area / set_posit
 
 `coalesce_key` is an optional live business-slot key scoped by mode. A duplicate create returns the existing ID, state, and revision without changing content. Terminalization releases the key immediately.
 
-Updates contain `request_id`, `expected_revision`, and a complete `content` snapshot. Success increments the revision. A stale update returns `revision_conflict` with the current revision. Updates do not restart timers. A shown dialog's form-block structure is immutable; the renderer preserves current input while applying safe content updates.
+Updates contain `request_id`, `expected_revision`, and a complete `content` snapshot. Success increments the revision and refreshes the occurrence time. Notifications opt in at creation with `updatable: true` (default false); the final update sets it false. Update omission preserves the current flag. Updates optionally carry `reshow` and `duration_ms`; an explicit duration restarts the current display timer. Dialog updates retain their existing form-preserving behavior and reject notification options.
+
+Automatic display expiry hides an updatable notification; the next report queues it again. User close hides it and silences ordinary reports. An explicit `reshow: true` may override user close once by default, counted only on actual presentation. Closing the update channel is independent of displaying its final contents. Twelve hours without an accepted report ends it as `stale`. Full behavior and examples are in [live notifications](docs/live-notifications.md).
 
 External templates are caller configuration supplied with `--template`. The Host canonicalizes and validates the directory before registering the request.
 
@@ -68,13 +70,13 @@ Malformed JSON, unsupported versions, unknown methods, oversized frames, revisio
 
 ## History
 
-Only terminal notifications are stored in SQLite under the Popu application-data directory. Records contain the final structured content snapshot, revision, timestamps, terminal state, and optional response. Dialogs and form values are never persisted. Insertion prunes history to the newest 500 rows using a stable timestamp/row sequence.
+Notification history and live notification checkpoints are stored in SQLite under the Popu application-data directory. Accepted updates replace the existing history row, keeping content, revision, occurrence time and reading state consistent. Checkpoints retain the request, template location, user-close intent and reshow budget. History and checkpoint changes commit atomically before successful command replies. Dialogs and form values are never persisted. Retention keeps the newest 500 archived rows and preserves active notifications.
 
-The history window is a read-only master-detail view: its left list identifies each notification by title, terminal outcome, and end time; its right pane renders the saved structured body. It never reopens a notification or recreates its controls, so viewing history cannot start a timer, alter the notification stack, or emit a business action. `expired` is shown as a timeout, `closed` as a user close, and other terminal states retain their own labels.
+The history window is a read-only master-detail view of current and archived notification snapshots. Its list shows title, presentation state and occurrence time; its detail pane renders the saved body. Viewing it never starts a timer, changes the stack or emits a business action. Clearing history also deletes hidden update channels, while preserving queued/preparing/ready/shown notifications. The coordinator serializes clearing with updates.
 
-When a terminal notification is successfully recorded, or history is successfully cleared, the Host emits a targeted `history-changed` event to the `history` webview. The window makes an initial `history_list` request and treats each event as a refresh hint, coalescing bursts and preserving the selected item when possible. No window polls the database, and an unopened history window receives no work.
+When a notification snapshot is successfully recorded, or history is cleared, the Host emits a targeted `history-changed` event. The history window coalesces refresh hints and preserves the selected item when possible. No window polls the database, and an unopened history window receives no work.
 
-History metadata persists a single `needs_attention` flag. Terminal notifications other than user/application cancellation or user close set it atomically with their history record. Opening or focusing the history window, and clearing history, acknowledges it. Tray animation remains active while there are visible/queued notifications or this flag is set, so a timed-out or failed notification remains discoverable across Host restarts without requiring a tray-number badge.
+Reading is per content revision. User close acknowledges the displayed revision, while later content starts unread. The foreground history renderer acknowledges only the revision it actually rendered; a late acknowledgement cannot read a newer result. Tray reminders depend only on hidden/archived unread rows with `requires_read: true`, never on visible or queued counts.
 
 ## Public CLI
 

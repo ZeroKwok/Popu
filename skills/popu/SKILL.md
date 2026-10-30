@@ -7,6 +7,8 @@ description: Design and invoke concise Popu human-interaction requests for autom
 
 Popu uses a persistent local Host. Read the first JSON line from `popu request` as the accepted receipt (`request_id`, `state`, `revision`, `duplicate`); dialog calls then produce a terminal response. Use `coalesce_key` for one live business slot and update only with the latest revision plus a complete content snapshot.
 
+Notifications must declare `updatable: true` at creation to accept updates. User close silences ordinary reports; automatic timeout permits the next report to show again. The final update sets `updatable: false` and may set `reshow: true` (one override of user close by default) plus `duration_ms`. Omission preserves the update flag and display timer. Reuse one ID, never recreate a notification to bypass user close or a consumed reshow budget. Twelve hours without a successful report archives the record as stale. See `docs/live-notifications.md` and `protocol/update.schema.json`.
+
 Use Popu only for a bounded human interaction. It is a local, short-lived window: it does not store tasks, coordinate calls, or render untrusted HTML.
 
 ## Choose the interaction

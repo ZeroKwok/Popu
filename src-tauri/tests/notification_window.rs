@@ -209,7 +209,7 @@ mod host {
                         let result = (|| -> Result<(), String> {
                             // The second request must wait for the head's actual
                             // preparation timeout, not be inserted below a hidden slot.
-                            let stalled = request(&endpoint, "Stalled head", 180, 60000)?;
+                            let stalled = create(&endpoint, json!({"version":"1.0","mode":"notify","template":"notification","updatable":true,"duration_ms":60000,"window":{"height":180},"content":{"title":"Stalled head"}}))?;
                             wait("intercepted content readiness", || app.state::<Fault>().intercepted.load(Ordering::SeqCst))?;
                             rpc(&endpoint, "request.update", json!({"request_id":stalled,"expected_revision":1,"content":{"title":"Stalled head","blocks":[{"type":"paragraph","text":"Updated before presentation"}]}}))?;
                             let (reply, receiver) = mpsc::channel();
@@ -276,13 +276,44 @@ mod host {
                             eprintln!("PASS native recovery: hidden HWND, DWM cloak, hidden WebView, unexpected destroy");
 
                             // Content updates and duplicate readiness must not extend duration.
-                            let timed = request(&endpoint, "Timed notification", 180, 1500)?;
+                            let timed = create(&endpoint, json!({"version":"1.0","mode":"notify","template":"notification","updatable":true,"duration_ms":1500,"window":{"height":180},"content":{"title":"Timed notification"}}))?;
                             wait("timed notification", || shown(&state, timed))?;
-                            rpc(&endpoint, "request.update", json!({"request_id":timed,"expected_revision":1,"content":{"title":"Updated notification"}}))?;
+                            rpc(&endpoint, "request.update", json!({"request_id":timed,"expected_revision":1,"updatable":false,"content":{"title":"Updated notification"}}))?;
                             wait("automatic expiry", || state.registry.lock().unwrap().snapshot(timed).unwrap().state.is_terminal())?;
                             wait("expired native window removed", || app.get_webview_window(&timed.to_string()).is_none())?;
                             let item = state.history.lock().unwrap().as_ref().unwrap().get(&timed.to_string()).map_err(|e| e.to_string())?;
                             if item.state != "expired" || item.read_at_ms.is_some() { return Err("expiry did not preserve unread history".into()); }
+
+                            // A real retained HWND receives silent progress, one
+                            // explicit reshow, and a final sealed report.
+                            let live = create(&endpoint, json!({"version":"1.0","mode":"notify","template":"notification","updatable":true,"requires_read":true,"duration_ms":60000,"content":{"title":"Backup progress"}}))?;
+                            wait("live notification", || shown(&state, live))?;
+                            let live_window = app.get_webview_window(&live.to_string()).unwrap();
+                            let original_hwnd = live_window.hwnd().map_err(|e| e.to_string())?;
+                            live_window.close().map_err(|e| e.to_string())?;
+                            wait("user close hides rather than ends", || state.registry.lock().unwrap().snapshot(live).is_ok_and(|s| s.state == crate::core::RequestState::Hidden))?;
+                            let progress = rpc(&endpoint, "request.update", json!({"request_id":live,"expected_revision":1,"content":{"title":"Backup 50%","blocks":[{"type":"progress","value":50}]}}))?;
+                            if progress["state"] != "hidden" || live_window.is_visible().map_err(|e| e.to_string())? { return Err("ordinary progress reopened a user-closed window".into()); }
+                            let final_report = rpc(&endpoint, "request.update", json!({"request_id":live,"expected_revision":2,"content":{"title":"Backup complete","blocks":[{"type":"progress","value":100}]},"updatable":false,"reshow":true,"duration_ms":1500}))?;
+                            if final_report["updatable"] != false { return Err("final update did not seal updates".into()); }
+                            wait("final report reshow", || shown(&state, live))?;
+                            if app.get_webview_window(&live.to_string()).unwrap().hwnd().map_err(|e| e.to_string())? != original_hwnd { return Err("reshow recreated the native window".into()); }
+                            if state.registry.lock().unwrap().snapshot(live).unwrap().reshow_count != 1 { return Err("reshow did not consume one opportunity".into()); }
+                            wait("final report archived", || state.registry.lock().unwrap().snapshot(live).unwrap().state.is_terminal())?;
+                            let final_item = state.history.lock().unwrap().as_ref().unwrap().get(&live.to_string()).map_err(|e| e.to_string())?;
+                            if final_item.revision != 3 || final_item.content["title"] != "Backup complete" || final_item.read_at_ms.is_some() { return Err("final summary was lost or inherited the progress acknowledgement".into()); }
+
+                            let automatic = create(&endpoint, json!({"version":"1.0","mode":"notify","template":"notification","updatable":true,"duration_ms":600,"content":{"title":"Auto-hidden progress"}}))?;
+                            wait("automatic progress first shown", || shown(&state, automatic))?;
+                            wait("automatic progress hidden", || state.registry.lock().unwrap().snapshot(automatic).unwrap().state == crate::core::RequestState::Hidden)?;
+                            rpc(&endpoint, "request.update", json!({"request_id":automatic,"expected_revision":1,"content":{"title":"Auto-hidden next report"},"duration_ms":60000}))?;
+                            wait("automatic progress shown on ordinary update", || shown(&state, automatic))?;
+                            app.get_webview_window(&automatic.to_string()).unwrap().close().map_err(|e| e.to_string())?;
+                            wait("automatic progress user closed", || state.registry.lock().unwrap().snapshot(automatic).unwrap().state == crate::core::RequestState::Hidden)?;
+                            rpc(&endpoint, "history.clear", json!({}))?;
+                            if rpc(&endpoint, "request.get", json!({"request_id":automatic})).is_ok() { return Err("history clear retained a hidden update endpoint".into()); }
+                            wait("cleared retained HWND removed", || app.get_webview_window(&automatic.to_string()).is_none())?;
+                            eprintln!("PASS live notifications: retained HWND, silent progress, final reshow, automatic timeout, and clear");
 
                             let dialog = json!({"version":"1.0","mode":"dialog","timeout_seconds":2,"content":{"title":"FIFO dialog"},"actions":[{"id":"ok","label":"OK","submit":true}]});
                             let first_dialog = create(&endpoint, dialog.clone())?;

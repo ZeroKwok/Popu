@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "mode": "notify",
+  "template": "notification",
+  "updatable": true,
+  "duration_ms": 20000,
+  "content": {
+    "severity": "info",
+    "title": "Backing up Documents",
+    "blocks": [
+      { "type": "properties", "items": [
+        { "label": "Files", "text": "1,240 / 2,000" },
+        { "label": "Destination", "text": "Daily backup" }
+      ] },
+      { "type": "progress", "title": "Backup", "value": 62 }
+    ]
+  }
+}
