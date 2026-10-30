@@ -128,6 +128,7 @@ class Notification:
         position: Position = Position.BOTTOM_RIGHT,
         duration_ms: int = 8_000,
         requires_read: bool = False,
+        updatable: bool = False,
         screen: Screen = Screen.PRIMARY,
         area: ScreenArea = ScreenArea.WORK_AREA,
         width: WindowDimension | None = None,
@@ -148,6 +149,7 @@ class Notification:
                 ),
                 "duration_ms": duration_ms,
                 "requires_read": requires_read,
+                "updatable": updatable,
                 "content": _content("success", title, message, blocks, icon, vertical_align),
                 **({"coalesce_key": coalesce_key} if coalesce_key is not None else {}),
             }

@@ -29,9 +29,9 @@ const readTracker = createReadTracker({
     trace("read_check", { visible, focused });
     return visible && focused;
   },
-  markRead: (requestId) => invoke("history_mark_read", { requestId }),
-  onRead: (requestId, timestamp) => {
-    const item = items.find((item) => item.request_id === requestId);
+  markRead: (requestId, revision) => invoke("history_mark_read", { requestId, revision }),
+  onRead: (requestId, timestamp, revision) => {
+    const item = items.find((item) => item.request_id === requestId && item.revision === revision);
     if (item) item.read_at_ms = timestamp;
     renderList();
   },
@@ -44,6 +44,12 @@ const statusLabels = {
   cancelled: "Dismissed",
   failed: "Failed",
   confirmed: "Confirmed",
+  stale: "No notification received for 12 hours",
+  hidden: "Hidden · accepting updates",
+  queued: "Waiting to display",
+  preparing: "Preparing",
+  ready: "Ready to display",
+  shown: "Displayed",
 };
 
 const severityIcons = { info: "i", success: "✓", warning: "!", error: "×" };
@@ -67,7 +73,7 @@ function formatTime(timestamp) {
 }
 
 function renderDetail(item) {
-  const key = item ? `${item.request_id}:${item.revision}` : null;
+  const key = item ? `${item.request_id}:${item.revision}:${item.state}` : null;
   if (item && detailKey === key) {
     if (readyDetail) readTracker.present(readyDetail);
     return;
@@ -113,7 +119,7 @@ function renderDetailContent(item, version) {
   const metadata = document.createElement("dl");
   metadata.className = "history-metadata";
   for (const [label, value] of [
-    ["Ended", formatTime(item.ended_at_ms)],
+    ["Time", formatTime(item.occurred_at_ms ?? item.created_at_ms ?? item.ended_at_ms)],
     ["Outcome", formatStatus(item.state)],
     ["Revision", String(item.revision)],
   ]) {
@@ -181,7 +187,7 @@ function renderList() {
     title.title = title.textContent;
     const summary = document.createElement("span");
     summary.className = "history-summary";
-    summary.textContent = `${formatStatus(item.state)} · ${formatTime(item.ended_at_ms)}`;
+    summary.textContent = `${formatStatus(item.state)} · ${formatTime(item.occurred_at_ms ?? item.created_at_ms ?? item.ended_at_ms)}`;
     text.append(title, summary);
     if (required) {
       const badge = document.createElement("span");

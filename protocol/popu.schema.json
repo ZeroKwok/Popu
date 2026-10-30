@@ -8,6 +8,7 @@
   "properties": {
     "version": { "const": "1.0" },
     "mode": { "enum": ["dialog", "notify"] },
+    "updatable": { "type": "boolean", "default": false, "description": "Accept future notification updates, including while hidden; false seals the update lifecycle." },
     "coalesce_key": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
     "template": { "type": "string", "minLength": 1 },
     "position": { "enum": ["bottom_right", "cursor_screen_center"] },
@@ -45,7 +46,7 @@
   "allOf": [
     {
       "if": { "properties": { "mode": { "const": "dialog" } } },
-      "then": { "required": ["actions"], "not": { "required": ["requires_read"] } },
+      "then": { "required": ["actions"], "not": { "required": ["requires_read"] }, "properties": { "updatable": { "const": false } } },
       "else": {
         "properties": {
           "actions": { "maxItems": 0 },

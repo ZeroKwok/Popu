@@ -12,7 +12,7 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use uuid::Uuid;
 
-use crate::core::RequestRegistry;
+use crate::core::{RequestRegistry, UpdateOptions};
 use crate::ipc::{self, RpcRequest, RpcResponse, RPC_VERSION};
 use crate::history::HistoryStore;
 use crate::protocol::{Content, Mode, Request, ResponseStatus};
@@ -41,12 +41,24 @@ impl Default for HostState {
 
 impl HostState {
     fn with_history(history: Option<HistoryStore>) -> Self {
-        Self { registry: Mutex::new(RequestRegistry::default()), changed: Condvar::new(), stopping: AtomicBool::new(false), history: Mutex::new(history), sender: Mutex::new(None), history_window: Mutex::new(None) }
+        let mut registry = RequestRegistry::default();
+        if let Some(store) = &history {
+            match store.load_live() {
+                Ok(records) => for (id, checkpoint) in records {
+                    if let Ok(id) = Uuid::parse_str(&id) {
+                        if let Err(error) = registry.restore(id, &checkpoint) { eprintln!("Popu could not restore {id}: {error}"); }
+                    }
+                },
+                Err(error) => eprintln!("Popu could not restore notifications: {error}"),
+            }
+        }
+        registry.expire_due(Instant::now());
+        Self { registry: Mutex::new(registry), changed: Condvar::new(), stopping: AtomicBool::new(false), history: Mutex::new(history), sender: Mutex::new(None), history_window: Mutex::new(None) }
     }
 }
 
 #[derive(Clone, Serialize)]
-struct Bootstrap { request: Request, revision: u64, template: TemplateAssets, maximized: bool }
+struct Bootstrap { request: Request, revision: u64, occurred_at_ms: u64, template: TemplateAssets, maximized: bool }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -56,7 +68,17 @@ struct CreateParams { request: Request, #[serde(default)] template: Option<PathB
 struct IdParams { request_id: Uuid }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct UpdateParams { request_id: Uuid, expected_revision: u64, content: Content }
+struct UpdateParams {
+    request_id: Uuid, expected_revision: u64, content: Content,
+    #[serde(default, deserialize_with = "deserialize_update_option")] updatable: Option<bool>,
+    #[serde(default)] reshow: bool,
+    #[serde(default, deserialize_with = "deserialize_update_option")] duration_ms: Option<u64>,
+}
+
+fn deserialize_update_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where D: serde::Deserializer<'de>, T: Deserialize<'de> {
+    T::deserialize(deserializer).map(Some)
+}
 
 pub fn run() -> i32 {
     let state = Arc::new(HostState::default());
@@ -94,7 +116,7 @@ fn host_builder(state: Arc<HostState>) -> tauri::Builder<tauri::Wry> {
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "history", "Open history", true, None::<&str>)?;
     let clear_current = MenuItem::with_id(app, "clear_current", "Clear current notifications", true, None::<&str>)?;
-    let clear_history_item = MenuItem::with_id(app, "clear_history", "Clear history", true, None::<&str>)?;
+    let clear_history_item = MenuItem::with_id(app, "clear_history", "Clear history and hidden notifications", true, None::<&str>)?;
     let exit = MenuItem::with_id(app, "exit", "Exit Popu Host", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &clear_current, &clear_history_item, &exit])?;
     let tray = TrayIconBuilder::with_id("popu").menu(&menu).show_menu_on_left_click(false)
@@ -104,10 +126,8 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         "clear_current" => clear_current_notifications(app),
         "clear_history" => {
             let state = app.state::<Arc<HostState>>();
-            if clear_history(state.inner()).is_ok() {
-                emit_history_changed(app);
-                update_tray_tooltip(app, state.inner());
-            }
+            let (reply, _) = mpsc::channel();
+            let _ = coordinator::send(&state, Task::Command(Command::ClearHistory, reply));
         },
         "exit" => stop_from_tray(app),
         _ => {}
@@ -199,7 +219,7 @@ fn handle_connection(mut stream: interprocess::local_socket::Stream, app: AppHan
     let _ = ipc::write_frame(&mut stream, &response);
 }
 
-fn dispatch(rpc: RpcRequest, app: &AppHandle, state: &Arc<HostState>) -> RpcResponse {
+fn dispatch(rpc: RpcRequest, _app: &AppHandle, state: &Arc<HostState>) -> RpcResponse {
     if rpc.version != RPC_VERSION {
         return failure("unsupported_version", format!("unsupported RPC version: {}", rpc.version));
     }
@@ -247,10 +267,7 @@ fn dispatch(rpc: RpcRequest, app: &AppHandle, state: &Arc<HostState>) -> RpcResp
             serde_json::to_value(item).map_err(invalid)
         }
         "history.clear" => {
-            let count = clear_history(state).map_err(|error| json!({"code":"history_unavailable","message":error}))?;
-            emit_history_changed(app);
-            update_tray_tooltip(app, state);
-            Ok(json!({"status":"cleared","count":count}))
+            coordinator::call(state, Command::ClearHistory)
         }
         "host.stop" => coordinator::call(state, Command::Stop),
         _ => Err(json!({"code":"method_not_found","message":format!("unknown RPC method: {}", rpc.method)})),
@@ -291,10 +308,11 @@ fn get_bootstrap(window: WebviewWindow, state: State<'_, Arc<HostState>>) -> Res
     let id = id_for(&window)?; let registry = state.registry.lock().unwrap();
     let request = registry.request(id).cloned().ok_or("request not found")?;
     let revision = registry.summary(id).map_err(|e| e.to_string())?.revision;
+    let occurred_at_ms = timestamp_ms(registry.snapshot(id).map_err(|e| e.to_string())?.occurred_at);
     let template_dir = registry.template_dir(id).map(PathBuf::from);
     drop(registry);
     let template = templates::resolve(&request, template_dir.as_deref()).map_err(|e| e.to_string())?;
-    Ok(Bootstrap { maximized: request.window.is_maximized(), request, revision, template })
+    Ok(Bootstrap { maximized: request.window.is_maximized(), request, revision, occurred_at_ms, template })
 }
 
 #[tauri::command]
@@ -339,16 +357,16 @@ async fn history_trace(window: WebviewWindow, state: State<'_, Arc<HostState>>, 
 }
 
 #[tauri::command]
-fn history_mark_read(window: WebviewWindow, app: AppHandle, state: State<'_, Arc<HostState>>, request_id: Uuid) -> Result<Option<i64>, String> {
+fn history_mark_read(window: WebviewWindow, app: AppHandle, state: State<'_, Arc<HostState>>, request_id: Uuid, revision: Option<u64>) -> Result<Option<i64>, String> {
     if window.label() != "history" { return Err("only the history window may mark notifications read".into()); }
     if !runtime::is_window_foreground(&window)? { return Ok(None); }
     let read_at_ms = {
         let mut history = state.history.lock().unwrap();
-        history.as_mut().ok_or("history unavailable")?.mark_read(&request_id.to_string()).map_err(|e| e.to_string())?
+        history.as_mut().ok_or("history unavailable")?.mark_read_revision(&request_id.to_string(), revision).map_err(|e| e.to_string())?
     };
     emit_history_changed(&app);
     update_tray_tooltip(&app, state.inner());
-    Ok(Some(read_at_ms))
+    Ok(read_at_ms)
 }
 
 #[tauri::command]
@@ -359,11 +377,11 @@ fn history_get(state: State<'_, Arc<HostState>>, request_id: Uuid) -> Result<Val
 }
 
 #[tauri::command]
-fn history_clear(app: AppHandle, state: State<'_, Arc<HostState>>) -> Result<usize, String> {
-    let count = clear_history(state.inner())?;
-    emit_history_changed(&app);
-    update_tray_tooltip(&app, state.inner());
-    Ok(count)
+async fn history_clear(state: State<'_, Arc<HostState>>) -> Result<usize, String> {
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || coordinator::call(&state, Command::ClearHistory))
+        .await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
+        .map(|value| value["count"].as_u64().unwrap_or(0) as usize)
 }
 
 #[tauri::command]
@@ -409,8 +427,13 @@ fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
 }
 
 fn clear_history(state: &Arc<HostState>) -> Result<usize, String> {
+    let ids = state.registry.lock().unwrap().hidden_notification_ids();
     let mut history = state.history.lock().unwrap();
-    history.as_mut().ok_or("history unavailable")?.clear().map_err(|error| error.to_string())
+    let store = history.as_mut().ok_or("history unavailable")?;
+    let count = store.clear_with_live(&ids).map_err(|error| error.to_string())?;
+    drop(history);
+    state.registry.lock().unwrap().clear_hidden();
+    Ok(count)
 }
 
 fn pending_history_read_count(state: &Arc<HostState>) -> usize {
@@ -426,17 +449,25 @@ fn tray_tooltip(pending: usize) -> String {
     }
 }
 
-fn persist_terminal(app: &AppHandle, state: &Arc<HostState>, id: Uuid) {
-    let Some(snapshot) = state.registry.lock().unwrap().snapshot(id).ok() else { return };
-    if snapshot.mode != Mode::Notify || !snapshot.state.is_terminal() { return; }
+fn persist_notification(app: &AppHandle, state: &Arc<HostState>, id: Uuid) -> Result<(), String> {
+    let (snapshot, checkpoint) = {
+        let registry = state.registry.lock().unwrap();
+        let Ok(snapshot) = registry.snapshot(id) else { return Ok(()) };
+        (snapshot, registry.checkpoint(id))
+    };
+    if snapshot.mode != Mode::Notify { return Ok(()); }
     let mut history_guard = state.history.lock().unwrap();
-    let Some(history) = history_guard.as_mut() else { return };
-    let result = history.record(&snapshot);
+    let Some(history) = history_guard.as_mut() else { return Err("notification persistence unavailable".into()) };
+    let result = history.persist(&snapshot, checkpoint.as_deref());
     drop(history_guard);
     match result {
-        Ok(()) => { emit_history_changed(app); update_tray_tooltip(app, state); }
-        Err(error) => eprintln!("Popu history error: {error}"),
+        Ok(()) => { emit_history_changed(app); update_tray_tooltip(app, state); Ok(()) }
+        Err(error) => Err(error.to_string()),
     }
+}
+
+fn timestamp_ms(time: std::time::SystemTime) -> u64 {
+    time.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis().min(u64::MAX as u128) as u64
 }
 
 fn emit_history_changed(app: &AppHandle) {

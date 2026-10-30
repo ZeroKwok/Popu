@@ -1,2 +1,4 @@
 .popu-shell { padding-right: 38px; }
+.popu-timestamp { display: block; color: var(--muted, #64748b); font-size: 11px; margin: 5px 0 8px; font-variant-numeric: tabular-nums; }
+@media (prefers-color-scheme: dark) { .popu-timestamp { color: #abb2bf; } }
 

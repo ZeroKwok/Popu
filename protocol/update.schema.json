@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Popu content update (CLI file)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["expected_revision", "content"],
+  "properties": {
+    "expected_revision": { "type": "integer", "minimum": 1 },
+    "content": { "$ref": "popu.schema.json#/properties/content" },
+    "updatable": { "type": "boolean", "description": "Omit to preserve; false accepts this content and seals future updates." },
+    "reshow": { "type": "boolean", "default": false, "description": "Request one of the limited presentations after a user close." },
+    "duration_ms": { "type": "integer", "minimum": 500, "maximum": 86400000 }
+  }
+}
