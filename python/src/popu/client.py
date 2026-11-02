@@ -112,7 +112,7 @@ class Client:
         self, request_id: str, expected_revision: int, content: Mapping[str, Any], *,
         updatable: bool | None = None, reshow: bool = False, duration_ms: int | None = None,
     ) -> Mapping[str, Any]:
-        """Replace content; optionally seal updates, request reshow, or restart the display timer."""
+        """Replace content and refresh notification duration; optionally seal, reshow, or override duration."""
         payload: dict[str, Any] = {"expected_revision": expected_revision, "content": dict(content)}
         if updatable is not None:
             payload["updatable"] = updatable

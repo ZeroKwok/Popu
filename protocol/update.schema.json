@@ -9,6 +9,6 @@
     "content": { "$ref": "popu.schema.json#/properties/content" },
     "updatable": { "type": "boolean", "description": "Omit to preserve; false accepts this content and seals future updates." },
     "reshow": { "type": "boolean", "default": false, "description": "Request one of the limited presentations after a user close." },
-    "duration_ms": { "type": "integer", "minimum": 500, "maximum": 86400000 }
+    "duration_ms": { "type": "integer", "minimum": 500, "maximum": 86400000, "description": "Override the configured display duration. Every accepted notification update restarts its timer, even when this field is omitted." }
   }
 }

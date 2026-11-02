@@ -484,7 +484,9 @@ impl RequestRegistry {
             && r.user_closed
             && r.state == RequestState::Hidden
             && r.reshow_count >= MAX_USER_RESHOWS;
-        if options.duration_ms.is_some() {
+        // Every accepted notification revision gets a full display interval,
+        // using the previous duration unless this update overrides it.
+        if r.request.mode == Mode::Notify {
             r.visible_duration = Duration::ZERO;
             if r.state == RequestState::Shown {
                 r.phase_started = Some(Instant::now());
@@ -908,7 +910,7 @@ mod tests {
     }
 
     #[test]
-    fn revision_updates_do_not_reset_presentation_lifetime() {
+    fn notification_updates_restart_duration_but_readiness_does_not() {
         let mut r = RequestRegistry::default();
         let mut request = req("notify", None);
         request.updatable = true;
@@ -922,13 +924,56 @@ mod tests {
                 current_revision: 2
             })
         ));
-        let now = Instant::now();
+        let now = Instant::now() - Duration::from_secs(7);
         show(&mut r, id, now);
         assert_eq!(r.update(id, 2, content).unwrap(), [Effect::Update(id)]);
+        let restarted = r.records[&id].phase_started.unwrap();
+        assert!(r.expire_due(now + Duration::from_secs(8)).is_empty());
+        r.mark_ready(id).unwrap();
+        r.mark_shown(id, restarted + Duration::from_secs(7))
+            .unwrap();
+        assert!(r.expire_due(restarted + Duration::from_secs(7)).is_empty());
+        assert_eq!(
+            r.expire_due(restarted + Duration::from_secs(8)),
+            [Effect::Hide(id)]
+        );
+    }
+
+    #[test]
+    fn updating_a_parked_notification_restores_its_full_display_duration() {
+        let mut r = RequestRegistry::default();
+        let id = live(&mut r);
+        let now = Instant::now();
+        show(&mut r, id, now - Duration::from_secs(7));
+        r.park_notification(id, now).unwrap();
+        change(&mut r, id, UpdateOptions::default());
+        assert_eq!(r.records[&id].visible_duration, Duration::ZERO);
+        assert!(r.activate(id, now));
+        r.mark_ready(id).unwrap();
+        r.mark_shown(id, now).unwrap();
+        assert!(r.expire_due(now + Duration::from_secs(7)).is_empty());
         assert_eq!(
             r.expire_due(now + Duration::from_secs(8)),
             [Effect::Hide(id)]
         );
+    }
+
+    #[test]
+    fn dialog_updates_preserve_the_original_interaction_deadline() {
+        let mut r = RequestRegistry::default();
+        let mut request = req("dialog", None);
+        request.timeout_seconds = 10;
+        let id = r.create(request, None).request_id;
+        let now = Instant::now() - Duration::from_secs(9);
+        show(&mut r, id, now);
+        let content = r.request(id).unwrap().content.clone();
+        r.update(id, 1, content).unwrap();
+        assert!(r.expire_due(now + Duration::from_secs(9)).is_empty());
+        assert_eq!(
+            r.expire_due(now + Duration::from_secs(10)),
+            [Effect::Close(id)]
+        );
+        assert_eq!(r.snapshot(id).unwrap().state, RequestState::Expired);
     }
 
     #[test]
@@ -1175,7 +1220,13 @@ mod tests {
         let after = r.snapshot(id).unwrap();
         assert_eq!(before.revision, after.revision);
         assert_eq!(before.occurred_at, after.occurred_at);
+        assert_eq!(r.records[&id].phase_started, Some(started));
         assert!(after.updatable);
+        assert!(matches!(
+            r.update(id, before.revision - 1, before.content),
+            Err(RegistryError::RevisionConflict { .. })
+        ));
+        assert_eq!(r.records[&id].phase_started, Some(started));
         assert_eq!(
             r.expire_due(started + Duration::from_secs(10)),
             [Effect::Hide(id)]

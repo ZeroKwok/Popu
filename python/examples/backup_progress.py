@@ -37,8 +37,8 @@ def content(percent: int, elapsed: float, *, finished: bool = False) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--executable", type=Path, help="Path to the matching popu executable; defaults to PATH")
-    parser.add_argument("--interval", type=float, default=15, help="Seconds between reports (default: 15)")
-    parser.add_argument("--steps", type=int, default=6, help="Number of report intervals (default: 6)")
+    parser.add_argument("--interval", type=float, default=15, help="Seconds between reports (default: 3)")
+    parser.add_argument("--steps", type=int, default=6, help="Number of report intervals (default: 12)")
     parser.add_argument("--display-seconds", type=float, default=20, help="Initial display duration (default: 20)")
     parser.add_argument("--final-seconds", type=float, default=10, help="Final display duration (default: 10)")
     parser.add_argument("--wait", action="store_true", help="Wait for the final presentation to end")

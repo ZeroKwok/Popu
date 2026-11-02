@@ -69,6 +69,10 @@ build-test prefix="": build
         esac
     done
 
+build-test-pysdk: build
+    python -m pip install -e ./python
+    python python/examples/backup_progress.py --executable "src-tauri\target\debug\popu.exe"
+
 # Build the release executable, then run a protocol fixture.
 build-test-release file="dialog-confirm.json": build-release
     just --quiet cli "src-tauri/target/release/popu" "protocol/examples/{{file}}"

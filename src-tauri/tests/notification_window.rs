@@ -275,10 +275,14 @@ mod host {
                             clear(&endpoint, &state, &app)?;
                             eprintln!("PASS native recovery: hidden HWND, DWM cloak, hidden WebView, unexpected destroy");
 
-                            // Content updates and duplicate readiness must not extend duration.
-                            let timed = create(&endpoint, json!({"version":"1.0","mode":"notify","template":"notification","updatable":true,"duration_ms":1500,"window":{"height":180},"content":{"title":"Timed notification"}}))?;
+                            // A plain content update must grant the last revision
+                            // a full display duration, even when it seals updates.
+                            let timed = create(&endpoint, json!({"version":"1.0","mode":"notify","template":"notification","updatable":true,"duration_ms":3000,"window":{"height":180},"content":{"title":"Timed notification"}}))?;
                             wait("timed notification", || shown(&state, timed))?;
+                            std::thread::sleep(Duration::from_millis(2000));
                             rpc(&endpoint, "request.update", json!({"request_id":timed,"expected_revision":1,"updatable":false,"content":{"title":"Updated notification"}}))?;
+                            std::thread::sleep(Duration::from_millis(1200));
+                            if !shown(&state, timed) { return Err("content update did not restart the display timer".into()); }
                             wait("automatic expiry", || state.registry.lock().unwrap().snapshot(timed).unwrap().state.is_terminal())?;
                             wait("expired native window removed", || app.get_webview_window(&timed.to_string()).is_none())?;
                             let item = state.history.lock().unwrap().as_ref().unwrap().get(&timed.to_string()).map_err(|e| e.to_string())?;

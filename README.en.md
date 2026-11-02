@@ -135,7 +135,7 @@ The Host starts automatically when the first request arrives. Callers receive a 
 
 Terminal notifications are saved to history; dialogs and their form values are not persisted. Only unread history entries with `requires_read: true` keep the tray reminder active.
 
-Long-running notifications opt in with `updatable: true` and reuse one ID. The last update sets `updatable: false`; it may request `reshow: true` and a fresh `duration_ms`. User closes silence ordinary updates, with one explicit reshow allowed by default; automatic expiry allows the next report to show again. Live records expire after 12 hours without a successful report. See [live notifications](docs/live-notifications.md) and the [Python backup demo](python/examples/README.md).
+Long-running notifications opt in with `updatable: true` and reuse one ID. Every accepted update restarts the display timer using the configured duration; `duration_ms` can override it. The last update sets `updatable: false` and may request `reshow: true`. User closes silence ordinary updates, with one explicit reshow allowed by default; automatic expiry allows the next report to show again. Live records expire after 12 hours without a successful report. See [live notifications](docs/live-notifications.md) and the [Python backup demo](python/examples/README.md).
 
 ## Notification and window rules
 
