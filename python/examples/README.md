@@ -10,6 +10,8 @@ python python/examples/backup_progress.py --executable src-tauri/target/debug/po
 
 默认每 15 秒提交一次进度，共 90 秒。可以拖动卡片、点击 × 收起；普通进度不会突破主动关闭，最后一次更新会提交摘要、关闭更新入口，并申请一次再次展示。
 
+在启动、进度等待、更新或 `--wait` 阶段按 Ctrl+C，示例会打印停止信息并以退出码 130 结束。未完成的通知会尝试使用最新 revision 提交停止摘要、关闭更新入口；查询和更新各最多等待 1 秒，失败则跳过收尾。已经提交的完成摘要会保留。再次按 Ctrl+C 可以中断收尾，常驻 Host 不会被停止。
+
 自动超时后再展示：
 
 ```powershell

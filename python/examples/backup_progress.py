@@ -53,35 +53,52 @@ def main() -> int:
         duration_ms=round(args.display_seconds * 1000), width=440, height=360,
     ).as_dict()
     notification["content"] = initial
-    receipt = client.notify(notification)
-    revision = receipt.revision
-    started = time.monotonic()
-    print(f"通知 ID: {receipt.request_id}", flush=True)
-    print("可点击 × 收起进度；后续进度静默更新，结束时申请最后显示一次。", flush=True)
+    receipt = None
+    finished = False
     try:
+        receipt = client.notify(notification)
+        revision = receipt.revision
+        started = time.monotonic()
+        print(f"通知 ID: {receipt.request_id}", flush=True)
+        print("可点击 × 收起进度；Ctrl+C 停止演示；结束时申请最后显示一次。", flush=True)
         for step in range(1, args.steps + 1):
             time.sleep(args.interval)
             percent = step * 100 // args.steps
-            finished = step == args.steps
+            is_final = step == args.steps
             snapshot = client.update(
-                receipt.request_id, revision, content(percent, time.monotonic() - started, finished=finished),
-                **({"updatable": False, "reshow": True, "duration_ms": round(args.final_seconds * 1000)} if finished else {}),
+                receipt.request_id, revision, content(percent, time.monotonic() - started, finished=is_final),
+                **({"updatable": False, "reshow": True, "duration_ms": round(args.final_seconds * 1000)} if is_final else {}),
             )
             revision = snapshot["revision"]
+            finished = is_final
             print(f"{percent:3d}% · state={snapshot['state']} · revision={revision} · reshow_suppressed={snapshot.get('reshow_suppressed', False)}", flush=True)
         if args.wait:
             result = client.wait(receipt.request_id)
             print(f"已归档：{result['state']}；可在托盘历史查看最终摘要。", flush=True)
     except KeyboardInterrupt:
-        client.update(receipt.request_id, revision, {
-            "severity": "warning", "title": "备份演示已停止",
-            "blocks": [{"type": "paragraph", "text": "演示被中断，没有复制实际文件。"}],
-        }, updatable=False, duration_ms=5000)
+        print("\n备份演示已停止。", flush=True)
+        if receipt is not None and not finished:
+            _stop_notification(args.executable, receipt.request_id)
         return 130
     except PopuError as error:
         print(f"通知已无法更新：{error}", flush=True)
         return 1
     return 0
+
+
+def _stop_notification(executable: Path | None, request_id: str) -> None:
+    # An interrupted update may already have reached the Host. Fetch its latest
+    # revision, and bound both cleanup commands so shutdown cannot hang.
+    try:
+        client = Client(executable, timeout=1)
+        snapshot = client.status(request_id)
+        if snapshot.get("updatable"):
+            client.update(request_id, snapshot["revision"], {
+                "severity": "warning", "title": "备份演示已停止",
+                "blocks": [{"type": "paragraph", "text": "演示被中断，没有复制实际文件。"}],
+            }, updatable=False, duration_ms=5000)
+    except (PopuError, KeyboardInterrupt) as error:
+        print(f"通知收尾已跳过：{error or '再次中断'}", flush=True)
 
 
 if __name__ == "__main__":

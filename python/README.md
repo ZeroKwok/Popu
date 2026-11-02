@@ -57,6 +57,10 @@ Cancelled, closed, and timed-out dialogs are normal `InteractionResult` outcomes
 
 `Client.create`, `Client.show`, `Client.notify`, and the module-level `show`/`notify` helpers accept `template=Path(...)` for a trusted custom template directory. `popu` is resolved from `PATH` unless `Client(executable=...)` is supplied. CLI communication uses UTF-8 JSON lines through a stdout pipe; there is no stdout temporary file or receipt polling. Notifications and management commands read their response line before waiting for the CLI to exit, without waiting for trailing pipe EOF. Stderr uses a temporary file so diagnostic bursts cannot block receipt delivery. After accepting a dialog, the SDK drains remaining stdout in bounded chunks and reaps its CLI in the background even if `wait` is never called; the Host owns the request lifetime and is launched without inherited CLI handles.
 
+CLI response reads and process waits remain interruptible on Windows: the blocking pipe read runs in a worker, while the calling thread uses bounded waits to dispatch Ctrl+C. Interrupting a call kills and reaps only its CLI and propagates `KeyboardInterrupt`; it does not stop the Host or implicitly cancel the request. SDK CLI processes run without a console on Windows so Ctrl+C is handled by the Python caller.
+
+`Client(timeout=2)` optionally limits each synchronous CLI operation to two seconds, including reading its response and waiting for process exit. The default is no deadline. Expiry raises `PopuError` and cleans up the CLI. A dialog's submission deadline ends at acceptance; it does not limit the later background reader or replace `timeout_seconds`. An explicitly configured client deadline also applies to a foreground `wait` call.
+
 ## Window options
 
 Notifications are always submitted with `window.always_on_top=True`; `Notification.success` does not expose a non-topmost option. It defaults to the primary display work area and rejects `area=ScreenArea.SCREEN`. Raw request dictionaries are validated by the CLI/Host, which reject notification `always_on_top=False`.

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import queue
 import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,7 +51,10 @@ NotificationReceipt = RequestReceipt
 
 
 class Client:
-    def __init__(self, executable: str | os.PathLike[str] | Sequence[str] | None = None) -> None:
+    def __init__(self, executable: str | os.PathLike[str] | Sequence[str] | None = None, *, timeout: float | None = None) -> None:
+        if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
+            raise ValueError("timeout must be finite and positive")
+        self._timeout = timeout
         if executable is None:
             resolved = shutil.which("popu")
             if resolved is None:
@@ -69,13 +75,14 @@ class Client:
             command = self._command + ["request", str(path)]
             if template is not None:
                 command += ["--template", os.fspath(template)]
-            invocation = _CliInvocation(command)
+            invocation = _CliInvocation(command, timeout=self._timeout)
             line = invocation.read_line()
             if not line:
                 invocation.wait()
                 raise PopuError(invocation.diagnostic() or "popu did not accept the request")
             receipt = RequestReceipt.from_dict(_json_object(line))
             if payload.get("mode") == "dialog":
+                invocation.clear_deadline()
                 threading.Thread(
                     target=_reap_request, args=(invocation,), daemon=True,
                 ).start()
@@ -83,7 +90,7 @@ class Client:
             else:
                 invocation.wait_for_success()
             return receipt
-        except (OSError, UnicodeError) as error:
+        except (OSError, UnicodeError, subprocess.TimeoutExpired) as error:
             raise PopuError(f"could not submit Popu request: {error}") from error
         finally:
             if invocation is not None:
@@ -133,13 +140,13 @@ class Client:
     def _run_json(self, args: Sequence[str]) -> Mapping[str, Any]:
         invocation: _CliInvocation | None = None
         try:
-            invocation = _CliInvocation(self._command + list(args))
+            invocation = _CliInvocation(self._command + list(args), timeout=self._timeout)
             # A full snapshot can exceed pipe capacity. Read its JSON line
             # before waiting, without waiting for inherited pipe EOF.
             line = invocation.read_line()
             invocation.wait_for_success()
             return _json_object(line)
-        except (OSError, UnicodeError) as error:
+        except (OSError, UnicodeError, subprocess.TimeoutExpired) as error:
             raise PopuError(f"could not run Popu command: {error}") from error
         finally:
             if invocation is not None:
@@ -149,11 +156,19 @@ class Client:
 class _CliInvocation:
     """Own CLI streams and process cleanup; stdout carries JSON lines."""
 
-    def __init__(self, command: Sequence[str]) -> None:
+    _INTERRUPT_INTERVAL = 0.1
+
+    def __init__(self, command: Sequence[str], *, timeout: float | None = None) -> None:
         self._resources = ExitStack()
+        self._reader: threading.Thread | None = None
+        self._timeout = timeout
+        self._deadline = None if timeout is None else time.monotonic() + timeout
         try:
             self._diagnostics = self._resources.enter_context(tempfile.TemporaryFile(mode="w+", encoding="utf-8"))
-            self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=self._diagnostics)
+            # The SDK handles Ctrl+C and reaps its own CLI. On Windows, keep the
+            # CLI out of console control broadcasts; the Host is independent.
+            flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=self._diagnostics, creationflags=flags)
             assert self.process.stdout is not None
             self._stdout = self._resources.enter_context(self.process.stdout)
         except BaseException:
@@ -161,10 +176,49 @@ class _CliInvocation:
             raise
 
     def read_line(self) -> str:
-        return self._stdout.readline().decode("utf-8")
+        result: queue.Queue[bytes | BaseException] = queue.Queue(maxsize=1)
+
+        def read() -> None:
+            try:
+                result.put(self._stdout.readline())
+            except BaseException as error:
+                result.put(error)
+
+        # Windows synchronous ReadFile does not reliably dispatch Python's
+        # pending SIGINT. Keep that read off the main thread, which waits in
+        # bounded intervals so KeyboardInterrupt and deadlines are observed.
+        self._reader = threading.Thread(target=read, daemon=True)
+        self._reader.start()
+        while True:
+            try:
+                line = result.get(timeout=self._wait_interval())
+                break
+            except queue.Empty:
+                continue
+        self._reader.join()
+        if isinstance(line, BaseException):
+            raise line
+        return line.decode("utf-8")
 
     def wait(self) -> int:
-        return self.process.wait()
+        while True:
+            interval = self._wait_interval()
+            try:
+                return self.process.wait(timeout=interval)
+            except subprocess.TimeoutExpired:
+                continue
+
+    def clear_deadline(self) -> None:
+        # Acceptance timeout must not limit a dialog's later user interaction.
+        self._deadline = None
+
+    def _wait_interval(self) -> float:
+        if self._deadline is None:
+            return self._INTERRUPT_INTERVAL
+        remaining = self._deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(self.process.args, self._timeout)
+        return min(self._INTERRUPT_INTERVAL, remaining)
 
     def wait_for_success(self) -> None:
         code = self.wait()
@@ -183,8 +237,10 @@ class _CliInvocation:
     def close(self) -> None:
         try:
             if self.process.poll() is None:
-                self.process.terminate()
+                self.process.kill()
             self.process.wait()
+            if self._reader is not None:
+                self._reader.join()
         finally:
             self._resources.close()
 
