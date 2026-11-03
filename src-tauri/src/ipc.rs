@@ -9,6 +9,10 @@ use interprocess::local_socket::{prelude::*, GenericFilePath, GenericNamespaced,
 pub const RPC_VERSION: &str = "1.0";
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 
+#[path = "ipc/handshake.rs"]
+mod handshake;
+pub use handshake::{call_connected, serve_connection, HostInfo};
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RpcRequest {
@@ -79,8 +83,21 @@ pub fn bind() -> io::Result<Listener> {
 
 pub fn call(request: &RpcRequest) -> io::Result<RpcResponse> {
     let mut stream = connect()?;
-    write_frame(&mut stream, request)?;
-    read_json(&mut stream)
+    exchange(&mut stream, request)
+}
+
+fn exchange<S: Read + Write>(stream: &mut S, request: &RpcRequest) -> io::Result<RpcResponse> {
+    write_frame(stream, request)?;
+    let response: RpcResponse = read_json(stream)?;
+    if response.version != RPC_VERSION {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unsupported Host RPC version: {} (CLI requires {RPC_VERSION})", response.version)));
+    }
+    // JSON null is a valid success result (e.g. an absent history record).
+    if (response.ok && response.error.is_some())
+        || (!response.ok && (response.error.is_none() || response.result.is_some())) {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid Host RPC response envelope"));
+    }
+    Ok(response)
 }
 
 #[cfg(test)]

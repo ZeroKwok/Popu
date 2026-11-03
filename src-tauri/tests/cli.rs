@@ -86,3 +86,21 @@ fn template_flag_is_accepted_by_request() {
     assert!(String::from_utf8_lossy(&output.stderr)
         .contains("notify cannot contain form blocks or actions"));
 }
+
+#[cfg(windows)]
+#[test]
+fn missing_webview_runtime_fails_before_host_startup_with_a_manual_install_link() {
+    let empty = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_popu"))
+        .args(["host", "run"])
+        .env("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", empty.path())
+        .output()
+        .expect("run popu");
+    assert_eq!(output.status.code(), Some(12));
+    assert!(output.stdout.is_empty());
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(diagnostic.contains("WebView2 Runtime is unavailable"), "{diagnostic}");
+    assert!(diagnostic.contains("https://developer.microsoft.com/microsoft-edge/webview2/"));
+    assert!(diagnostic.contains("manually"));
+    assert_eq!(std::fs::read_dir(empty.path()).unwrap().count(), 0);
+}

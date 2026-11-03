@@ -3,6 +3,7 @@ use std::io;
 
 #[cfg(not(windows))]
 pub(crate) fn spawn() -> io::Result<()> {
+    crate::preflight::check()?;
     use std::process::{Command, Stdio};
     Command::new(std::env::current_exe()?)
         .args(["host", "run"])
@@ -15,6 +16,7 @@ pub(crate) fn spawn() -> io::Result<()> {
 
 #[cfg(windows)]
 pub(crate) fn spawn() -> io::Result<()> {
+    crate::preflight::check()?;
     spawn_detached(&std::env::current_exe()?, "host run")?;
     Ok(())
 }

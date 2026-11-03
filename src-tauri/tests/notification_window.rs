@@ -51,14 +51,14 @@ mod host {
         }
 
         fn rpc(endpoint: &str, method: &str, params: Value) -> Result<Value, String> {
-            let mut stream = Stream::connect(
+            let stream = Stream::connect(
                 endpoint
                     .to_ns_name::<GenericNamespaced>()
                     .map_err(|e| e.to_string())?,
             )
             .map_err(|e| e.to_string())?;
-            ipc::write_frame(
-                &mut stream,
+            let response = ipc::call_connected(
+                stream,
                 &ipc::RpcRequest {
                     version: ipc::RPC_VERSION.into(),
                     method: method.into(),
@@ -66,8 +66,6 @@ mod host {
                 },
             )
             .map_err(|e| e.to_string())?;
-            let response: ipc::RpcResponse =
-                ipc::read_json(&mut stream).map_err(|e| e.to_string())?;
             if response.ok {
                 Ok(response.result.unwrap())
             } else {
@@ -378,6 +376,9 @@ mod host {
                             // Diagnostic response exposes logical and native states separately.
                             let status = rpc(&endpoint, "host.status", json!({}))?;
                             if status["notifications"] != 0 || status["windows"].as_array().unwrap().len() != 0 { return Err("diagnostics retained ghost notifications".into()); }
+                            if status["host"]["app_version"] != env!("CARGO_PKG_VERSION") || status["host"]["pid"] != std::process::id() {
+                                return Err("Host diagnostics omitted the running identity".into());
+                            }
                             Ok(())
                         })();
                         let _ = done.send(result);

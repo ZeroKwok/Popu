@@ -64,10 +64,15 @@ External templates are caller configuration supplied with `--template`. The Host
 Every frame is capped at 1 MiB. RPC version `1.0` methods are:
 
 - `request.create`, `request.update`, `request.dismiss`, `request.get`, `request.wait`
+- `host.hello`
 - `host.status`, `host.stop`
 - `history.list`, `history.clear`
 
 Malformed JSON, unsupported versions, unknown methods, oversized frames, revision conflicts, terminal updates, and missing IDs return structured errors.
+
+Each business connection begins with `host.hello` (`params.app_version`). The Host validates the CLI application version and the frame's RPC version, then returns `app_version`, `rpc_version`, `pid`, and `executable`. The client validates that identity before sending one business request on the same connection. Both versions must match exactly. A two-second handshake deadline uses nonblocking I/O, including partial frames, without limiting a later business wait. Hosts reject business calls without a handshake. `host.status` and explicitly requested `host.stop` remain available without it for upgrade recovery; status includes the running identity under `host`.
+
+Only connection absence/refusal triggers automatic Host startup. Handshake failures and business transport errors never replay a request or replace an existing Host. On Windows, WebView2 availability is checked via its loader before detached startup and before direct `host run`; failure reports a manual installation link without launching an installer. The Host and Python distribution details are in [Python distribution](docs/python-distribution.md).
 
 ## History
 
@@ -97,6 +102,9 @@ The internal `popu host run` command is hidden. Exit codes are 0 for success/con
 
 - `core.rs`: Tauri-independent registry, states, FIFO scheduling, coalescing, revision checks, and timers.
 - `ipc.rs`: bounded framing and local-socket client/listener construction.
+- `ipc/handshake.rs`: Host identity negotiation and the business connection handshake.
+- `host_client.rs`: connection acquisition and startup, without business request replay.
+- `preflight.rs`: WebView2 availability diagnostics before Host startup.
 - `host.rs`: RPC dispatch, synchronization, multi-window ownership, and UI commands.
 - `history.rs`: notification-only SQLite persistence and retention.
 - `runtime.rs`: target-monitor/DPI discovery, physical placement, and frameless-window helpers.

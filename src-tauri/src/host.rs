@@ -212,11 +212,7 @@ fn start_listener(app: AppHandle, state: Arc<HostState>) -> Result<(), Box<dyn s
 }
 
 fn handle_connection(mut stream: interprocess::local_socket::Stream, app: AppHandle, state: Arc<HostState>) {
-    let response = match ipc::read_json::<_, RpcRequest>(&mut stream) {
-        Ok(request) => dispatch(request, &app, &state),
-        Err(error) => RpcResponse::failure(json!({"code":"invalid_request","message":error.to_string()})).unwrap(),
-    };
-    let _ = ipc::write_frame(&mut stream, &response);
+    let _ = ipc::serve_connection(&mut stream, |request| dispatch(request, &app, &state));
 }
 
 fn dispatch(rpc: RpcRequest, _app: &AppHandle, state: &Arc<HostState>) -> RpcResponse {
@@ -253,7 +249,11 @@ fn dispatch(rpc: RpcRequest, _app: &AppHandle, state: &Arc<HostState>) -> RpcRes
                 registry = state.changed.wait(registry).unwrap();
             }
         }
-        "host.status" => coordinator::call(state, Command::Status),
+        "host.status" => {
+            let mut status = coordinator::call(state, Command::Status)?;
+            status["host"] = serde_json::to_value(ipc::HostInfo::current().map_err(invalid)?).map_err(invalid)?;
+            Ok(status)
+        }
         "history.list" => {
             let history = state.history.lock().unwrap();
             let items = history.as_ref().ok_or_else(|| json!({"code":"history_unavailable"}))?.list().map_err(invalid)?;

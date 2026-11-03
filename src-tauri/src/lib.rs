@@ -1,7 +1,9 @@
 pub mod core;
 mod history;
 mod host;
+mod host_client;
 mod host_process;
+mod preflight;
 pub mod ipc;
 pub mod placement;
 pub mod notifications;
@@ -14,8 +16,6 @@ mod visual;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::thread;
-use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use protocol::{Mode, Request};
@@ -92,7 +92,7 @@ fn run_inner() -> Result<i32, Box<dyn std::error::Error>> {
         Commands::Dismiss { request_id } => print_rpc(rpc_with_start("request.dismiss", serde_json::json!({"request_id":request_id}))?),
         Commands::Status { request_id } => print_rpc(rpc_with_start("request.get", serde_json::json!({"request_id":request_id}))?),
         Commands::Wait { request_id } => print_rpc(rpc_with_start("request.wait", serde_json::json!({"request_id":request_id}))?),
-        Commands::Host { command: HostCommands::Run } => Ok(host::run()),
+        Commands::Host { command: HostCommands::Run } => { preflight::check()?; Ok(host::run()) },
         Commands::Host { command: HostCommands::Status } => print_rpc(rpc_call("host.status", serde_json::json!({}))?),
         Commands::Host { command: HostCommands::Stop } => print_rpc(rpc_call("host.stop", serde_json::json!({}))?),
         Commands::Templates { command: TemplateCommands::List } => {
@@ -125,20 +125,7 @@ fn unwrap_rpc(response: ipc::RpcResponse) -> Result<serde_json::Value, Box<dyn s
 }
 
 fn rpc_with_start(method: &str, params: serde_json::Value) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    match ipc::call(&rpc_request(method, params.clone())) {
-        Ok(response) => return unwrap_rpc(response),
-        Err(_) => {}
-    }
-    host_process::spawn()?;
-    let mut last = None;
-    for _ in 0..60 {
-        thread::sleep(Duration::from_millis(50));
-        match ipc::call(&rpc_request(method, params.clone())) {
-            Ok(response) => return unwrap_rpc(response),
-            Err(error) => last = Some(error.into()),
-        }
-    }
-    Err(last.unwrap_or_else(|| "Host did not become ready".into()))
+    unwrap_rpc(host_client::call(&rpc_request(method, params))?)
 }
 
 fn load_request(path: &Path) -> Result<Request, Box<dyn std::error::Error>> {
