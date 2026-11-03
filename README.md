@@ -65,10 +65,11 @@ popu request protocol/examples/dialog-confirm.json
 
 ### Python SDK
 
-需要 Python 3.10 或更高版本，并确保 `popu` 可执行文件位于 `PATH`：
+Windows wheel 包含原生 CLI 和 SDK，需要 Windows x64、64 位 Python 3.10+ 和 WebView2 Runtime。目前尚未发布到 PyPI，请先按[打包说明](docs/python-distribution.md)构建本地 wheel，再安装：
 
 ```powershell
-python -m pip install -e ./python
+python -m pip install ./dist/popu-0.1.0-py3-none-win_amd64.whl
+python -m popu --version
 ```
 
 发送通知：
@@ -154,6 +155,7 @@ Host 在首次请求时自动启动。调用方提交请求后获得 Host 生成
 - [通知窗口协调与排布](docs/notification-layout.md)
 - [可更新通知生命周期](docs/live-notifications.md)
 - [Python SDK](python/README.md)
+- [Python 分发与阶段审核](docs/python-distribution.md)
 - [JSON Schema](protocol/popu.schema.json)
 - [贡献指南](CONTRIBUTING.md)
 - [安全说明](SECURITY.md)
@@ -169,7 +171,7 @@ npm ci
 npm run build
 ```
 
-Windows 可执行文件位于 `src-tauri/target/release/popu.exe`。将该目录加入 `PATH`，或直接使用此路径调用；Python 也可通过 `Client(executable="src-tauri/target/release/popu.exe")` 指定它。Python SDK 是 CLI 客户端，安装 SDK 不会安装 Rust 可执行文件。
+Windows 可执行文件位于 `src-tauri/target/release/popu.exe`。将该目录加入 `PATH`，或直接使用此路径调用。源码开发可执行 `python -m pip install -e ./python`，并通过 `Client(executable="src-tauri/target/release/popu.exe")` 指定本地构建；editable 安装不会构建或下载二进制。正式 Windows wheel 则同时包含原生可执行文件与 SDK。
 
 运行测试：
 

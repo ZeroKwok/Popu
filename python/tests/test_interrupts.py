@@ -30,7 +30,7 @@ def stall():
     (root / "waiting").write_text(str(os.getpid()))
     time.sleep(60)
 
-if phase in ("read", "exit"):
+if phase in ("read", "exit", "entry"):
     if phase == "exit":
         output({"state": "queued"})
     stall()
@@ -78,7 +78,7 @@ def test_invalid_deadlines_are_rejected(timeout: float) -> None:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows console Ctrl+C regression")
-@pytest.mark.parametrize("phase", ["read", "exit", "notify", "sleep", "update", "wait", "cleanup"])
+@pytest.mark.parametrize("phase", ["read", "exit", "notify", "sleep", "update", "wait", "cleanup", "entry"])
 def test_real_ctrl_c_interrupts_sdk_and_backup_demo(tmp_path: Path, phase: str) -> None:
     command = _cli(tmp_path, phase)
     demo = Path(__file__).parents[1] / "examples" / "backup_progress.py"
@@ -88,7 +88,12 @@ import importlib.util, json, sys
 from pathlib import Path
 from popu import Client
 command, phase, root, demo = json.loads(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), sys.argv[4]
-if phase in ("read", "exit"):
+if phase == "entry":
+    from popu import _cli
+    _cli.executable_path = lambda: Path(command[0])
+    sys.argv = ["popu", *command[1:], "status"]
+    raise SystemExit(_cli.main())
+elif phase in ("read", "exit"):
     try:
         Client(command).status("demo")
     except KeyboardInterrupt:
@@ -141,7 +146,7 @@ kernel.FreeConsole()
             if target.poll() is None:
                 target.kill()
             target.wait()
-    if phase not in ("read", "exit", "notify", "cleanup"):
+    if phase not in ("read", "exit", "notify", "cleanup", "entry"):
         snapshot = json.loads((tmp_path / "snapshot.json").read_text(encoding="utf-8"))
         assert snapshot["updatable"] is False
         assert snapshot["content"]["title"] == ("备份完成" if phase == "wait" else "备份演示已停止")

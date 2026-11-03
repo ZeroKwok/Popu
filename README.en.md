@@ -65,10 +65,11 @@ Requests are JSON files. See the [JSON Schema](protocol/popu.schema.json) and [a
 
 ### Python SDK
 
-Python 3.10+ is required. Make sure the `popu` executable is available on `PATH`:
+The Windows wheel includes both the native CLI and SDK. It requires Windows x64, 64-bit Python 3.10+, and WebView2 Runtime. PyPI publishing is not enabled yet; [build a local wheel](docs/python-distribution.md) before installing:
 
 ```powershell
-python -m pip install -e ./python
+python -m pip install ./dist/popu-0.1.0-py3-none-win_amd64.whl
+python -m popu --version
 ```
 
 Send a notification:
@@ -168,7 +169,7 @@ npm ci
 npm run build
 ```
 
-On Windows, the executable is `src-tauri/target/release/popu.exe`. Add that directory to `PATH` or invoke the executable by its path. Python can also use `Client(executable="src-tauri/target/release/popu.exe")`. The Python SDK is a CLI client; installing it does not install the Rust executable.
+On Windows, the executable is `src-tauri/target/release/popu.exe`. Add that directory to `PATH` or invoke it by path. For source development, run `python -m pip install -e ./python` and use `Client(executable="src-tauri/target/release/popu.exe")`; editable installs do not build or download binaries. The Windows wheel includes both the native executable and SDK.
 
 Run tests:
 

@@ -8,6 +8,10 @@
 .assets/
 *.pyc
 TODO.md
+/python/build/
+/python/dist/
+/python/src/*.egg-info/
+/python/src/popu/_native/
 
 # make by script
 /src-tauri/icons/tray/

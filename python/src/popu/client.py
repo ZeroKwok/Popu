@@ -4,7 +4,6 @@ import json
 import math
 import os
 import queue
-import shutil
 import subprocess
 import tempfile
 import threading
@@ -15,10 +14,8 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence, TextIO
 
 from .models import DialogRequest, InteractionResult, Notification
-
-
-class PopuError(RuntimeError):
-    pass
+from ._errors import PopuError
+from ._runtime import executable_path
 
 
 @dataclass(frozen=True)
@@ -56,10 +53,7 @@ class Client:
             raise ValueError("timeout must be finite and positive")
         self._timeout = timeout
         if executable is None:
-            resolved = shutil.which("popu")
-            if resolved is None:
-                raise PopuError("popu executable was not found on PATH")
-            self._command = [resolved]
+            self._command = [str(executable_path())]
         elif isinstance(executable, (str, os.PathLike)):
             self._command = [os.fspath(executable)]
         else:

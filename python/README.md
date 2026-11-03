@@ -1,16 +1,30 @@
 # Popu Python SDK
 
-The Python package is a client for the persistent local Popu Host. It invokes the installed `popu` CLI, parses accepted receipts and terminal snapshots, and never manages notification child processes or lifetime pipes.
+The Python package bundles the Windows native Popu tool and a client for its persistent local Host. It parses accepted receipts and terminal snapshots; the Host manages notification windows and lifetime.
 
 ## Installation
 
-Requires Python 3.10+ and a matching `popu` executable. From the repository root:
+Requires Windows x64, 64-bit Python 3.10+, and Microsoft WebView2 Runtime. The Windows wheel includes the matching native executable; Rust and Node.js are not required on the user's machine. WebView2 is a separate prerequisite: install it manually from [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/) if missing. Popu does not install it automatically.
+
+PyPI publishing is not enabled yet. After [building a local wheel](../docs/python-distribution.md), install it from the repository root:
+
+```powershell
+python -m pip install ./dist/popu-0.1.0-py3-none-win_amd64.whl
+popu --version
+python -m popu --version
+```
+
+Both CLI entries forward native arguments, input/output, and exit codes. If the Python scripts directory is absent from `PATH`, use `python -m popu`.
+
+For source development:
 
 ```powershell
 python -m pip install -e ./python
 ```
 
-Set `Client(executable="path/to/popu.exe")` to use a local build. A command sequence such as `["path/to/popu.exe"]` is also accepted. The SDK targets the current Host protocol and does not accept pre-Host response formats.
+Use `Client(executable="path/to/popu.exe")` with a local build. A command sequence such as `["path/to/popu.exe"]` is also accepted. Editable installation does not build or download a native executable. The SDK targets the current Host protocol and does not accept pre-Host response formats.
+
+By default, the CLI and SDK verify the bundled payload and copy it to `%LOCALAPPDATA%\Popu\runtime\<version>-win_amd64-<manifest-hash>\`. Native processes run from this immutable cache, so an active Host does not lock files inside `site-packages` during upgrade or uninstall. Old caches are retained; automatic cleanup and Host compatibility negotiation are not implemented in this first packaging stage.
 
 ## Requests and results
 
@@ -55,7 +69,7 @@ The default template displays occurrence time, refreshed on every accepted repor
 
 Cancelled, closed, and timed-out dialogs are normal `InteractionResult` outcomes. A custom dialog action may use exit code `12` (or any other code from 0–255); the SDK reads the Host result rather than treating that business exit code as a transport error. If a terminal dialog has no response, `show` raises `PopuError` with its terminal state.
 
-`Client.create`, `Client.show`, `Client.notify`, and the module-level `show`/`notify` helpers accept `template=Path(...)` for a trusted custom template directory. `popu` is resolved from `PATH` unless `Client(executable=...)` is supplied. CLI communication uses UTF-8 JSON lines through a stdout pipe; there is no stdout temporary file or receipt polling. Notifications and management commands read their response line before waiting for the CLI to exit, without waiting for trailing pipe EOF. Stderr uses a temporary file so diagnostic bursts cannot block receipt delivery. After accepting a dialog, the SDK drains remaining stdout in bounded chunks and reaps its CLI in the background even if `wait` is never called; the Host owns the request lifetime and is launched without inherited CLI handles.
+`Client.create`, `Client.show`, `Client.notify`, and the module-level `show`/`notify` helpers accept `template=Path(...)` for a trusted custom template directory. The default client uses its bundled version rather than searching `PATH`; `Client(executable=...)` overrides this explicitly. CLI communication uses UTF-8 JSON lines through a stdout pipe; there is no stdout temporary file or receipt polling. Notifications and management commands read their response line before waiting for the CLI to exit, without waiting for trailing pipe EOF. Stderr uses a temporary file so diagnostic bursts cannot block receipt delivery. After accepting a dialog, the SDK drains remaining stdout in bounded chunks and reaps its CLI in the background even if `wait` is never called; the Host owns the request lifetime and is launched without inherited CLI handles.
 
 CLI response reads and process waits remain interruptible on Windows: the blocking pipe read runs in a worker, while the calling thread uses bounded waits to dispatch Ctrl+C. Interrupting a call kills and reaps only its CLI and propagates `KeyboardInterrupt`; it does not stop the Host or implicitly cancel the request. SDK CLI processes run without a console on Windows so Ctrl+C is handled by the Python caller.
 

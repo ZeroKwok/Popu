@@ -1,6 +1,9 @@
 """Simulate a backup to demonstrate live notifications; no files are copied.
 
-Run after installing the SDK and building the matching Popu executable:
+Run after installing the Windows wheel:
+    python python/examples/backup_progress.py
+
+For source development, install the editable SDK and build Popu first:
     python python/examples/backup_progress.py --executable src-tauri/target/debug/popu.exe
 
 Close the progress card: subsequent reports stay silent, and the final report
@@ -36,7 +39,7 @@ def content(percent: int, elapsed: float, *, finished: bool = False) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--executable", type=Path, help="Path to the matching popu executable; defaults to PATH")
+    parser.add_argument("--executable", type=Path, help="Path to a local popu executable; defaults to the bundled runtime")
     parser.add_argument("--interval", type=float, default=3, help="Seconds between reports (default: 3)")
     parser.add_argument("--steps", type=int, default=12, help="Number of report intervals (default: 12)")
     parser.add_argument("--display-seconds", type=float, default=20, help="Initial display duration (default: 20)")
