@@ -11,8 +11,10 @@ python python/examples/progress.py --wait
 ```powershell
 python -m pip install -e ./python
 just build
-python python/examples/progress.py --executable src-tauri/target/debug/popu.exe --wait
+just demo-python --wait
 ```
+
+`just demo-python` 直接使用本地 debug 程序运行示例，可透传 `--interval`、`--steps` 等参数。首次使用时，先按上面的命令安装 editable SDK 并构建本地程序。
 
 默认每 3 秒提交一次进度，共 36 秒。可以拖动卡片、点击 × 收起；普通进度不会突破主动关闭，最后一次更新会提交摘要、关闭更新入口，并申请一次再次展示。
 
@@ -23,13 +25,13 @@ python python/examples/progress.py --executable src-tauri/target/debug/popu.exe 
 自动超时后再展示：
 
 ```powershell
-python python/examples/progress.py --executable src-tauri/target/debug/popu.exe --display-seconds 5 --wait
+just demo-python --display-seconds 5 --wait
 ```
 
 快速演示：
 
 ```powershell
-python python/examples/progress.py --executable src-tauri/target/debug/popu.exe --interval 2 --steps 4 --display-seconds 3 --final-seconds 5 --wait
+just demo-python --interval 2 --steps 4 --display-seconds 3 --final-seconds 5 --wait
 ```
 
 演示结束后，从托盘打开历史查看最终摘要。若常驻 Host 来自旧版本，请先退出旧 Host，再运行演示。

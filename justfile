@@ -44,6 +44,11 @@ version:
 test-python: prepare-python
     python -m pytest python/tests -q
 
+# Run progress.py; requires an installed SDK and a local debug build (just build).
+[positional-arguments]
+demo-python *args: prepare-python
+    python python/examples/progress.py --executable "src-tauri/target/debug/popu{{ if os() == "windows" { ".exe" } else { "" } }}" "$@"
+
 test-rust: build-ui
     cargo test --locked --manifest-path src-tauri/Cargo.toml
 
@@ -114,18 +119,9 @@ build-test prefix="": build
         esac
     done
 
-build-test-pysdk: build
-    python -m pip install -e ./python
-    python python/examples/progress.py --executable "src-tauri/target/debug/popu.exe"
-
 # Build the release executable, then run a protocol fixture.
 build-test-release file="dialog-confirm.json": build-release
     just --quiet cli "src-tauri/target/release/popu" "protocol/examples/{{file}}"
-
-# Build the release executable, then run a protocol fixture.
-install: build-release
-    #!/usr/bin/env bash
-    cp -v ./src-tauri/target/release/popu.exe /g/Local/bin/
 
 # Run every protocol fixture through the shared prefix-based entry point.
 build-test-all:
