@@ -17,19 +17,18 @@
 - 分发名和导入名都是 `popu`，wheel 标签为 `py3-none-win_amd64`，要求 64 位 Python 3.10+；不发布 sdist，也不在安装时编译 Rust。
 - 安装后提供 `popu` 和 `python -m popu`。命令入口转发参数、标准输入、标准输出、标准错误和原生退出码。运行时准备失败输出到 stderr，退出码为 12；Ctrl+C 退出码为 130，只停止前台 CLI。
 - `Client()` 默认使用包内的匹配版本，不搜索 `PATH`。源码开发和特殊部署继续支持 `Client(executable=...)`。
-- SDK 版本由 `python/src/popu/_version.py` 提供。打包前检查它与 Cargo、Tauri、npm 和 `popu --version` 一致。
+- 产品版本唯一来源是 `src-tauri/Cargo.toml` 的 `package.version`。Python 构建、editable 安装和载荷准备自动生成被 Git 忽略的 `python/src/popu/_version.py`；Tauri 自动继承 Cargo，UI npm 包不再保存产品版本。打包仍检查 `popu --version`，拒绝混入旧版本二进制。
 - wheel 内包含 `popu.exe`、许可证和 SHA-256 清单。构建检查 Windows x64 PE 类型、文件清单和校验值；可显式传入额外的 x64 DLL。
 
 ## 本地构建和安装
 
-构建机器需要 Windows x64、Python 3.11+、Rust、Node.js 和前端依赖。安装后的 SDK 不依赖构建工具。以下命令在仓库根目录执行：
+构建机器需要 Windows x64、Python 3.11+、Rust、Node.js、just、ImageMagick 和前端依赖。安装后的 SDK 不依赖构建工具。以下命令在仓库根目录执行（建议使用开发虚拟环境）：
 
 ```powershell
-npm ci
-npm run build
-python scripts/stage-python-runtime.py
+just setup-ui
+just icons
 python -m pip install build
-python -m build --wheel --outdir dist python
+just wheel
 
 python -m venv test-results/popu-review
 ./test-results/popu-review/Scripts/python.exe -m pip install --no-index --no-deps ./dist/popu-0.1.0-py3-none-win_amd64.whl
@@ -39,6 +38,8 @@ python -m venv test-results/popu-review
 ```
 
 若需额外依赖库，可在 staging 时重复传入 `--dll <path>`；必须为 x64 PE DLL。staging 输出位于被 Git 忽略的 `python/src/popu/_native/`，wheel 输出位于 `dist/`。未准备或损坏的原生载荷会阻止 wheel 构建。源码 editable 安装允许不含载荷，但这时必须显式指定本地可执行文件。
+
+`just wheel` 依次构建 `ui/dist/`、原生 release 程序、版本化载荷和 wheel。UI 的依赖、脚本和测试不会进入 Tauri 嵌入资源。若只想更新 `_native`，执行 `just build-release` 后运行 `python scripts/stage-python-runtime.py`。只修改 Cargo 中的版本后，需重新编译原生程序；载荷准备不会自动拿旧 exe 冒充新版本。SDK 安装后使用随包生成的版本文件，不读取仓库中的 Cargo 清单。
 
 ## 运行时缓存
 

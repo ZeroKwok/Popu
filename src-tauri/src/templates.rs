@@ -6,10 +6,10 @@ use thiserror::Error;
 
 use crate::protocol::{Mode, Request, PROTOCOL_VERSION};
 
-const CONFIRM_HTML: &str = include_str!("../../ui/templates/confirm/template.html");
-const CONFIRM_CSS: &str = include_str!("../../ui/templates/confirm/template.css");
-const NOTIFICATION_HTML: &str = include_str!("../../ui/templates/notification/template.html");
-const NOTIFICATION_CSS: &str = include_str!("../../ui/templates/notification/template.css");
+const CONFIRM_HTML: &str = include_str!("../../ui/dist/templates/confirm/template.html");
+const CONFIRM_CSS: &str = include_str!("../../ui/dist/templates/confirm/template.css");
+const NOTIFICATION_HTML: &str = include_str!("../../ui/dist/templates/notification/template.html");
+const NOTIFICATION_CSS: &str = include_str!("../../ui/dist/templates/notification/template.css");
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TemplateAssets {

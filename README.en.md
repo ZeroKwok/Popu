@@ -160,13 +160,14 @@ Long-running notifications opt in with `updatable: true` and reuse one ID. Every
 
 ## Build and test
 
-The project is currently validated primarily on Windows 10/11 with Rust stable, Node.js 20+, and the WebView2 Runtime. The protocol and IPC design include a Unix Domain Socket path; window capabilities depend on the target platform.
+The project is currently validated primarily on Windows 10/11 with Rust stable, Node.js 20+, just, and the WebView2 Runtime. Root just tasks coordinate the npm project in `ui/`, Cargo project in `src-tauri/`, and SDK/wheel project in `python/`. UI sources live in `ui/src/`; Cargo embeds only `ui/dist/` build output. The protocol and IPC design include a Unix Domain Socket path; window capabilities depend on the target platform.
 
-Install frontend dependencies and build:
+For a fresh checkout, install ImageMagick and run `just icons` to generate the ignored native icons from SVG. Install frontend dependencies and build:
 
 ```powershell
-npm ci
-npm run build
+just setup-ui
+just icons
+just build-release
 ```
 
 On Windows, the executable is `src-tauri/target/release/popu.exe`. Add that directory to `PATH` or invoke it by path. For source development, run `python -m pip install -e ./python` and use `Client(executable="src-tauri/target/release/popu.exe")`; editable installs do not build or download binaries. The Windows wheel includes both the native executable and SDK.
@@ -174,17 +175,19 @@ On Windows, the executable is `src-tauri/target/release/popu.exe`. Add that dire
 Run tests:
 
 ```powershell
-cargo test --manifest-path src-tauri/Cargo.toml
-node --check ui/app.js
-python -m pytest python/tests -q
+just check
+# Browser visual regression (does not start the native Host):
+just test-visuals
 ```
 
 During development, build the UI and Rust executable separately:
 
 ```powershell
-npm run build:ui
+just build-ui
 cargo build --manifest-path src-tauri/Cargo.toml
 ```
+
+Change only `package.version` in `src-tauri/Cargo.toml` for a product release. Tauri inherits it; Python builds and editable installs generate the SDK version automatically. `just version` prints it; `just wheel` builds the bundled local wheel. Install pytest and build in your development virtual environment for Python tests and wheel builds.
 
 Issues and pull requests are welcome; see [Contributing](CONTRIBUTING.md). Native notification lifecycle tests are documented in [notification window coordination](docs/notification-layout.md) and require an unlocked Windows desktop.
 

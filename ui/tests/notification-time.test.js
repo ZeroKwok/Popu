@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatNotificationTime, renderNotificationTime } from "../ui/notification-time.js";
+import { formatNotificationTime, renderNotificationTime } from "../src/notification-time.js";
 
 test("notification time ages without changing its occurrence and exposes absolute time", () => {
   const timestamp = Date.UTC(2026, 9, 30, 6, 30);

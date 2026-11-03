@@ -1,18 +1,63 @@
+
+# Install UI dependencies within the UI project.
+[working-directory: "ui"]
+setup-ui:
+    npm ci
+
+# Build the static UI distribution consumed by Cargo.
+[working-directory: "ui"]
+build-ui:
+    npm run build
+
+[working-directory: "ui"]
+check-ui:
+    npm run check
+
+[working-directory: "ui"]
+test-ui:
+    npm test
+
+[working-directory: "ui"]
+test-visuals:
+    npm run test:visuals
+
+# Generate native application and tray icons from the SVG source.
+icons:
+    python scripts/generate-icons.py
+
 # Build the debug executable used by local examples.
 build: build-ui
     cargo build --manifest-path src-tauri/Cargo.toml
-
-# Regenerate committed application and tray icons from the SVG source.
-icons:
-    python scripts/generate-icons.py
 
 # Build the release executable.
 build-release: build-ui
     cargo build --release --manifest-path src-tauri/Cargo.toml
 
-# Bundle the local chart renderer (run npm ci once before the first build).
-build-ui:
-    npm run build:ui
+# Generate the SDK version from Cargo (also automatic during pip installation).
+prepare-python:
+    python python/build_version.py
+
+# Print the single product version.
+version:
+    @python python/build_version.py --print
+
+test-python: prepare-python
+    python -m pytest python/tests -q
+
+test-rust: build-ui
+    cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+# Checks without opening native windows; UI assets are built before Rust tests.
+check: check-ui test-ui test-python test-rust
+
+# Native visual smoke test requires the user's Host to be stopped first.
+test-native: build
+    node scripts/native-visual-smoke.mjs
+
+# Build a local Windows wheel; publishing remains a separate release step.
+wheel: build-release
+    python scripts/stage-python-runtime.py
+    python -m build --wheel --outdir dist python
 
 # Clean the build artifacts for the debug and release executables.
 clean:
@@ -71,7 +116,7 @@ build-test prefix="": build
 
 build-test-pysdk: build
     python -m pip install -e ./python
-    python python/examples/progress.py --executable "src-tauri\target\debug\popu.exe"
+    python python/examples/progress.py --executable "src-tauri/target/debug/popu.exe"
 
 # Build the release executable, then run a protocol fixture.
 build-test-release file="dialog-confirm.json": build-release

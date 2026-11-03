@@ -6,12 +6,16 @@ import json
 import re
 import shutil
 import struct
+import sys
 from pathlib import Path
 
 from setuptools import setup
 from setuptools.command.bdist_wheel import bdist_wheel
 from setuptools.command.build_py import build_py
 from setuptools.errors import SetupError
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from build_version import cargo_version, generate_version
 
 
 def validate_payload(version: str) -> None:
@@ -45,7 +49,7 @@ def validate_payload(version: str) -> None:
 class NativeBuild(build_py):
     def run(self) -> None:
         if not self.editable_mode:
-            validate_payload(self.distribution.get_version())
+            validate_payload(cargo_version())
             # build_py otherwise leaves DLLs removed from a previous payload
             # in build/lib, which install_lib would silently ship in the wheel.
             root = Path(self.build_lib).resolve()
@@ -67,4 +71,4 @@ class WindowsWheel(bdist_wheel):
         return "py3", "none", "win_amd64"
 
 
-setup(cmdclass={"build_py": NativeBuild, "bdist_wheel": WindowsWheel})
+setup(version=generate_version(), cmdclass={"build_py": NativeBuild, "bdist_wheel": WindowsWheel})

@@ -10,7 +10,7 @@ python python/examples/progress.py --wait
 
 ```powershell
 python -m pip install -e ./python
-cargo build --manifest-path src-tauri/Cargo.toml
+just build
 python python/examples/progress.py --executable src-tauri/target/debug/popu.exe --wait
 ```
 
@@ -34,4 +34,4 @@ python python/examples/progress.py --executable src-tauri/target/debug/popu.exe 
 
 演示结束后，从托盘打开历史查看最终摘要。若常驻 Host 来自旧版本，请先退出旧 Host，再运行演示。
 
-若使用本次验证构建，可将 `--executable` 替换为 `src-tauri/target/live-notifications/debug/popu.exe`。不安装 SDK 时，可先执行 `$env:PYTHONPATH = "$PWD/python/src"`，从当前源码加载 SDK。
+若使用本次验证构建，可将 `--executable` 替换为 `src-tauri/target/live-notifications/debug/popu.exe`。不安装 SDK 时，先执行 `just prepare-python`，再设置 `$env:PYTHONPATH = "$PWD/python/src"`，从当前源码加载 SDK。

@@ -1,15 +1,18 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { test, expect } from "@playwright/test";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
-const examples = readdirSync("protocol/examples").filter((name) => /^(dialog|notification)-visual-.*\.json$/.test(name));
+const root = fileURLToPath(new URL("../../..", import.meta.url));
+const readJson = (path) => JSON.parse(readFileSync(resolve(root, path), "utf8"));
+const examples = readdirSync(resolve(root, "protocol/examples")).filter((name) => /^(dialog|notification)-visual-.*\.json$/.test(name));
 
 async function mockHost(page, fixture, history = [], foreground = true, opened = true) {
   fixture = { ...fixture, actions: (fixture.actions ?? []).map((action) => ({ style: "primary", submit: false, ...action })) };
   const mode = fixture.mode === "notify" ? "notification" : "confirm";
   const template = {
-    html: readFileSync(`ui/templates/${mode}/template.html`, "utf8"),
-    css: readFileSync(`ui/templates/${mode}/template.css`, "utf8"),
+    html: readFileSync(resolve(root, `ui/dist/templates/${mode}/template.html`), "utf8"),
+    css: readFileSync(resolve(root, `ui/dist/templates/${mode}/template.css`), "utf8"),
   };
   await page.addInitScript(({ fixture, template, history, foreground, opened }) => {
     window.__reads = [];

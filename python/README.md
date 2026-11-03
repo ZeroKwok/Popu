@@ -24,6 +24,8 @@ python -m pip install -e ./python
 
 Use `Client(executable="path/to/popu.exe")` with a local build. A command sequence such as `["path/to/popu.exe"]` is also accepted. Editable installation does not build or download a native executable. The SDK targets the current Host protocol and does not accept pre-Host response formats.
 
+The product version is maintained only in `src-tauri/Cargo.toml`. Builds and editable installs generate `_version.py` automatically; the installed SDK is self-contained. `just test-python` also prepares the version before running tests. For an uninstalled source checkout on `PYTHONPATH`, run `just prepare-python` first. Build metadata requires the complete checkout; users should install the Windows wheel.
+
 By default, the CLI and SDK verify the bundled payload and copy it to `%LOCALAPPDATA%\Popu\runtime\<version>-win_amd64-<manifest-hash>\`. Native processes run from this immutable cache, so an active Host does not lock files inside `site-packages` during upgrade or uninstall. Old caches are retained; automatic cleanup is not implemented.
 
 Before a business request, the native CLI and Host require matching application and RPC versions through a handshake on the same connection. A legacy or incompatible Host produces a diagnostic before submission; Python raises `PopuError`. Inspect it with `python -m popu host status`, then explicitly stop it with `python -m popu host stop` or exit from its tray menu when ready. Popu never automatically stops an existing Host. Management commands remain available without the business handshake. Handshakes have a two-second deadline; this does not limit a dialog's business wait. A submitted business request is not automatically replayed after a transport failure.

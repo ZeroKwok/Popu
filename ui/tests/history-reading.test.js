@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { setImmediate } from "node:timers/promises";
 import test from "node:test";
-import { createReadTracker } from "../ui/history-reading.js";
+import { createReadTracker } from "../src/history-reading.js";
 
 const item = (id, requiresRead = false) => ({ request_id: id, requires_read: requiresRead, read_at_ms: null });
 

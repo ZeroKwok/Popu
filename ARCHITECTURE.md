@@ -2,6 +2,10 @@
 
 Popu is a single-instance persistent Tauri Host for bounded local human interactions. CLI and Python processes are clients; they never own notification lifetime or create their own WebView process.
 
+The repository is coordinated by root just tasks. `ui/` is an independent npm project: static source assets live in `ui/src/`, chart bundle entries in `ui/charts/`, and generated distributable assets in `ui/dist/`. Its dependencies and browser tests stay outside the embedded resource tree. The Cargo project in `src-tauri/` consumes only that UI distribution; the Python project in `python/` packages the SDK and staged native executable. Root `scripts/` contains cross-project build and native verification helpers.
+
+`src-tauri/Cargo.toml`'s `package.version` is the sole product release version. Tauri inherits it, and Python build metadata/editable installs generate the ignored SDK `_version.py` before packaging. Installed wheels contain this generated module and never read a repository Cargo manifest. Protocol/RPC versions remain separate compatibility identifiers.
+
 ```text
 CLI / Python SDK
        │ 4-byte big-endian length + UTF-8 JSON RPC

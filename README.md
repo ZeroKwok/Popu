@@ -162,13 +162,14 @@ Host 在首次请求时自动启动。调用方提交请求后获得 Host 生成
 
 ## 构建与测试
 
-当前主要在 Windows 10/11、Rust stable、Node.js 20+ 和 WebView2 Runtime 上验证。协议与 IPC 设计包含 Unix Domain Socket 路径，具体窗口能力取决于目标平台。
+当前主要在 Windows 10/11、Rust stable、Node.js 20+、just 和 WebView2 Runtime 上验证。根目录 just 编排任务，`ui/` 管理 npm 项目，`src-tauri/` 管理 Cargo 项目，`python/` 管理 SDK 与 wheel。界面源码位于 `ui/src/`，Cargo 只嵌入 `ui/dist/` 构建产物。协议与 IPC 设计包含 Unix Domain Socket 路径，具体窗口能力取决于目标平台。
 
-安装前端依赖并构建：
+首次检出需要安装 ImageMagick，并通过 `just icons` 从 SVG 生成被 Git 忽略的原生图标。安装前端依赖并构建：
 
 ```powershell
-npm ci
-npm run build
+just setup-ui
+just icons
+just build-release
 ```
 
 Windows 可执行文件位于 `src-tauri/target/release/popu.exe`。将该目录加入 `PATH`，或直接使用此路径调用。源码开发可执行 `python -m pip install -e ./python`，并通过 `Client(executable="src-tauri/target/release/popu.exe")` 指定本地构建；editable 安装不会构建或下载二进制。正式 Windows wheel 则同时包含原生可执行文件与 SDK。
@@ -176,17 +177,19 @@ Windows 可执行文件位于 `src-tauri/target/release/popu.exe`。将该目录
 运行测试：
 
 ```powershell
-cargo test --manifest-path src-tauri/Cargo.toml
-node --check ui/app.js
-python -m pytest python/tests -q
+just check
+# 浏览器视觉回归（不会启动原生 Host）：
+just test-visuals
 ```
 
 开发期也可以分别构建 UI 和 Rust 可执行文件：
 
 ```powershell
-npm run build:ui
+just build-ui
 cargo build --manifest-path src-tauri/Cargo.toml
 ```
+
+产品版本只修改 `src-tauri/Cargo.toml` 中的 `package.version`。Tauri 自动读取它，Python 构建和 editable 安装自动生成 SDK 版本文件；`just version` 显示当前版本，`just wheel` 构建包含原生程序的本地 wheel。Python 测试需要 pytest，wheel 构建需要 build；请在开发用虚拟环境中安装。
 
 欢迎通过 issue 和 pull request 参与改进，详见[贡献指南](CONTRIBUTING.md)。原生通知窗口生命周期测试见[通知窗口协调与排布](docs/notification-layout.md)；运行这些测试需要解锁的 Windows 桌面。
 

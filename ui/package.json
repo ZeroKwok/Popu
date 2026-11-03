@@ -1,0 +1,20 @@
+{
+  "name": "popu-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-ui.mjs",
+    "check": "node --check src/app.js && node --check src/history.js && node --check src/history-reading.js && node --check src/notification-time.js && node --check src/presentation.js && node --check src/content-renderer.js && node --check src/visual-renderer.js && node --check charts/chart-worker.js && node --check charts/chart-runtime.js",
+    "test": "node --test tests/history-reading.test.js tests/notification-time.test.js",
+    "test:visuals": "npm run build && playwright test"
+  },
+  "dependencies": {
+    "vega": "6.4.0",
+    "vega-interpreter": "2.3.2",
+    "vega-lite": "6.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "esbuild": "0.28.2"
+  }
+}

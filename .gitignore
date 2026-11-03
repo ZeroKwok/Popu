@@ -1,7 +1,8 @@
 /src-tauri/target/
 /node_modules/
 /dist/
-/ui/vendor/
+/ui/node_modules/
+/ui/dist/
 /test-results/
 /.pytest_cache/
 /**/__pycache__/
@@ -12,6 +13,7 @@ TODO.md
 /python/dist/
 /python/src/*.egg-info/
 /python/src/popu/_native/
+/python/src/popu/_version.py
 
 # make by script
 /src-tauri/icons/tray/

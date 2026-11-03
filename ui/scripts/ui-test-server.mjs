@@ -1,8 +1,9 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve, sep, extname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = resolve("ui");
+const root = fileURLToPath(new URL("../dist", import.meta.url));
 const types = { ".js": "text/javascript", ".html": "text/html", ".css": "text/css" };
 createServer(async (request, response) => {
   try {
