@@ -216,13 +216,13 @@ def test_live_notification_options_and_omitted_update_values(tmp_path: Path) -> 
 def test_backup_demo_runs_through_sdk_and_seals_its_last_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location("backup_progress", Path(__file__).parents[1] / "examples" / "backup_progress.py")
+    spec = importlib.util.spec_from_file_location("progress", Path(__file__).parents[1] / "examples" / "progress.py")
     demo = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(demo)
     client = _client(tmp_path)
     monkeypatch.setattr(demo, "Client", lambda executable: client)
     monkeypatch.setattr(demo.time, "sleep", lambda seconds: None)
-    monkeypatch.setattr(sys, "argv", ["backup_progress.py", "--steps", "2", "--interval", "0.01"])
+    monkeypatch.setattr(sys, "argv", ["progress.py", "--steps", "2", "--interval", "0.01"])
     assert demo.main() == 0
     submitted = json.loads((tmp_path / "input.json").read_text(encoding="utf-8"))
     final = json.loads((tmp_path / "update.json").read_text(encoding="utf-8"))

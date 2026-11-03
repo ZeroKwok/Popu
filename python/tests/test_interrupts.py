@@ -81,7 +81,7 @@ def test_invalid_deadlines_are_rejected(timeout: float) -> None:
 @pytest.mark.parametrize("phase", ["read", "exit", "notify", "sleep", "update", "wait", "cleanup", "entry"])
 def test_real_ctrl_c_interrupts_sdk_and_backup_demo(tmp_path: Path, phase: str) -> None:
     command = _cli(tmp_path, phase)
-    demo = Path(__file__).parents[1] / "examples" / "backup_progress.py"
+    demo = Path(__file__).parents[1] / "examples" / "progress.py"
     controller = tmp_path / "controller.py"
     controller.write_text('''
 import importlib.util, json, sys
@@ -99,13 +99,13 @@ elif phase in ("read", "exit"):
     except KeyboardInterrupt:
         raise SystemExit(130)
 else:
-    spec = importlib.util.spec_from_file_location("backup_progress", demo)
+    spec = importlib.util.spec_from_file_location("progress", demo)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module.Client = lambda executable, **kwargs: Client(command, **kwargs)
     interval = "60" if phase in ("sleep", "cleanup") else "0.01"
     steps = "1" if phase == "wait" else "2"
-    sys.argv = ["backup_progress.py", "--interval", interval, "--steps", steps, "--wait"]
+    sys.argv = ["progress.py", "--interval", interval, "--steps", steps, "--wait"]
     raise SystemExit(module.main())
 ''', encoding="utf-8")
     import json

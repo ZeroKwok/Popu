@@ -1,10 +1,10 @@
 """Simulate a backup to demonstrate live notifications; no files are copied.
 
 Run after installing the Windows wheel:
-    python python/examples/backup_progress.py
+    python python/examples/progress.py
 
 For source development, install the editable SDK and build Popu first:
-    python python/examples/backup_progress.py --executable src-tauri/target/debug/popu.exe
+    python python/examples/progress.py --executable src-tauri/target/debug/popu.exe
 
 Close the progress card: subsequent reports stay silent, and the final report
 requests the single allowed reshow. Leave it open to see in-place updates, or

@@ -35,7 +35,7 @@ python -m venv test-results/popu-review
 ./test-results/popu-review/Scripts/python.exe -m pip install --no-index --no-deps ./dist/popu-0.1.0-py3-none-win_amd64.whl
 ./test-results/popu-review/Scripts/popu.exe --version
 ./test-results/popu-review/Scripts/python.exe -m popu templates list
-./test-results/popu-review/Scripts/python.exe python/examples/backup_progress.py
+./test-results/popu-review/Scripts/python.exe python/examples/progress.py
 ```
 
 若需额外依赖库，可在 staging 时重复传入 `--dll <path>`；必须为 x64 PE DLL。staging 输出位于被 Git 忽略的 `python/src/popu/_native/`，wheel 输出位于 `dist/`。未准备或损坏的原生载荷会阻止 wheel 构建。源码 editable 安装允许不含载荷，但这时必须显式指定本地可执行文件。
