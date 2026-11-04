@@ -5,6 +5,7 @@ import base64
 import csv
 import io
 import json
+import os
 from pathlib import Path
 import runpy
 import struct
@@ -92,7 +93,7 @@ def test_local_build_metadata_cannot_accidentally_be_uploaded_to_pypi(monkeypatc
 @pytest.fixture
 def wheel_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, bytes]:
     (tmp_path / "src-tauri").mkdir()
-    (tmp_path / "LICENSE").write_bytes(b"project license")
+    (tmp_path / "LICENSE").write_bytes(b"project license\n")
     (tmp_path / "src-tauri/Cargo.lock").write_bytes(b"lockfile")
     monkeypatch.setitem(release["inspect_wheel"].__globals__, "ROOT", tmp_path)
     files = {
@@ -104,7 +105,7 @@ def wheel_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, by
         "popu-0.1.1.dist-info/METADATA": b"Name: popu\nVersion: 0.1.1\nRequires-Python: >=3.10\n",
         "popu-0.1.1.dist-info/WHEEL": b"Root-Is-Purelib: false\nTag: py3-none-win_amd64\n",
         "popu-0.1.1.dist-info/entry_points.txt": b"[console_scripts]\npopu = popu._cli:main\n",
-        "popu-0.1.1.dist-info/licenses/LICENSE": b"project license",
+        "popu-0.1.1.dist-info/licenses/LICENSE": b"project license\n",
         "popu/_version.py": b"__version__ = '0.1.1'\n",
         "popu/demo/progress.py": b"demo",
         "popu/_native/manifest.json": json.dumps(manifest).encode(),
@@ -133,6 +134,13 @@ def test_complete_wheel_passes_content_and_record_validation(tmp_path: Path, whe
     assert report["imports"] == {"popu.exe":["kernel32.dll"]}
 
 
+def test_license_verification_accepts_git_checkout_line_ending_differences(tmp_path: Path, wheel_files: dict) -> None:
+    wheel_files["popu-0.1.1.dist-info/licenses/LICENSE"] = b"project license\r\n"
+    wheel = tmp_path / "popu-0.1.1-py3-none-win_amd64.whl"
+    write_wheel(wheel, wheel_files)
+    assert release["inspect_wheel"](wheel, "0.1.1", "0.1.1")["version"] == "0.1.1"
+
+
 @pytest.mark.parametrize("change", ["checksum", "missing_license", "platform", "stale_license"])
 def test_invalid_wheel_is_rejected_even_with_a_correct_record(tmp_path: Path, wheel_files: dict, change: str) -> None:
     if change == "checksum":
@@ -151,3 +159,30 @@ def test_invalid_wheel_is_rejected_even_with_a_correct_record(tmp_path: Path, wh
     write_wheel(wheel, wheel_files)
     with pytest.raises(ValueError):
         release["inspect_wheel"](wheel, "0.1.1", "0.1.1")
+
+
+def test_installation_identity_still_rejects_paths_outside_the_selected_roots(tmp_path: Path) -> None:
+    root = tmp_path / "venv"
+    root.mkdir()
+    assert release["_is_within"](root / "Lib/site-packages/popu", root)
+    assert not release["_is_within"](tmp_path / "venv-other/Lib/site-packages/popu", root)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows 8.3 path aliases")
+def test_installation_identity_accepts_short_and_long_spellings_of_the_same_root(tmp_path: Path) -> None:
+    import ctypes
+    from ctypes import wintypes
+    root = (tmp_path / "long installation directory").resolve()
+    root.mkdir()
+    get_short = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+    get_short.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+    get_short.restype = wintypes.DWORD
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = get_short(str(root), buffer, len(buffer))
+    assert 0 < length < len(buffer)
+    alias = Path(buffer.value)
+    if alias == root:
+        pytest.skip("This filesystem has no short alias for the temporary directory")
+    assert not (root / "popu").is_relative_to(alias)
+    assert release["_is_within"](root / "popu", alias)
+    assert release["_is_within"](alias / "popu", root)

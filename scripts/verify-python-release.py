@@ -66,7 +66,8 @@ def inspect_wheel(path: Path, native_version: str, python_version: str) -> dict:
         if embedded != [native_version]:
             raise ValueError("SDK version does not match the native application version")
         find("popu/demo/progress.py")
-        if archive.read(find(".dist-info/licenses/LICENSE")) != (ROOT / "LICENSE").read_bytes():
+        # Git checkouts can choose LF or CRLF independently of the builder.
+        if archive.read(find(".dist-info/licenses/LICENSE")).replace(b"\r\n", b"\n") != (ROOT / "LICENSE").read_bytes().replace(b"\r\n", b"\n"):
             raise ValueError("Wheel license does not match the repository license")
 
         manifest_path = find("popu/_native/manifest.json")
@@ -108,11 +109,17 @@ def inspect_wheel(path: Path, native_version: str, python_version: str) -> dict:
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "native_sha256": files["popu.exe"], "imports": imports}
 
 
+def _is_within(path: Path, root: Path) -> bool:
+    return path.resolve().is_relative_to(root.resolve())
+
+
 def smoke_install(path: Path, report: dict) -> None:
     require_windows("Installed wheel verification")
     # Keep all runtime/cache/cwd state outside the checkout's import paths.
     with tempfile.TemporaryDirectory(prefix="popu-wheel-review-") as temporary:
-        work = Path(temporary)
+        # Windows runner TEMP can use an 8.3 alias such as RUNNER~1. The SDK
+        # resolves its paths, so use the same canonical spelling for roots.
+        work = Path(temporary).resolve()
         home = work / "venv"
         venv.EnvBuilder(with_pip=True).create(home)
         python = home / "Scripts/python.exe"
@@ -161,8 +168,8 @@ print(json.dumps({'package':str(Path(popu.__file__).resolve()),'version':popu.__
                   'native':str(native),'sha256':hashlib.sha256(native.read_bytes()).hexdigest()}))
 '''
         installed = json.loads(run([python, "-c", probe]).stdout)
-        cached = Path(installed["native"])
-        if not Path(installed["package"]).is_relative_to(home) or not cached.is_relative_to(Path(environment["LOCALAPPDATA"])) or installed["version"] != report["version"] or installed["sha256"] != report["native_sha256"]:
+        cached = Path(installed["native"]).resolve()
+        if not _is_within(Path(installed["package"]), home) or not _is_within(cached, Path(environment["LOCALAPPDATA"])) or installed["version"] != report["version"] or installed["sha256"] != report["native_sha256"]:
             raise ValueError("Installed SDK resolved an unexpected package or native executable")
         with cached.open("rb"):
             run([python, "-m", "pip", "install", "--force-reinstall", "--no-index", "--no-deps", path])
