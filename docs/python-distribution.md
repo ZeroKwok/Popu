@@ -1,6 +1,6 @@
 # Python 分发与阶段审核
 
-目标是通过一个 `popu` Windows wheel 安装原生工具和 Python SDK。三个阶段的代码已实现，第三阶段等待审核及 GitHub 首次运行，尚未向 PyPI 发布。
+目标是通过一个 `popu` Windows wheel 安装原生工具和 Python SDK。三个阶段的代码与 GitHub 构建/安装验证均已完成，等待发布前人工验收；尚未向 PyPI 发布。
 
 ## 阶段划分
 
@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 1 | 本地 wheel、命令入口、SDK 默认解析、不可变运行时缓存与安装验证 | 已审核 |
 | 2 | CLI 与已有 Host 的版本/协议握手，WebView2 缺失诊断和手动安装入口 | 已审核 |
-| 3 | 发布 workflow、发行版本检查、制品验证和 PyPI Trusted Publisher | 已实现，等待审核 |
+| 3 | 发布 workflow、发行版本检查、制品验证和 PyPI Trusted Publisher | 远端构建及安装验证通过，待发布批准 |
 
 每阶段完成后停下审核。`.github/workflows/python-publish.yml` 已接通构建、验证和 Trusted Publishing；先通过手动运行审核制品，再发布 GitHub Release。
 
@@ -116,6 +116,39 @@ Windows 上，在 CLI 启动后台 Host 之前以及显式运行 `host run` 之�
 
 发布步骤：提交并推送已审核代码 → 手动运行本 workflow 并检查 artifacts → 创建标签 `v<Cargo版本>` → 发布该标签的 GitHub Release。以当前 Cargo 版本为例，标签必须为 `v0.1.1`；不一致会在原生编译前失败。修改版本后先用常规 `just build` 或 `just build-release` 让 Cargo 更新生成的 Cargo.lock，并随代码提交；CI 使用 `--locked`，不会默默更新锁文件。SemVer 的 `-rc.1` 等兼容预发布写法由 Python 元数据规范化，原生版本保留 Cargo 写法；禁止向 PyPI 上传带 `+...` 本地构建元数据的版本。
 
-首次发布成功后，用户可执行 `python -m pip install popu`，然后使用 `popu`、`python -m popu` 或 Python SDK。当前检查只验证本地构建与工作流结构，不代表已完成远端 OIDC 身份验证或实际 PyPI 上传；没有从本次开发会话触发发布。隔离 runner 也不能代替所有 Windows 10/11 系统环境的虚拟机验证。
+首次发布成功后，用户可执行 `python -m pip install popu`，然后使用 `popu`、`python -m popu` 或 Python SDK。当前已完成 GitHub 构建和安装矩阵验证，尚未执行 PyPI OIDC 上传；没有从本次开发会话触发发布。隔离 runner 也不能代替所有 Windows 10/11 系统环境的桌面验收。
 
-本次本地验证：14 项 UI 测试、39 项构建工具测试、80 项 Python SDK 测试和完整 Rust 常规测试通过；另用静态 CRT release 构建运行真实原生窗口回归，通知、更新、等待、对话框及八轮混合布局均通过。`actionlint` 与 `twine check --strict` 通过。最终 0.1.1 wheel 在 Python 3.11.9 上通过隔离安装、运行、重装和卸载缓存保留验证，报告位于 `test-results/release-wheel-review.json`。Python 3.10/3.13 矩阵和 OIDC 发布等待 GitHub 首次运行验证。
+本地验证包括 UI、构建工具、Python SDK 和完整 Rust 常规测试；另用静态 CRT release 构建运行真实原生窗口回归，通知、更新、等待、对话框及八轮混合布局均通过。`actionlint`、`twine check --strict` 和本地隔离安装验证通过。
+
+## GitHub 最终验证与人工交接
+
+`dev` 已快进合并到 `master` 并推送。修复后验证的代码提交为 `30395ed2cd2f27692c8381310c51ec1c86b51ff6`，见 [GitHub Actions 成功运行](https://github.com/ZeroKwok/Popu/actions/runs/41771829903)。该次运行事件为 `workflow_dispatch`：
+
+| Job | 结果 |
+| --- | --- |
+| Windows 构建、回归、许可证与 wheel 校验 | 成功 |
+| Python 3.10.11 隔离安装/运行/重装/缓存保留 | 成功 |
+| Python 3.13.17 隔离安装/运行/重装/缓存保留 | 成功 |
+| PyPI 发布 | 按设计跳过 |
+
+首次远端运行暴露了 runner 临时目录 `RUNNER~1` 与长路径的比较误判；校验脚本现统一解析真实路径，并兼容许可证文件的 Git LF/CRLF 换行差异。相关回归已加入工具测试，本地 49 项工具测试通过，并使用实际 GitHub wheel 在真实 Windows 短路径下完成隔离安装验证。
+
+本次 GitHub 候选制品为 `popu-0.1.1-py3-none-win_amd64.whl`，SHA-256：
+
+```text
+6a7396f8efa8f76a684557ce5dd32979e3819d9bcab388b8293b5bcab3a19e0a
+```
+
+已下载并核对 `release-dists`、`wheel-build-report`、`installed-wheel-3.10` 和 `installed-wheel-3.13`，两份安装报告均验证同一个 wheel。此校验值用于验收这一次候选制品；正式 Release 会重新构建并再次执行全部检查。
+
+需要人工介入的部分：
+
+| 类型 | 人工操作 | 说明 |
+| --- | --- | --- |
+| 账户配置核对 | 登录 PyPI，核对既有 Pending Publisher 的五个字段 | 使用上文配置表；GitHub 凭据无法读取 PyPI 的私有账户配置。无需提供 API token。 |
+| 用户验收 | 审阅成功运行和候选 wheel，在目标 Windows 桌面运行进度演示 | 检查展示、关闭、最终摘要等表现；自动安装检查不代替主观界面验收。 |
+| 发布决定 | 明确是否正式发布 `0.1.1` | 当前未创建标签、Release 或上传 PyPI。批准后，标签和 Release 操作可以由助手代办。 |
+| 条件操作 | 配置或批准 GitHub 环境审核 | 当前尚无 `pypi` 环境；如需要平台内的额外审批，由管理员配置该环境的审核者，再在发布时批准。此机制可选。 |
+| 条件操作 | 安装 WebView2，或确认后退出旧 Host | 仅在目标机器缺失运行时或现有 Host 需要切换版本时处理；程序不自动安装或终止现有 Host。 |
+
+构建依赖准备、静态 CRT 编译、许可证生成、版本与校验值检查、打包和 Python 安装验证均自动完成。正式发布是否执行及 PyPI 私有配置核对由用户掌握。
