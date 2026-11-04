@@ -1,16 +1,16 @@
 # Python 分发与阶段审核
 
-目标是通过一个 `popu` Windows wheel 安装原生工具和 Python SDK。当前已实现前两个阶段，第二阶段等待审核，尚未向 PyPI 发布。
+目标是通过一个 `popu` Windows wheel 安装原生工具和 Python SDK。三个阶段的代码已实现，第三阶段等待审核及 GitHub 首次运行，尚未向 PyPI 发布。
 
 ## 阶段划分
 
 | 阶段 | 范围 | 当前状态 |
 | --- | --- | --- |
 | 1 | 本地 wheel、命令入口、SDK 默认解析、不可变运行时缓存与安装验证 | 已审核 |
-| 2 | CLI 与已有 Host 的版本/协议握手，WebView2 缺失诊断和手动安装入口 | 已实现，等待审核 |
-| 3 | 发布 workflow、发行版本检查、制品验证和 PyPI Trusted Publisher | 待第二阶段审核 |
+| 2 | CLI 与已有 Host 的版本/协议握手，WebView2 缺失诊断和手动安装入口 | 已审核 |
+| 3 | 发布 workflow、发行版本检查、制品验证和 PyPI Trusted Publisher | 已实现，等待审核 |
 
-每阶段完成后停下审核。仓库现有 `.github/workflows/python-publish.yml` 留到第三阶段修改；当前不能直接依赖它发布本包。
+每阶段完成后停下审核。`.github/workflows/python-publish.yml` 已接通构建、验证和 Trusted Publishing；先通过手动运行审核制品，再发布 GitHub Release。
 
 ## 第一阶段的接口
 
@@ -26,8 +26,11 @@
 
 ```powershell
 just setup
-python -m pip install build
+python -m pip install build twine packaging pytest
+cargo install cargo-about --locked --version 0.9.3 --features cli
 just wheel
+python -m twine check --strict ./dist/popu-0.1.1-py3-none-win_amd64.whl
+python scripts/verify-python-release.py --wheel ./dist/popu-0.1.1-py3-none-win_amd64.whl --smoke --report test-results/wheel-review.json
 
 python -m venv test-results/popu-review
 ./test-results/popu-review/Scripts/python.exe -m pip install --no-index --no-deps ./dist/popu-0.1.1-py3-none-win_amd64.whl
@@ -36,11 +39,11 @@ python -m venv test-results/popu-review
 ./test-results/popu-review/Scripts/python.exe -m popu.demo progress --wait
 ```
 
-若需额外依赖库，可在 staging 时重复传入 `--dll <path>`；必须为 x64 PE DLL。staging 输出位于被 Git 忽略的 `python/src/popu/_native/`，wheel 输出位于 `dist/`。未准备或损坏的原生载荷会阻止 wheel 构建。源码 editable 安装允许不含载荷，但这时必须显式指定本地可执行文件。
+若需额外依赖库，可在 staging 时重复传入 `--dll <path>`；必须为 x64 PE DLL，并通过 VC 运行库依赖检查。staging 输出位于被 Git 忽略的 `python/src/popu/_native/`，wheel 输出位于 `dist/`。未准备或损坏的原生载荷会阻止 wheel 构建。源码 editable 安装允许不含载荷，但这时必须显式指定本地可执行文件。
 
-`just wheel` 依次构建 `ui/dist/`、原生 release 程序、版本化载荷和 wheel。UI 的依赖、脚本和测试不会进入 Tauri 嵌入资源。若只想更新 `_native`，执行 `just build-release` 后运行 `python scripts/stage-python-runtime.py`。只修改 Cargo 中的版本后，需重新编译原生程序；载荷准备不会自动拿旧 exe 冒充新版本。SDK 安装后使用随包生成的版本文件，不读取仓库中的 Cargo 清单。
+`just wheel` 依次构建 `ui/dist/`、静态 CRT 的原生 release 程序、Rust 依赖许可证、版本化载荷和 wheel。UI 的依赖、脚本和测试不会进入 Tauri 嵌入资源。只修改 Cargo 中的版本后，需重新编译原生程序；载荷准备不会自动拿旧 exe 冒充新版本。SDK 安装后使用随包生成的版本文件，不读取仓库中的 Cargo 清单。
 
-原生构建会先按需准备图标。载荷准备默认从 Cargo metadata 读取 release 程序位置，尊重 `CARGO_TARGET_DIR`，也可用 `--executable` 显式覆盖。当前 wheel 配方及载荷准备仅支持 Windows；Python 解释器可通过 `PYTHON` 环境变量指定。
+原生构建会先按需准备图标。wheel 专用原生程序位于 Cargo target 目录下的 `x86_64-pc-windows-msvc/release/popu.exe`；普通 `just build-release` 仍是开发构建，不能直接作为便携 wheel 载荷。工具通过 Cargo metadata 尊重 `CARGO_TARGET_DIR`。若只更新载荷，可在许可证已生成后，运行 `python scripts/stage-python-runtime.py --executable <静态CRT程序>`；默认也选择 wheel 专用程序。当前 wheel 配方及载荷准备仅支持 Windows；Python 解释器可通过 `PYTHON` 环境变量指定。
 
 wheel 包含 `popu.demo.progress` 的唯一实现。安装后可在任意目录执行 `python -m popu.demo progress --wait`；快速测试使用 `--interval 1 --steps 5`。这是模拟进度演示，模拟备份只是表现情境，不操作用户备份文件。仓库开发入口 `just demo-python` 调用同一实现，并使用当前 Cargo debug 程序；没有仓库外层的重复示例文件。
 
@@ -85,3 +88,35 @@ Windows 上，在 CLI 启动后台 Host 之前以及显式运行 `host run` 之�
 第二阶段的审核重点是兼容/旧版/异常 Host、握手半帧超时、业务响应丢失、管理通道恢复，以及真实 loader 缺失场景。原生窗口回归使用独立 Named Pipe 和内存历史库；已有旧 Host 只做状态查询及握手拒绝验证，不停止它。发布 workflow、Trusted Publisher 和干净 Windows 系统的分发依赖验证仍留在第三阶段。
 
 本次验证结果：完整 Rust 常规测试通过；最终代码再次通过 88 项库测试和 5 项 CLI 测试（另有 3 个子进程辅助测试按设计忽略），66 项 Python 测试通过。真实原生窗口回归在新握手连接下通过，包括通知/对话框生命周期、内容更新、等待、并发请求与 Host 身份诊断。重建后的 `dist/popu-0.1.0-py3-none-win_amd64.whl` 通过隔离 venv 安装、重装及缓存校验；安装后的 CLI 两种入口均验证了真实 loader 缺失提示，默认 SDK 验证了旧 Host 拒绝及恢复说明。
+
+## 第三阶段：发行与发布
+
+宏观检查确认版本已统一为 Cargo 单源，UI 产物与源码分离，CLI/Host 握手与不可变缓存已经接通。发现旧 release exe 依赖 `VCRUNTIME140.dll` 和 `VCRUNTIME140_1.dll`；wheel 构建现使用显式 Windows x64 target 和 `+crt-static`，避免额外安装 VC Redistributable。staging 和制品校验都会检查 PE 普通导入与延迟导入，拒绝这些依赖。Windows 自带 DLL 和用户手动安装的 WebView2 仍是系统前提。
+
+原生依赖通知由固定版本 `cargo-about 0.9.3` 生成，按 `src-tauri/about.toml` 选择许可文本；无法解析的依赖会阻止构建。wheel 同时保留项目许可证、UI 依赖许可证和 Rust 依赖许可证，后者包含未修改依赖的精确版本源码下载地址，并绑定当前 Cargo.lock 的 SHA-256。`src-tauri/about.hbs` 是生成模板。构建许可证工具需要联网获取未随 crate 打包的上游许可证。
+
+工作流的三个 job：
+
+1. `release-build` 在 Windows Server 2022 上准备 Python、Node、Rust、just、ImageMagick 和许可证工具，运行 `just check`，构建唯一的 Windows wheel，并进行 twine 与制品内容检查。
+2. `installed-wheel` 在新的 Windows runner 上，分别使用 Python 3.10 和 3.13 检查同一 wheel。脚本创建隔离 venv、清除源码导入路径和构建工具 PATH，验证 SDK、两种 CLI 入口、内置演示帮助、UTF-8 输入、退出码、WebView2 缺失提示、缓存定位、重装与卸载后的缓存保留。它不会启动可见窗口或连接用户业务 Host。
+3. `pypi-publish` 仅由 GitHub Release 的 `published` 事件触发，等待所有验证成功后，在 Ubuntu 上发布下载到的原制品。只发布 wheel，不发布 sdist；使用 OIDC Trusted Publishing 和制品证明，不需要 PyPI API token。
+
+手动 `workflow_dispatch` 只构建和验证，上传 `release-dists`、构建报告和各 Python 安装报告，发布 job 会跳过。工作流文件名必须保持 `python-publish.yml`，环境名保持 `pypi`。
+
+首次发布前核对 Pending Publisher：
+
+| 字段 | 值 |
+| --- | --- |
+| PyPI project | `popu` |
+| GitHub owner | `ZeroKwok` |
+| Repository | `Popu` |
+| Workflow filename | `python-publish.yml` |
+| Environment | `pypi` |
+
+这些值必须与 PyPI 页面中创建的 Pending Publisher 一致。首次成功上传会创建项目；Pending Publisher 不保留项目名称。参考 [PyPI Pending Publisher 文档](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/) 和 [发布动作说明](https://github.com/pypa/gh-action-pypi-publish)。
+
+发布步骤：提交并推送已审核代码 → 手动运行本 workflow 并检查 artifacts → 创建标签 `v<Cargo版本>` → 发布该标签的 GitHub Release。以当前 Cargo 版本为例，标签必须为 `v0.1.1`；不一致会在原生编译前失败。修改版本后先用常规 `just build` 或 `just build-release` 让 Cargo 更新生成的 Cargo.lock，并随代码提交；CI 使用 `--locked`，不会默默更新锁文件。SemVer 的 `-rc.1` 等兼容预发布写法由 Python 元数据规范化，原生版本保留 Cargo 写法；禁止向 PyPI 上传带 `+...` 本地构建元数据的版本。
+
+首次发布成功后，用户可执行 `python -m pip install popu`，然后使用 `popu`、`python -m popu` 或 Python SDK。当前检查只验证本地构建与工作流结构，不代表已完成远端 OIDC 身份验证或实际 PyPI 上传；没有从本次开发会话触发发布。隔离 runner 也不能代替所有 Windows 10/11 系统环境的虚拟机验证。
+
+本次本地验证：14 项 UI 测试、39 项构建工具测试、80 项 Python SDK 测试和完整 Rust 常规测试通过；另用静态 CRT release 构建运行真实原生窗口回归，通知、更新、等待、对话框及八轮混合布局均通过。`actionlint` 与 `twine check --strict` 通过。最终 0.1.1 wheel 在 Python 3.11.9 上通过隔离安装、运行、重装和卸载缓存保留验证，报告位于 `test-results/release-wheel-review.json`。Python 3.10/3.13 矩阵和 OIDC 发布等待 GitHub 首次运行验证。

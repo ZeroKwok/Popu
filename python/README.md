@@ -4,9 +4,9 @@ The Python package bundles the Windows native Popu tool and a client for its per
 
 ## Installation
 
-Requires Windows x64, 64-bit Python 3.10+, and Microsoft WebView2 Runtime. The Windows wheel includes the matching native executable; Rust and Node.js are not required on the user's machine. WebView2 is a separate prerequisite: install it manually from [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/) if missing. Popu does not install it automatically.
+Requires Windows x64, 64-bit Python 3.10+, and Microsoft WebView2 Runtime. The Windows wheel includes the matching native executable, built with a static C runtime; Rust, Node.js, and a separate Visual C++ Redistributable installation are not required for Popu. WebView2 is a separate prerequisite: install it manually from [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/) if missing. Popu does not install it automatically.
 
-PyPI publishing is not enabled yet. After [building a local wheel](../docs/python-distribution.md), install it from the repository root:
+The publishing workflow is ready for review; the first PyPI release has not been uploaded. After [building a local wheel](https://github.com/ZeroKwok/Popu/blob/HEAD/docs/python-distribution.md), install it from the repository root:
 
 ```powershell
 python -m pip install ./dist/popu-0.1.1-py3-none-win_amd64.whl
@@ -25,7 +25,7 @@ python -m popu.demo progress --interval 1 --steps 5 --wait
 python -m popu.demo progress --help
 ```
 
-The mock backup scenario generates simulated file counts, data volumes, and progress. It never reads, copies, modifies, or verifies your backup files. Console output and all notification stages explicitly identify the simulation. Notifications use the real SDK and bundled native runtime. Closing a progress card hides it while the simulation continues; Ctrl+C stops the simulation and attempts a bounded final update. No build tools are required to run an installed wheel. See the [progress demo guide](examples/README.md) for timing and source-development options.
+The mock backup scenario generates simulated file counts, data volumes, and progress. It never reads, copies, modifies, or verifies your backup files. Console output and all notification stages explicitly identify the simulation. Notifications use the real SDK and bundled native runtime. Closing a progress card hides it while the simulation continues; Ctrl+C stops the simulation and attempts a bounded final update. No build tools are required to run an installed wheel. See the [progress demo guide](https://github.com/ZeroKwok/Popu/blob/HEAD/python/examples/README.md) for timing and source-development options.
 
 For source development:
 
@@ -41,7 +41,7 @@ By default, the CLI and SDK verify the bundled payload and copy it to `%LOCALAPP
 
 Before a business request, the native CLI and Host require matching application and RPC versions through a handshake on the same connection. A legacy or incompatible Host produces a diagnostic before submission; Python raises `PopuError`. Inspect it with `python -m popu host status`, then explicitly stop it with `python -m popu host stop` or exit from its tray menu when ready. Popu never automatically stops an existing Host. Management commands remain available without the business handshake. Handshakes have a two-second deadline; this does not limit a dialog's business wait. A submitted business request is not automatically replayed after a transport failure.
 
-Before starting a new Host, the CLI checks WebView2 availability. Missing/unavailable runtimes produce a manual installation link and the loader diagnostic rather than a background startup timeout. This check does not install software or open the browser. See [distribution stages](../docs/python-distribution.md) for upgrade rules and review scope.
+Before starting a new Host, the CLI checks WebView2 availability. Missing/unavailable runtimes produce a manual installation link and the loader diagnostic rather than a background startup timeout. This check does not install software or open the browser. See [distribution stages](https://github.com/ZeroKwok/Popu/blob/HEAD/docs/python-distribution.md) for upgrade rules and review scope.
 
 ## Requests and results
 
@@ -82,7 +82,7 @@ snapshot = client.update(receipt.request_id, snapshot["revision"], {
 
 User close hides progress and silences ordinary updates. An explicit `reshow=True` permits one further presentation by default; `reshow_suppressed` reports a consumed budget without rejecting the content. Automatic display timeout hides the card, and the next report shows it again unless the user previously closed it. `dismiss` is caller cancellation and ends the notification outright.
 
-The default template displays occurrence time, refreshed on every accepted report. Hidden contents remain current in history. After 12 hours without a successful report, the notification becomes `stale` and rejects updates. Host restart restores live records hidden without resetting this deadline. See the [complete lifecycle](../docs/live-notifications.md) and [installed progress demo](examples/README.md).
+The default template displays occurrence time, refreshed on every accepted report. Hidden contents remain current in history. After 12 hours without a successful report, the notification becomes `stale` and rejects updates. Host restart restores live records hidden without resetting this deadline. See the [complete lifecycle](https://github.com/ZeroKwok/Popu/blob/HEAD/docs/live-notifications.md) and [installed progress demo](https://github.com/ZeroKwok/Popu/blob/HEAD/python/examples/README.md).
 
 Cancelled, closed, and timed-out dialogs are normal `InteractionResult` outcomes. A custom dialog action may use exit code `12` (or any other code from 0–255); the SDK reads the Host result rather than treating that business exit code as a transport error. If a terminal dialog has no response, `show` raises `PopuError` with its terminal state.
 

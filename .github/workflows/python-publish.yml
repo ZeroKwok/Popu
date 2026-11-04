@@ -1,70 +1,160 @@
-# This workflow will upload a Python Package to PyPI when a release is created
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python#publishing-to-package-registries
-
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-name: Upload Python Package
+name: Build and publish Python wheel
 
 on:
   release:
     types: [published]
+  # Manual runs validate artifacts; they never upload to PyPI.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: python-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release-build:
-    runs-on: windows-latest
-
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    outputs:
+      wheel: ${{ steps.identity.outputs.wheel }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
         with:
-          python-version: "3.x"
-
-      - name: Build release distributions
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install Python release tools
+        run: python -m pip install build twine packaging pytest tomli
+      - name: Check release identity before building
+        id: identity
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          # NOTE: put your own distribution build steps here.
-          python -m pip install build
-          python -m build
+          $arguments = @('scripts/verify-python-release.py', '--version-only')
+          if ($env:GITHUB_EVENT_NAME -eq 'release') {
+            $arguments += @('--tag', $env:RELEASE_TAG)
+          }
+          $version = & python @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $normalized = & python -c 'from packaging.version import Version; import sys; print(Version(sys.argv[1]))' $version
+          "wheel=popu-$normalized-py3-none-win_amd64.whl" >> $env:GITHUB_OUTPUT
+      - name: Prepare Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add x86_64-pc-windows-msvc
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: wheel-windows-msvc-static-v1-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: wheel-windows-msvc-static-v1-
+      - name: Install build tools
+        run: |
+          $tools = Join-Path $env:RUNNER_TEMP 'popu-tools'
+          cargo install just --locked --version 1.44.1 --root $tools
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo install cargo-about --locked --version 0.9.3 --features cli --root $tools
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          (Join-Path $tools 'bin') >> $env:GITHUB_PATH
+          'C:\Program Files\Git\usr\bin' >> $env:GITHUB_PATH
+          if (-not (Get-Command magick -ErrorAction SilentlyContinue)) {
+            choco install imagemagick --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $magick = Get-ChildItem "$env:ProgramFiles\ImageMagick*\magick.exe" | Select-Object -First 1
+            $magick.DirectoryName >> $env:GITHUB_PATH
+          }
+      - name: Prepare checkout and run regression tests
+        run: |
+          just setup
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          just check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build portable native payload and Windows wheel
+        run: just wheel
+      - name: Validate metadata and wheel contents
+        env:
+          WHEEL: ${{ steps.identity.outputs.wheel }}
+        run: |
+          $wheels = @(Get-ChildItem dist -File)
+          if ($wheels.Count -ne 1 -or $wheels[0].Name -ne $env:WHEEL) {
+            throw 'Release output must contain exactly the expected Windows wheel'
+          }
+          python -m twine check --strict "dist/$env:WHEEL"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/verify-python-release.py --wheel "dist/$env:WHEEL" --report test-results/wheel-build.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dists
+          path: dist/*.whl
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-build-report
+          path: test-results/wheel-build.json
 
-      - name: Upload distributions
-        uses: actions/upload-artifact@v4
+  installed-wheel:
+    needs: release-build
+    runs-on: windows-2022
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          architecture: x64
+      - uses: actions/download-artifact@v4
         with:
           name: release-dists
           path: dist/
+      - run: python -m pip install packaging tomli
+      - name: Verify isolated install without build tools on PATH
+        shell: pwsh
+        env:
+          WHEEL: ${{ needs.release-build.outputs.wheel }}
+        run: python scripts/verify-python-release.py --wheel "dist/$env:WHEEL" --smoke --report "test-results/installed-${{ matrix.python }}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installed-wheel-${{ matrix.python }}
+          path: test-results/installed-*.json
 
   pypi-publish:
+    if: github.event_name == 'release'
+    needs: [release-build, installed-wheel]
     runs-on: ubuntu-latest
-    needs:
-      - release-build
+    timeout-minutes: 10
     permissions:
-      # IMPORTANT: this permission is mandatory for trusted publishing
       id-token: write
-
-    # Dedicated environments with protections for publishing are strongly recommended.
-    # For more information, see: https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment#deployment-protection-rules
     environment:
       name: pypi
-      # OPTIONAL: uncomment and update to include your PyPI project URL in the deployment status:
-      # url: https://pypi.org/p/YOURPROJECT
-      #
-      # ALTERNATIVE: if your GitHub Release name is the PyPI project version string
-      # ALTERNATIVE: exactly, uncomment the following line instead:
-      # url: https://pypi.org/project/YOURPROJECT/${{ github.event.release.name }}
-
+      url: https://pypi.org/project/popu/
     steps:
-      - name: Retrieve release distributions
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: release-dists
           path: dist/
-
-      - name: Publish release distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+          attestations: true

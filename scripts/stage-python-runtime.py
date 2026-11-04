@@ -9,13 +9,13 @@ import hashlib
 import json
 import re
 import shutil
-import struct
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 from project_paths import native_executable, require_windows
+from native_payload import WINDOWS_TARGET, verify_portable_binary
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,26 +23,15 @@ sys.path.insert(0, str(ROOT / "python"))
 from build_version import generate_version
 
 
-def require_x64_pe(executable: Path) -> None:
-    with executable.open("rb") as stream:
-        if stream.read(2) != b"MZ":
-            raise ValueError("runtime must be a Windows PE executable")
-        stream.seek(0x3C)
-        offset = struct.unpack("<I", stream.read(4))[0]
-        stream.seek(offset)
-        if stream.read(4) != b"PE\0\0" or struct.unpack("<H", stream.read(2))[0] != 0x8664:
-            raise ValueError("runtime must target Windows x64 (AMD64)")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--executable", type=Path, help="Native release binary; defaults to Cargo's target directory")
+    parser.add_argument("--executable", type=Path, help="Portable x64 binary; defaults to the wheel target's release directory")
     parser.add_argument("--dll", type=Path, action="append", default=[], help="Additional native runtime DLL; repeat if needed")
     args = parser.parse_args()
     require_windows("Bundled native wheel preparation")
     version = generate_version()
-    executable = (args.executable or native_executable("release")).resolve(strict=True)
-    require_x64_pe(executable)
+    executable = (args.executable or native_executable("release", target=WINDOWS_TARGET)).resolve(strict=True)
+    verify_portable_binary(executable.read_bytes())
     result = subprocess.run([str(executable), "--version"], capture_output=True, text=True, encoding="utf-8", check=True, timeout=10)
     if result.stdout.strip() != f"popu {version}":
         raise ValueError(f"executable version mismatch: {result.stdout.strip()}")
@@ -50,14 +39,18 @@ def main() -> None:
         "popu.exe": executable,
         "LICENSE": ROOT / "LICENSE",
         "THIRD_PARTY_LICENSES.txt": ROOT / "ui/dist/vendor/THIRD_PARTY_LICENSES.txt",
+        "RUST_THIRD_PARTY_LICENSES.txt": ROOT / "python/build/RUST_THIRD_PARTY_LICENSES.txt",
     }
     for library in args.dll:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", library.name) or library.suffix.lower() != ".dll" or library.name.lower() in {name.lower() for name in sources}:
             raise ValueError(f"invalid or duplicate DLL: {library}")
-        require_x64_pe(library)
+        verify_portable_binary(library.read_bytes())
         sources[library.name] = library.resolve(strict=True)
     if (ROOT / "python/LICENSE").read_bytes() != sources["LICENSE"].read_bytes():
         raise ValueError("python/LICENSE does not match the repository LICENSE")
+    lock_hash = hashlib.sha256((ROOT / "src-tauri/Cargo.lock").read_bytes()).hexdigest()
+    if not sources["RUST_THIRD_PARTY_LICENSES.txt"].read_text(encoding="utf-8").startswith(f"Cargo.lock SHA-256: {lock_hash}\n"):
+        raise ValueError("Native license notices are stale; rebuild with `just wheel`.")
     destination = ROOT / "python/src/popu/_native"
     with tempfile.TemporaryDirectory(prefix="popu-stage-", dir=ROOT / "python") as temporary:
         staging = Path(temporary)

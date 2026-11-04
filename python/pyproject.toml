@@ -19,6 +19,12 @@ classifiers = [
 [project.scripts]
 popu = "popu._cli:main"
 
+[project.urls]
+Homepage = "https://github.com/ZeroKwok/Popu"
+Repository = "https://github.com/ZeroKwok/Popu"
+Issues = "https://github.com/ZeroKwok/Popu/issues"
+Documentation = "https://github.com/ZeroKwok/Popu#readme"
+
 [tool.setuptools]
 include-package-data = false
 

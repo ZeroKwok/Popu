@@ -1,0 +1,15 @@
+Popu native dependency notices
+Source archives for the unmodified dependencies are linked below.
+
+{{#each licenses}}
+======================================================================
+{{name}} ({{id}})
+Used by:
+{{#each used_by}}
+  {{crate.name}} {{crate.version}}
+  Source: https://crates.io/api/v1/crates/{{crate.name}}/{{crate.version}}/download
+{{/each}}
+
+{{{text}}}
+
+{{/each}}
