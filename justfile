@@ -107,7 +107,7 @@ test-python: prep-python
 # Build a local Windows wheel; publishing remains a separate release step.
 [group("Python")]
 [windows]
-wheel: build-ui prep-native
+build-wheel: build-ui prep-native
     "{{ python }}" scripts/build-python-wheel.py
 
 # Run the packaged progress demo with an installed SDK and a local debug build.

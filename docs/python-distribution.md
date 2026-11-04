@@ -27,8 +27,7 @@
 ```powershell
 just setup
 python -m pip install build twine packaging pytest
-cargo install cargo-about --locked --version 0.9.3 --features cli
-just wheel
+just build-wheel
 python -m twine check --strict ./dist/popu-0.1.1-py3-none-win_amd64.whl
 python scripts/verify-python-release.py --wheel ./dist/popu-0.1.1-py3-none-win_amd64.whl --smoke --report test-results/wheel-review.json
 
@@ -41,7 +40,7 @@ python -m venv test-results/popu-review
 
 若需额外依赖库，可在 staging 时重复传入 `--dll <path>`；必须为 x64 PE DLL，并通过 VC 运行库依赖检查。staging 输出位于被 Git 忽略的 `python/src/popu/_native/`，wheel 输出位于 `dist/`。未准备或损坏的原生载荷会阻止 wheel 构建。源码 editable 安装允许不含载荷，但这时必须显式指定本地可执行文件。
 
-`just wheel` 依次构建 `ui/dist/`、静态 CRT 的原生 release 程序、Rust 依赖许可证、版本化载荷和 wheel。UI 的依赖、脚本和测试不会进入 Tauri 嵌入资源。只修改 Cargo 中的版本后，需重新编译原生程序；载荷准备不会自动拿旧 exe 冒充新版本。SDK 安装后使用随包生成的版本文件，不读取仓库中的 Cargo 清单。
+`just build-wheel` 依次构建 `ui/dist/`、静态 CRT 的原生 release 程序、Rust 依赖许可证、版本化载荷和 wheel。UI 的依赖、脚本和测试不会进入 Tauri 嵌入资源。只修改 Cargo 中的版本后，需重新编译原生程序；载荷准备不会自动拿旧 exe 冒充新版本。SDK 安装后使用随包生成的版本文件，不读取仓库中的 Cargo 清单。
 
 原生构建会先按需准备图标。wheel 专用原生程序位于 Cargo target 目录下的 `x86_64-pc-windows-msvc/release/popu.exe`；普通 `just build-release` 仍是开发构建，不能直接作为便携 wheel 载荷。工具通过 Cargo metadata 尊重 `CARGO_TARGET_DIR`。若只更新载荷，可在许可证已生成后，运行 `python scripts/stage-python-runtime.py --executable <静态CRT程序>`；默认也选择 wheel 专用程序。当前 wheel 配方及载荷准备仅支持 Windows；Python 解释器可通过 `PYTHON` 环境变量指定。
 
@@ -93,7 +92,7 @@ Windows 上，在 CLI 启动后台 Host 之前以及显式运行 `host run` 之�
 
 宏观检查确认版本已统一为 Cargo 单源，UI 产物与源码分离，CLI/Host 握手与不可变缓存已经接通。发现旧 release exe 依赖 `VCRUNTIME140.dll` 和 `VCRUNTIME140_1.dll`；wheel 构建现使用显式 Windows x64 target 和 `+crt-static`，避免额外安装 VC Redistributable。staging 和制品校验都会检查 PE 普通导入与延迟导入，拒绝这些依赖。Windows 自带 DLL 和用户手动安装的 WebView2 仍是系统前提。
 
-原生依赖通知由固定版本 `cargo-about 0.9.3` 生成，按 `src-tauri/about.toml` 选择许可文本；无法解析的依赖会阻止构建。wheel 同时保留项目许可证、UI 依赖许可证和 Rust 依赖许可证，后者包含未修改依赖的精确版本源码下载地址，并绑定当前 Cargo.lock 的 SHA-256。`src-tauri/about.hbs` 是生成模板。构建许可证工具需要联网获取未随 crate 打包的上游许可证。
+原生依赖通知由固定版本 `cargo-about 0.9.3` 生成，按 `src-tauri/about.toml` 选择许可文本；无法解析的依赖会阻止构建。`just build-wheel` 会复用已有匹配版本，或自动安装到被 Git 忽略的 `python/build/tools/cargo-about-0.9.3/`；直接调用该缓存里的程序，不依赖工具目录位于 PATH，也不替换全局安装。首次工具安装需要联网并编译数分钟。wheel 同时保留项目许可证、UI 依赖许可证和 Rust 依赖许可证，后者包含未修改依赖的精确版本源码下载地址，并绑定当前 Cargo.lock 的 SHA-256。`src-tauri/about.hbs` 是生成模板。构建许可证工具需要联网获取未随 crate 打包的上游许可证。
 
 工作流的三个 job：
 

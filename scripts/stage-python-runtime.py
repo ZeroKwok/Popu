@@ -50,7 +50,7 @@ def main() -> None:
         raise ValueError("python/LICENSE does not match the repository LICENSE")
     lock_hash = hashlib.sha256((ROOT / "src-tauri/Cargo.lock").read_bytes()).hexdigest()
     if not sources["RUST_THIRD_PARTY_LICENSES.txt"].read_text(encoding="utf-8").startswith(f"Cargo.lock SHA-256: {lock_hash}\n"):
-        raise ValueError("Native license notices are stale; rebuild with `just wheel`.")
+        raise ValueError("Native license notices are stale; rebuild with `just build-wheel`.")
     destination = ROOT / "python/src/popu/_native"
     with tempfile.TemporaryDirectory(prefix="popu-stage-", dir=ROOT / "python") as temporary:
         staging = Path(temporary)

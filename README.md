@@ -51,13 +51,13 @@ Popu 让脚本和 Agent 能够在需要时通知用户、请求确认、收集�
 
 提交一个通知：
 
-```powershell
+```sh
 popu request protocol/examples/notification-success.json
 ```
 
 提交一个确认对话框：
 
-```powershell
+```sh
 popu request protocol/examples/dialog-confirm.json
 ```
 
@@ -67,7 +67,7 @@ popu request protocol/examples/dialog-confirm.json
 
 Windows wheel 包含原生 CLI 和 SDK，需要 Windows x64、64 位 Python 3.10+ 和 WebView2 Runtime。目前尚未发布到 PyPI，请先按[打包说明](docs/python-distribution.md)构建本地 wheel，再安装：
 
-```powershell
+```sh
 python -m pip install ./dist/popu-0.1.1-py3-none-win_amd64.whl
 python -m popu --version
 ```
@@ -168,7 +168,7 @@ Host 在首次请求时自动启动。调用方提交请求后获得 Host 生成
 
 首次检出需要安装 ImageMagick。安装前端依赖、准备生成文件并构建：
 
-```powershell
+```sh
 just setup
 just build-release
 ```
@@ -177,7 +177,7 @@ Windows 可执行文件位于 `src-tauri/target/release/popu.exe`。将该目录
 
 运行测试：
 
-```powershell
+```sh
 just check
 # 浏览器视觉回归（不会启动原生 Host）：
 just test-visuals
@@ -185,14 +185,14 @@ just test-visuals
 
 开发期也可以分别构建 UI 和 Rust 可执行文件：
 
-```powershell
+```sh
 just build-ui
 cargo build --manifest-path src-tauri/Cargo.toml
 ```
 
-产品版本只修改 `src-tauri/Cargo.toml` 中的 `package.version`。Tauri 自动读取它，Python 构建和 editable 安装自动生成 SDK 版本文件；`just version` 显示当前版本，`just wheel` 构建包含原生程序的本地 wheel。Python 测试需要 pytest，wheel 构建需要 build；请在开发用虚拟环境中安装。
+产品版本只修改 `src-tauri/Cargo.toml` 中的 `package.version`。Tauri 自动读取它，Python 构建和 editable 安装自动生成 SDK 版本文件；`just version` 显示当前版本，`just build-wheel` 构建包含原生程序的本地 wheel。Python 测试需要 pytest，wheel 构建需要 build；请在开发用虚拟环境中安装。
 
-直接运行 `just` 会显示分组帮助。自动化检查使用 `just check`，交互演示使用 `just demo-fixture notification-success.json`、`just demo-fixtures notification` 或 `just demo-python --wait`。演示与 wheel 载荷准备通过 Cargo metadata 获取程序路径，支持 `CARGO_TARGET_DIR`；可用 `PYTHON` 环境变量指定 Python 解释器。构建会按需生成缺失或过期的图标，`just icons` 可强制重建。`just wheel` 和现有 `just test-native` 目前仅在 Windows 提供。
+直接运行 `just` 会显示分组帮助。自动化检查使用 `just check`，交互演示使用 `just demo-fixture notification-success.json`、`just demo-fixtures notification` 或 `just demo-python --wait`。演示与 wheel 载荷准备通过 Cargo metadata 获取程序路径，支持 `CARGO_TARGET_DIR`；可用 `PYTHON` 环境变量指定 Python 解释器。构建会按需生成缺失或过期的图标，`just icons` 可强制重建。`just build-wheel` 和现有 `just test-native` 目前仅在 Windows 提供。
 
 欢迎通过 issue 和 pull request 参与改进，详见[贡献指南](CONTRIBUTING.md)。原生通知窗口生命周期测试见[通知窗口协调与排布](docs/notification-layout.md)；运行这些测试需要解锁的 Windows 桌面。
 

@@ -78,5 +78,5 @@ def verify_portable_binary(data: bytes) -> set[str]:
     imports = imported_dlls(data)
     vc = sorted(name for name in imports if re.match(r"(?:vcruntime|msvcp|msvcr|concrt)\d.*\.dll$", name))
     if vc:
-        raise ValueError(f"Native wheel requires static CRT; found {', '.join(vc)}. Build with `just wheel`.")
+        raise ValueError(f"Native wheel requires static CRT; found {', '.join(vc)}. Build with `just build-wheel`.")
     return imports

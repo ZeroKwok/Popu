@@ -61,14 +61,13 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          key: wheel-windows-msvc-static-v1-${{ hashFiles('src-tauri/Cargo.lock') }}
+            python/build/tools
+          key: wheel-windows-msvc-static-v1-${{ hashFiles('src-tauri/Cargo.lock', 'scripts/build-python-wheel.py') }}
           restore-keys: wheel-windows-msvc-static-v1-
       - name: Install build tools
         run: |
           $tools = Join-Path $env:RUNNER_TEMP 'popu-tools'
           cargo install just --locked --version 1.44.1 --root $tools
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo install cargo-about --locked --version 0.9.3 --features cli --root $tools
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           (Join-Path $tools 'bin') >> $env:GITHUB_PATH
           'C:\Program Files\Git\usr\bin' >> $env:GITHUB_PATH
@@ -85,7 +84,7 @@ jobs:
           just check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build portable native payload and Windows wheel
-        run: just wheel
+        run: just build-wheel
       - name: Validate metadata and wheel contents
         env:
           WHEEL: ${{ steps.identity.outputs.wheel }}

@@ -188,7 +188,7 @@ just build-ui
 cargo build --manifest-path src-tauri/Cargo.toml
 ```
 
-Change only `package.version` in `src-tauri/Cargo.toml` for a product release. Tauri inherits it; Python builds and editable installs generate the SDK version automatically. `just version` prints it; `just wheel` builds the bundled local wheel. Install pytest and build in your development virtual environment for Python tests and wheel builds.
+Change only `package.version` in `src-tauri/Cargo.toml` for a product release. Tauri inherits it; Python builds and editable installs generate the SDK version automatically. `just version` prints it; `just build-wheel` builds the bundled local wheel. Install pytest and build in your development virtual environment for Python tests and wheel builds.
 
 Running `just` displays grouped help. Use `just check` for automated checks; use `just demo-fixture notification-success.json`, `just demo-fixtures notification`, or `just demo-python --wait` for interactive demos. Demos and native wheel staging resolve executables through Cargo metadata, including `CARGO_TARGET_DIR`. Set `PYTHON` to select an interpreter. Builds prepare missing/outdated icons automatically; `just icons` forces regeneration. The current `wheel` and `test-native` tasks are Windows-only.
 
