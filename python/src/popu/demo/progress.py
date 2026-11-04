@@ -3,14 +3,13 @@
 The mock backup scenario only generates progress and statistics. It never
 reads, copies, modifies, or verifies your backup files.
 
-Run after installing the Windows wheel:
-    python -m popu.demo progress --wait
-Quick demonstration:
-    python -m popu.demo progress --interval 1 --steps 5 --wait
+Run after installing Popu:
+    python -m popu.demo progress
+Add --wait to wait for the final presentation to end.
 
 Close the progress card: subsequent reports stay silent, and the final report
 requests the single allowed reshow. Leave it open to see in-place updates, or
-use --display-seconds 5 to see automatic expiry followed by the next report.
+use --interval 6 --display-seconds 5 to see automatic expiry and the next report.
 """
 from __future__ import annotations
 
@@ -57,7 +56,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     receipt = None
     finished = False
     try:
-        print("模拟进度演示（模拟备份场景）：不会读取、复制或修改你的备份文件。", flush=True)
+        print("Simulated progress demo (mock backup): no backup files will be read, copied, or modified.", flush=True)
         client = Client(args.executable)
         initial = content(0, 0)
         notification = Notification.success(
@@ -68,8 +67,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         receipt = client.notify(notification)
         revision = receipt.revision
         started = time.monotonic()
-        print(f"通知 ID: {receipt.request_id}", flush=True)
-        print("可点击 × 收起进度；Ctrl+C 停止演示；结束时申请最后显示一次。", flush=True)
+        print(f"Notification ID: {receipt.request_id}", flush=True)
+        print("Close the card to hide progress; press Ctrl+C to stop. The final summary requests one reshow.", flush=True)
         for step in range(1, args.steps + 1):
             time.sleep(args.interval)
             percent = step * 100 // args.steps
@@ -80,17 +79,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             revision = snapshot["revision"]
             finished = is_final
-            print(f"{percent:3d}% · state={snapshot['state']} · revision={revision} · reshow_suppressed={snapshot.get('reshow_suppressed', False)}", flush=True)
+            print(f"{percent:3d}% | state={snapshot['state']} | revision={revision} | reshow_suppressed={snapshot.get('reshow_suppressed', False)}", flush=True)
         if args.wait:
             result = client.wait(receipt.request_id)
-            print(f"已归档：{result['state']}；可在托盘历史查看最终摘要。", flush=True)
+            print(f"Archived: {result['state']}. View the final summary in notification history from the tray.", flush=True)
     except KeyboardInterrupt:
-        print("\n模拟进度演示已停止。", flush=True)
+        print("\nSimulated progress demo stopped.", flush=True)
         if receipt is not None and not finished:
             _stop_notification(args.executable, receipt.request_id)
         return 130
     except PopuError as error:
-        print(f"无法运行模拟进度演示：{error}", file=sys.stderr, flush=True)
+        print(f"Could not run the simulated progress demo: {error}", file=sys.stderr, flush=True)
         return 1
     return 0
 
@@ -107,7 +106,7 @@ def _stop_notification(executable: Path | None, request_id: str) -> None:
                 "blocks": [{"type": "paragraph", "text": "模拟进度演示被中断。未执行真实备份，未对你的备份文件做任何操作。"}],
             }, updatable=False, duration_ms=5000)
     except (PopuError, KeyboardInterrupt) as error:
-        print(f"通知收尾已跳过：{error or '再次中断'}", flush=True)
+        print(f"Notification cleanup skipped: {error or 'interrupted again'}", flush=True)
 
 
 if __name__ == "__main__":

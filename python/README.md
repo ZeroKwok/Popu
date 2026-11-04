@@ -1,145 +1,143 @@
-# Popu Python SDK
+# Popu
 
-The Python package bundles the Windows native Popu tool and a client for its persistent local Host. It parses accepted receipts and terminal snapshots; the Host manages notification windows and lifetime.
+Desktop notifications and lightweight dialogs for Python scripts and automation tools.
 
-## Installation
+Show task progress, report results, ask for confirmation, and keep notification history available after your script exits. The package includes the Python SDK and the `popu` command-line tool. Everything runs locally; no external service or account is needed.
 
-Requires Windows x64, 64-bit Python 3.10+, and Microsoft WebView2 Runtime. The Windows wheel includes the matching native executable, built with a static C runtime; Rust, Node.js, and a separate Visual C++ Redistributable installation are not required for Popu. WebView2 is a separate prerequisite: install it manually from [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/) if missing. Popu does not install it automatically.
+## Install and try it
 
-The publishing workflow is ready for review; the first PyPI release has not been uploaded. After [building a local wheel](https://github.com/ZeroKwok/Popu/blob/HEAD/docs/python-distribution.md), install it from the repository root:
+Currently supported: **Windows x64 with 64-bit Python 3.10+**. [Microsoft WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) is required; if it is missing, Popu provides a manual installation link.
 
-```powershell
-python -m pip install ./dist/popu-0.1.1-py3-none-win_amd64.whl
-popu --version
-python -m popu --version
+```sh
+python -m pip install popu
+python -m popu.demo progress
 ```
 
-Both CLI entries forward native arguments, input/output, and exit codes. If the Python scripts directory is absent from `PATH`, use `python -m popu`.
+The demo shows a progress notification followed by a result summary. It simulates a backup without accessing your files. Try closing the progress card: updates continue in the background, and the final summary requests one more presentation. Press Ctrl+C to stop the demo. Add `--wait` to wait for the final notification to finish displaying. Console messages are in English.
 
-The wheel includes a progress demonstration, runnable from any directory without a repository checkout:
+The native executable is included. You can run the installed package from any directory without checking out the repository or installing build tools. The background Host starts automatically on the first request and keeps notifications and history available after the submitting script exits.
 
-```powershell
-python -m popu.demo progress --wait
-# Shorter run:
-python -m popu.demo progress --interval 1 --steps 5 --wait
-python -m popu.demo progress --help
-```
-
-The mock backup scenario generates simulated file counts, data volumes, and progress. It never reads, copies, modifies, or verifies your backup files. Console output and all notification stages explicitly identify the simulation. Notifications use the real SDK and bundled native runtime. Closing a progress card hides it while the simulation continues; Ctrl+C stops the simulation and attempts a bounded final update. No build tools are required to run an installed wheel. See the [progress demo guide](https://github.com/ZeroKwok/Popu/blob/HEAD/python/examples/README.md) for timing and source-development options.
-
-For source development:
-
-```powershell
-python -m pip install -e ./python
-```
-
-Use `Client(executable="path/to/popu.exe")` with a local build. A command sequence such as `["path/to/popu.exe"]` is also accepted. Editable installation does not build or download a native executable. The SDK targets the current Host protocol and does not accept pre-Host response formats.
-
-The product version is maintained only in `src-tauri/Cargo.toml`. Builds and editable installs generate `_version.py` automatically; the installed SDK is self-contained. `just test-python` also prepares the version before running tests. For an uninstalled source checkout on `PYTHONPATH`, run `just prep-python` first. Build metadata requires the complete checkout; users should install the Windows wheel.
-
-By default, the CLI and SDK verify the bundled payload and copy it to `%LOCALAPPDATA%\Popu\runtime\<version>-win_amd64-<manifest-hash>\`. Native processes run from this immutable cache, so an active Host does not lock files inside `site-packages` during upgrade or uninstall. Old caches are retained; automatic cleanup is not implemented.
-
-Before a business request, the native CLI and Host require matching application and RPC versions through a handshake on the same connection. A legacy or incompatible Host produces a diagnostic before submission; Python raises `PopuError`. Inspect it with `python -m popu host status`, then explicitly stop it with `python -m popu host stop` or exit from its tray menu when ready. Popu never automatically stops an existing Host. Management commands remain available without the business handshake. Handshakes have a two-second deadline; this does not limit a dialog's business wait. A submitted business request is not automatically replayed after a transport failure.
-
-Before starting a new Host, the CLI checks WebView2 availability. Missing/unavailable runtimes produce a manual installation link and the loader diagnostic rather than a background startup timeout. This check does not install software or open the browser. See [distribution stages](https://github.com/ZeroKwok/Popu/blob/HEAD/docs/python-distribution.md) for upgrade rules and review scope.
-
-## Requests and results
+## Send a notification
 
 ```python
-from popu import Client, DialogRequest, Notification
+from popu import Client, Notification
 
 client = Client()
-result = client.show(DialogRequest.confirm(title="Continue?"))
-
-receipt = client.notify(Notification.success(title="Backup running", updatable=True))
-snapshot = client.status(receipt.request_id)
-snapshot = client.update(receipt.request_id, receipt.revision, {
-    "severity": "success",
-    "title": "Backup 50%",
-    "blocks": [],
-})
-client.dismiss(receipt.request_id)
-```
-
-`create` and `notify` return `RequestReceipt` (`NotificationReceipt` is an alias) with `status="accepted"`, a Host-generated `request_id`, `state`, `revision`, and `duplicate`. Acceptance can mean `queued`; it does not mean the window has already appeared. `create` returns after acceptance for dialogs as well as notifications; `show` waits and returns an `InteractionResult` containing `status`, `action`, and `values`.
-
-`status`, `update`, `dismiss`, and `wait` return Host snapshot dictionaries. `wait` reads the authoritative terminal snapshot, including revision, content, timestamps, response and exit code; a hidden updatable notification is not terminal. The same request can be managed from another client using its ID. Updating requires the latest revision and replaces the entire content. Every accepted notification update restarts its display timer using the configured duration; optional `duration_ms` overrides that duration. Updates preserve a dialog's original interaction deadline. Revision conflicts, missing IDs, validation failures, sealed updates and subprocess/JSON errors raise `PopuError`.
-
-## Live notifications
-
-Notifications default to `updatable=False` and reject updates. Opt in at creation for progress reports. Update omission preserves this flag; the last report sets `updatable=False`, atomically saving the final contents and rejecting further updates. There is no `final` field. Dialog content updates do not use notification options.
-
-```python
-receipt = client.notify(Notification.success(title="Backing up", updatable=True))
-snapshot = client.update(receipt.request_id, receipt.revision, {
-    "title": "Backup 50%", "blocks": [{"type": "progress", "value": 50}],
-})
-snapshot = client.update(receipt.request_id, snapshot["revision"], {
-    "severity": "success", "title": "Backup completed",
-    "blocks": [{"type": "paragraph", "text": "2,000 files verified."}],
-}, updatable=False, reshow=True, duration_ms=10000)
-```
-
-User close hides progress and silences ordinary updates. An explicit `reshow=True` permits one further presentation by default; `reshow_suppressed` reports a consumed budget without rejecting the content. Automatic display timeout hides the card, and the next report shows it again unless the user previously closed it. `dismiss` is caller cancellation and ends the notification outright.
-
-The default template displays occurrence time, refreshed on every accepted report. Hidden contents remain current in history. After 12 hours without a successful report, the notification becomes `stale` and rejects updates. Host restart restores live records hidden without resetting this deadline. See the [complete lifecycle](https://github.com/ZeroKwok/Popu/blob/HEAD/docs/live-notifications.md) and [installed progress demo](https://github.com/ZeroKwok/Popu/blob/HEAD/python/examples/README.md).
-
-Cancelled, closed, and timed-out dialogs are normal `InteractionResult` outcomes. A custom dialog action may use exit code `12` (or any other code from 0–255); the SDK reads the Host result rather than treating that business exit code as a transport error. If a terminal dialog has no response, `show` raises `PopuError` with its terminal state.
-
-`Client.create`, `Client.show`, `Client.notify`, and the module-level `show`/`notify` helpers accept `template=Path(...)` for a trusted custom template directory. The default client uses its bundled version rather than searching `PATH`; `Client(executable=...)` overrides this explicitly. CLI communication uses UTF-8 JSON lines through a stdout pipe; there is no stdout temporary file or receipt polling. Notifications and management commands read their response line before waiting for the CLI to exit, without waiting for trailing pipe EOF. Stderr uses a temporary file so diagnostic bursts cannot block receipt delivery. After accepting a dialog, the SDK drains remaining stdout in bounded chunks and reaps its CLI in the background even if `wait` is never called; the Host owns the request lifetime and is launched without inherited CLI handles.
-
-CLI response reads and process waits remain interruptible on Windows: the blocking pipe read runs in a worker, while the calling thread uses bounded waits to dispatch Ctrl+C. Interrupting a call kills and reaps only its CLI and propagates `KeyboardInterrupt`; it does not stop the Host or implicitly cancel the request. SDK CLI processes run without a console on Windows so Ctrl+C is handled by the Python caller.
-
-`Client(timeout=2)` optionally limits each synchronous CLI operation to two seconds, including reading its response and waiting for process exit. The default is no deadline. Expiry raises `PopuError` and cleans up the CLI. A dialog's submission deadline ends at acceptance; it does not limit the later background reader or replace `timeout_seconds`. An explicitly configured client deadline also applies to a foreground `wait` call.
-
-## Window options
-
-Notifications are always submitted with `window.always_on_top=True`; `Notification.success` does not expose a non-topmost option. It defaults to the primary display work area and rejects `area=ScreenArea.SCREEN`. Raw request dictionaries are validated by the CLI/Host, which reject notification `always_on_top=False`.
-
-Dialog builders support `always_on_top`, `screen`, `area`, `width`, and `height`. Sizes are logical pixels or percentage strings, without manual DPI multiplication. Both builders support `vertical_align` and `coalesce_key`:
-
-```python
-from popu import Screen, ScreenArea, VerticalAlign
-
-request = DialogRequest.confirm(
-    title="Review", always_on_top=False,
-    screen=Screen.PRIMARY, area=ScreenArea.SCREEN,
-    width="80%", height="80%", vertical_align=VerticalAlign.START,
+client.notify(
+    Notification.success(
+        title="Backup completed",
+        message="128 files backed up successfully.",
+    )
 )
-receipt = client.notify(Notification.success(title="Backup", coalesce_key="job:backup"))
 ```
 
-For other severities, forms, or custom dialog actions, pass a complete protocol request dictionary to `create`, `show`, or `notify`. No separate Python transport or renderer is required.
-
-## Reading requirements
-
-Notifications accept `requires_read=True` (default: `False`):
+## Ask for confirmation
 
 ```python
-client.notify(Notification.success(title="Review backup results", requires_read=True))
+from popu import Client, DialogRequest
+
+result = Client().show(
+    DialogRequest.confirm(
+        title="Deploy release?",
+        message="The release is ready for production.",
+    )
+)
+
+if result.status == "submitted" and result.action == "confirm":
+    print("Deployment confirmed")
 ```
 
-After timeout, all notifications remain unread in history, but only those requiring reading keep the tray reminder active. Displayed or queued notifications do not trigger the tray reminder; it represents only unread history requiring reading. Viewing an individual detail in the foreground history window marks it read; opening the window does not acknowledge the whole list. Reading does not change the request's terminal state. Dialogs do not accept this field.
+`show()` waits for the user's response. Cancelling, closing, or timing out are normal outcomes; check the result before continuing your task.
 
-Both builders accept `blocks=[...]` and an optional `icon` image source. Use `image_source` to capture a local SVG/PNG/JPEG/WebP file, or `svg_source` for SVG text; the submitted data is self-contained and remains available in history.
+## Update task progress
+
+This example simulates progress; replace the sleeps and percentages with your task's own reports.
 
 ```python
-from popu import chart_block, image_block, image_source, svg_source
+import time
+from popu import Client
 
-chart = chart_block({
-    "data": {"values": [{"service": "Sync", "ms": 115}, {"service": "Backup", "ms": 78}]},
-    "mark": "bar",
-    "encoding": {
-        "x": {"field": "service", "type": "nominal"},
-        "y": {"field": "ms", "type": "quantitative"},
+client = Client()
+receipt = client.notify({
+    "version": "1.0",
+    "mode": "notify",
+    "template": "notification",
+    "updatable": True,
+    "content": {
+        "severity": "info",
+        "title": "Example task",
+        "blocks": [{"type": "progress", "value": 0}],
     },
-}, title="Service latency", height=240)
-client.notify(Notification.success(title="Measurements", blocks=[chart], height=400))
-client.show(DialogRequest.confirm(title="Review", blocks=[chart], width=740, height=580))
+})
+revision = receipt.revision
 
-# A caller-rendered graphic, including chart types outside Vega-Lite:
-picture = image_block(image_source("report.svg", alt="Report graphic"), height=240)
-client.notify(Notification.success(title="Report", blocks=[picture], height=400))
+for percent in (25, 50, 75, 100):
+    time.sleep(1)
+    done = percent == 100
+    snapshot = client.update(
+        receipt.request_id,
+        revision,
+        {
+            "severity": "success" if done else "info",
+            "title": "Example completed" if done else "Example task",
+            "blocks": [{"type": "progress", "value": percent}],
+        },
+        updatable=not done,
+        reshow=done,
+    )
+    revision = snapshot["revision"]
 ```
 
-Chart blocks accept generic Vega-Lite 6 specifications with inline data and render interactive SVG without network access. Hover shows encoded field values by default; use `encoding.tooltip` to customize labels and formatting, or `null` to disable. Native Vega-Lite `params` support nearest-point hover, highlighting, legend selection, and scale-bound zoom/pan when declared in the spec. Compilation runs in a local worker; a CSP-compatible live Vega view handles rendering and interaction. Image blocks remain static. Changing the mark/encodings is sufficient for lines, bars and heatmaps. Visual `height` is within 64–1200; an image data URI is limited to 256 KiB, a chart spec to 128 KiB, and the complete content to 768 KiB. SVG scripts and external resources are rejected.
+- Set `updatable=True` when creating a notification you intend to update.
+- Each update replaces the full content and uses the latest revision.
+- Finish with `updatable=False` to save the final content and stop accepting updates.
+- Updates restart the display timer. Closing a card silences ordinary updates; `reshow=True` explicitly requests another presentation, allowed once beyond the initial presentation by default. After an automatic timeout, ordinary updates can show it again.
+
+See the [notification lifecycle](https://github.com/ZeroKwok/Popu/blob/master/docs/live-notifications.md) for complete rules.
+
+## Use the command line
+
+```sh
+popu --help
+popu templates list
+```
+
+Save this request as `notification.json`:
+
+```json
+{
+  "version": "1.0",
+  "mode": "notify",
+  "template": "notification",
+  "content": {
+    "severity": "success",
+    "title": "Task completed",
+    "blocks": [{"type": "paragraph", "text": "Your results are ready."}]
+  }
+}
+```
+
+```sh
+popu request notification.json
+```
+
+The CLI and SDK use the same local Host and notification history. See the [JSON protocol](https://github.com/ZeroKwok/Popu/blob/master/protocol/popu.schema.json) for other request types.
+
+## Troubleshooting
+
+- **`popu` is not found:** use `python -m popu` with the same arguments, or add your Python scripts directory to `PATH`.
+- **WebView2 is missing:** install the runtime from [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/) and try again. Popu does not install it automatically.
+- **An older Host is still running after an upgrade:** inspect it with `python -m popu host status`. When you are ready to end its active interactions, exit it from the tray or run `python -m popu host stop`, then retry. The next request starts the new Host.
+
+To upgrade the package, run `python -m pip install --upgrade popu`.
+
+## Documentation
+
+- [SDK reference](https://github.com/ZeroKwok/Popu/blob/master/docs/python-sdk.md): request results, window options, images, charts, and runtime behavior.
+- [Demo guide](https://github.com/ZeroKwok/Popu/blob/master/python/src/popu/demo/README.md): available examples, options, and source development.
+- [Project overview](https://github.com/ZeroKwok/Popu#readme) and [issue tracker](https://github.com/ZeroKwok/Popu/issues).
+- [Build and distribution](https://github.com/ZeroKwok/Popu/blob/master/docs/python-distribution.md): for contributors building from source.
+
+## License
+
+[Apache License 2.0](https://github.com/ZeroKwok/Popu/blob/master/LICENSE).

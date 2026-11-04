@@ -4,7 +4,83 @@
 
 [English](README.en.md)
 
-Popu 让脚本和 Agent 能够在需要时通知用户、请求确认、收集少量结构化输入，并在任务结束后保留可追溯的通知历史。它运行在本机，不需要网络服务；CLI 和 Python SDK 由常驻 Host 统一管理窗口、队列、状态、历史和托盘提醒。
+Popu 让脚本和 Agent 能够在需要时通知用户、请求确认、收集少量结构化输入，并在任务结束后保留可追溯的通知历史。它运行在本机，不需要网络服务。通过 pip 一次安装即可获得 Python SDK 和 `popu` 命令行工具。
+
+## 快速开始
+
+### 安装并运行演示
+
+**目前仅支持 Windows x64，需要 64 位 Python 3.10+ 和 [Microsoft WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。** 如缺少 WebView2，程序会提示手动安装入口。
+
+```sh
+python -m pip install popu
+python -m popu.demo progress
+```
+
+演示展示任务进度和最终摘要，可以尝试中途关闭进度卡片，观察后台更新和最后一次摘要展示。它使用模拟备份数据，不会操作你的文件；按 Ctrl+C 可停止演示。可加 `--wait` 等待最终通知结束展示，控制台提示使用英文。
+
+安装包已包含匹配的原生程序，无需检出仓库或安装编译工具，可在任意目录使用。后台 Host 会在首次请求时自动启动。
+
+### Python SDK
+
+发送通知：
+
+```python
+from popu import Client, Notification
+
+Client().notify(
+    Notification.success(
+        title="Backup completed",
+        message="All files were backed up successfully.",
+    )
+)
+```
+
+请求用户确认：
+
+```python
+from popu import Client, DialogRequest
+
+result = Client().show(
+    DialogRequest.confirm(
+        title="Deploy release?",
+        message="Production deployment is ready.",
+    )
+)
+
+if result.status == "submitted" and result.action == "confirm":
+    print("Deployment confirmed")
+```
+
+进度更新示例见 [Python 入门](python/README.md#update-task-progress)，完整接口见 [SDK 参考](docs/python-sdk.md)。
+
+### CLI
+
+```sh
+popu --help
+popu templates list
+```
+
+将以下内容保存为 `notification.json`，即可从任意目录提交通知：
+
+```json
+{
+  "version": "1.0",
+  "mode": "notify",
+  "template": "notification",
+  "content": {
+    "severity": "success",
+    "title": "Task completed",
+    "blocks": [{"type": "paragraph", "text": "Your results are ready."}]
+  }
+}
+```
+
+```sh
+popu request notification.json
+```
+
+如果 `popu` 不在 `PATH`，使用 `python -m popu` 代替。更多请求见 [JSON Schema](protocol/popu.schema.json) 和[协议架构说明](ARCHITECTURE.md)。
 
 ## 为什么使用 Popu
 
@@ -40,73 +116,8 @@ Popu 让脚本和 Agent 能够在需要时通知用户、请求确认、收集�
 
 - JSON CLI；
 - Python SDK；
-- 本地 Named Pipe（Windows）或 Unix Domain Socket（Unix）；
+- 本地 IPC，由后台 Host 统一管理窗口与历史；
 - 不提供网络监听端口，不需要外部服务。
-
-## 快速开始
-
-以下命令在项目根目录运行。请先按照[构建与测试](#构建与测试)生成 `popu` 可执行文件，并将其所在目录加入 `PATH`。
-
-### CLI
-
-提交一个通知：
-
-```sh
-popu request protocol/examples/notification-success.json
-```
-
-提交一个确认对话框：
-
-```sh
-popu request protocol/examples/dialog-confirm.json
-```
-
-请求文件是 JSON，完整协议见 [JSON Schema](protocol/popu.schema.json) 和 [协议架构说明](ARCHITECTURE.md)。
-
-### Python SDK
-
-Windows wheel 包含原生 CLI 和 SDK，需要 Windows x64、64 位 Python 3.10+ 和 WebView2 Runtime。目前尚未发布到 PyPI，请先按[打包说明](docs/python-distribution.md)构建本地 wheel，再安装：
-
-```sh
-python -m pip install ./dist/popu-0.1.1-py3-none-win_amd64.whl
-python -m popu --version
-```
-
-发送通知：
-
-```python
-from popu import Client, Notification
-
-client = Client()
-receipt = client.notify(
-    Notification.success(
-        title="Backup completed",
-        message="All files were backed up successfully.",
-    )
-)
-
-print(receipt.request_id)
-```
-
-请求用户确认：
-
-```python
-from popu import Client, DialogRequest
-
-result = Client().show(
-    DialogRequest.confirm(
-        title="Deploy release?",
-        message="Production deployment is ready.",
-    )
-)
-
-if result.status == "submitted":
-    print("confirmed")
-```
-
-Python SDK 详细说明见 [python/README.md](python/README.md)。
-
-安装 wheel 后，可在任意目录执行 `python -m popu.demo progress --interval 1 --steps 5 --wait` 快速测试。它以模拟备份场景展示进度和最终摘要，所有阶段都明确标注“模拟”，不会读取、复制或修改用户的备份文件。
 
 ## 工作方式
 
@@ -138,7 +149,7 @@ Host 在首次请求时自动启动。调用方提交请求后获得 Host 生成
 
 通知终态会保存到历史；dialog 及其表单值不会持久化。只有 `requires_read: true` 且仍未阅读的历史通知会持续触发托盘提醒。
 
-长时间任务创建通知时声明 `updatable: true`，使用同一 ID 持续更新；最后一次更新设为 `updatable: false`。用户关闭后普通更新静默保存，`reshow: true` 默认允许最后再次展示一次；自动超时后的下次更新会正常再次展示。每次成功更新都重新计时，并可通过 `duration_ms` 覆盖展示时长，默认模板显示通知发生时间。连续 12 小时未上报会自动过期归档。完整规则见[可更新通知](docs/live-notifications.md)，可运行的备份演示见[Python 示例](python/examples/README.md)。
+长时间任务创建通知时声明 `updatable: true`，使用同一 ID 持续更新；最后一次更新设为 `updatable: false`。用户关闭后普通更新静默保存，`reshow: true` 默认允许最后再次展示一次；自动超时后的下次更新会正常再次展示。每次成功更新都重新计时，并可通过 `duration_ms` 覆盖展示时长，默认模板显示通知发生时间。连续 12 小时未上报会自动过期归档。完整规则见[可更新通知](docs/live-notifications.md)，可运行的备份演示见[Python 示例](python/src/popu/demo/README.md)。
 
 ## 通知与窗口规则
 
@@ -156,7 +167,8 @@ Host 在首次请求时自动启动。调用方提交请求后获得 Host 生成
 - [完整架构说明](ARCHITECTURE.md)
 - [通知窗口协调与排布](docs/notification-layout.md)
 - [可更新通知生命周期](docs/live-notifications.md)
-- [Python SDK](python/README.md)
+- [Python 安装与入门](python/README.md)
+- [Python SDK 参考](docs/python-sdk.md)
 - [Python 分发与阶段审核](docs/python-distribution.md)
 - [JSON Schema](protocol/popu.schema.json)
 - [贡献指南](CONTRIBUTING.md)

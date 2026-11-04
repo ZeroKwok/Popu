@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "popu"
 dynamic = ["version"]
-description = "Popu native notification tool and Python SDK for Windows"
+description = "Desktop notifications and lightweight dialogs for scripts and automation"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
@@ -30,6 +30,7 @@ include-package-data = false
 
 [tool.setuptools.package-data]
 popu = ["_native/*"]
+"popu.demo" = ["README.md"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

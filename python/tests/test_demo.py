@@ -30,6 +30,66 @@ def test_demo_startup_errors_are_reported_without_a_traceback(monkeypatch: pytes
     monkeypatch.setattr(progress, "Client", unavailable)
     assert main(["progress"]) == 1
     output = capsys.readouterr()
-    assert "模拟进度演示" in output.out
-    assert "不会读取、复制或修改你的备份文件" in output.out
+    assert "Simulated progress demo" in output.out
+    assert "no backup files will be read, copied, or modified" in output.out
     assert "bundled runtime unavailable" in output.err
+    assert (output.out + output.err).isascii()
+
+
+@pytest.mark.parametrize("phase", ["complete", "error", "interrupt", "cleanup-error", "cleanup-interrupt"])
+def test_demo_console_is_english_during_updates_wait_and_cleanup(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, phase: str) -> None:
+    from popu import RequestReceipt
+
+    class DemoClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def notify(self, notification):
+            return RequestReceipt("demo", "shown", 1)
+
+        def update(self, request_id, revision, content, **kwargs):
+            if phase == "error":
+                raise PopuError("update failed")
+            if phase != "complete":
+                raise KeyboardInterrupt
+            return {"revision": revision + 1, "state": "shown"}
+
+        def status(self, request_id):
+            if phase == "cleanup-error":
+                raise PopuError("cleanup failed")
+            if phase == "cleanup-interrupt":
+                raise KeyboardInterrupt
+            return {"revision": 1, "updatable": True}
+
+        def wait(self, request_id):
+            return {"state": "completed"}
+
+    monkeypatch.setattr(progress, "Client", DemoClient)
+    monkeypatch.setattr(progress.time, "sleep", lambda _: None)
+    result = main(["progress", "--steps", "2", "--wait"])
+    assert result == (0 if phase == "complete" else 1 if phase == "error" else 130)
+    output = capsys.readouterr()
+    assert (output.out + output.err).isascii()
+    assert "Notification ID: demo" in output.out
+    if phase == "complete":
+        assert "100% | state=shown" in output.out
+        assert "Archived: completed" in output.out
+    elif phase == "error":
+        assert "Could not run the simulated progress demo: update failed" in output.err
+    else:
+        assert "Simulated progress demo stopped." in output.out
+        assert "Notification cleanup skipped:" in output.out
+
+
+def test_demo_dispatches_registered_examples_with_their_own_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+    from popu.demo.__main__ import DEMOS
+
+    received = []
+    def run(arguments):
+        received.extend(arguments)
+        return 7
+
+    monkeypatch.setitem(DEMOS, "another", SimpleNamespace(__doc__="Another SDK example.", main=run))
+    assert main(["another", "--own-option", "value"]) == 7
+    assert received == ["--own-option", "value"]
