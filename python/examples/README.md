@@ -14,7 +14,7 @@ just build
 just demo-python --wait
 ```
 
-`just demo-python` 直接使用本地 debug 程序运行示例，可透传 `--interval`、`--steps` 等参数。首次使用时，先按上面的命令安装 editable SDK 并构建本地程序。
+`just demo-python` 直接使用 Cargo 当前构建目录中的 debug 程序运行示例，支持 `CARGO_TARGET_DIR`，可透传 `--interval`、`--steps` 等参数。首次使用时，先按上面的命令安装 editable SDK 并构建本地程序。可用 `--executable` 显式覆盖程序路径，`--help` 无需先构建原生程序。启动工具在同一 Python 进程执行示例，保留 Ctrl+C 的停止摘要与有界收尾行为。
 
 默认每 3 秒提交一次进度，共 36 秒。可以拖动卡片、点击 × 收起；普通进度不会突破主动关闭，最后一次更新会提交摘要、关闭更新入口，并申请一次再次展示。
 
@@ -36,4 +36,4 @@ just demo-python --interval 2 --steps 4 --display-seconds 3 --final-seconds 5 --
 
 演示结束后，从托盘打开历史查看最终摘要。若常驻 Host 来自旧版本，请先退出旧 Host，再运行演示。
 
-若使用本次验证构建，可将 `--executable` 替换为 `src-tauri/target/live-notifications/debug/popu.exe`。不安装 SDK 时，先执行 `just prepare-python`，再设置 `$env:PYTHONPATH = "$PWD/python/src"`，从当前源码加载 SDK。
+若使用本次验证构建，可将 `--executable` 替换为 `src-tauri/target/live-notifications/debug/popu.exe`。不安装 SDK 时，先执行 `just prep-python`，再设置 `$env:PYTHONPATH = "$PWD/python/src"`，从当前源码加载 SDK。

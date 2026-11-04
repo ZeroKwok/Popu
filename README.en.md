@@ -162,11 +162,10 @@ Long-running notifications opt in with `updatable: true` and reuse one ID. Every
 
 The project is currently validated primarily on Windows 10/11 with Rust stable, Node.js 20+, just, and the WebView2 Runtime. Root just tasks coordinate the npm project in `ui/`, Cargo project in `src-tauri/`, and SDK/wheel project in `python/`. UI sources live in `ui/src/`; Cargo embeds only `ui/dist/` build output. The protocol and IPC design include a Unix Domain Socket path; window capabilities depend on the target platform.
 
-For a fresh checkout, install ImageMagick and run `just icons` to generate the ignored native icons from SVG. Install frontend dependencies and build:
+For a fresh checkout, install ImageMagick. Install frontend dependencies, prepare generated inputs, and build:
 
 ```powershell
-just setup-ui
-just icons
+just setup
 just build-release
 ```
 
@@ -188,6 +187,8 @@ cargo build --manifest-path src-tauri/Cargo.toml
 ```
 
 Change only `package.version` in `src-tauri/Cargo.toml` for a product release. Tauri inherits it; Python builds and editable installs generate the SDK version automatically. `just version` prints it; `just wheel` builds the bundled local wheel. Install pytest and build in your development virtual environment for Python tests and wheel builds.
+
+Running `just` displays grouped help. Use `just check` for automated checks; use `just demo-fixture notification-success.json`, `just demo-fixtures notification`, or `just demo-python --wait` for interactive demos. Demos and native wheel staging resolve executables through Cargo metadata, including `CARGO_TARGET_DIR`. Set `PYTHON` to select an interpreter. Builds prepare missing/outdated icons automatically; `just icons` forces regeneration. The current `wheel` and `test-native` tasks are Windows-only.
 
 Issues and pull requests are welcome; see [Contributing](CONTRIBUTING.md). Native notification lifecycle tests are documented in [notification window coordination](docs/notification-layout.md) and require an unlocked Windows desktop.
 

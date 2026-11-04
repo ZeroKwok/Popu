@@ -110,6 +110,18 @@ def replace_status_dot(source: str, cx: int, cy: int, rx: int, ry: int, color: s
     return result
 
 
+def icons_current(tray_only: bool = False) -> bool:
+    inputs = (SOURCE_SVG, Path(__file__))
+    if not all(path.is_file() for path in inputs):
+        return False
+    changed = max(path.stat().st_mtime_ns for path in inputs)
+    outputs = [TRAY_DIR / f"{name}.png" for name, *_ in TRAY_FRAMES]
+    if not tray_only:
+        outputs.extend(ICON_DIR / name for _, name in COMMITTED_PNGS)
+        outputs.append(ICON_DIR / "icon.ico")
+    return all(path.is_file() and path.stat().st_mtime_ns >= changed for path in outputs)
+
+
 def generate(executable: str, tray_only: bool) -> None:
     executable = shutil.which(executable)
     if not SOURCE_SVG.is_file():
@@ -165,7 +177,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--magick", default="magick", help="preferred ImageMagick executable (default: magick)")
     parser.add_argument("--tray-only", action="store_true", help="regenerate only tray animation frames")
+    parser.add_argument("--if-needed", action="store_true", help="Skip rendering when all outputs are newer than the SVG and generator")
     arguments = parser.parse_args()
+    if arguments.if_needed and icons_current(arguments.tray_only):
+        print("Native icons are up to date")
+        return
     generate(arguments.magick, arguments.tray_only)
 
 

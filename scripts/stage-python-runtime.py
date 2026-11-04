@@ -15,6 +15,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from project_paths import native_executable, require_windows
+
 ROOT = Path(__file__).resolve().parents[1]
 
 sys.path.insert(0, str(ROOT / "python"))
@@ -34,11 +36,12 @@ def require_x64_pe(executable: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--executable", type=Path, default=ROOT / "src-tauri/target/release/popu.exe")
+    parser.add_argument("--executable", type=Path, help="Native release binary; defaults to Cargo's target directory")
     parser.add_argument("--dll", type=Path, action="append", default=[], help="Additional native runtime DLL; repeat if needed")
     args = parser.parse_args()
+    require_windows("Bundled native wheel preparation")
     version = generate_version()
-    executable = args.executable.resolve(strict=True)
+    executable = (args.executable or native_executable("release")).resolve(strict=True)
     require_x64_pe(executable)
     result = subprocess.run([str(executable), "--version"], capture_output=True, text=True, encoding="utf-8", check=True, timeout=10)
     if result.stdout.strip() != f"popu {version}":

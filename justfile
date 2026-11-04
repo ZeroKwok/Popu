@@ -1,128 +1,136 @@
+python := env("PYTHON", "python")
 
-# Install UI dependencies within the UI project.
-[working-directory: "ui"]
+# Show available tasks without installing dependencies or building.
+[group("Project")]
+default:
+    @just --list
+
+# Install UI dependencies and prepare generated source-build inputs.
+[group("Project")]
+setup: setup-ui prep-python prep-native
+
+# Print the single product version.
+[group("Project")]
+version:
+    @"{{ python }}" python/build_version.py --print
+
+# Test the cross-project development and build helpers.
+[group("Project")]
+test-tools:
+    "{{ python }}" -m pytest scripts/tests -q
+
+# Run static UI checks and automated UI, tool, SDK, and Rust tests.
+[group("Project")]
+check: check-ui test-ui test-tools test-python test-rust
+
+# Install dependencies of the UI npm project.
+[group("UI")]
+[working-directory("ui")]
 setup-ui:
     npm ci
 
 # Build the static UI distribution consumed by Cargo.
-[working-directory: "ui"]
+[group("UI")]
+[working-directory("ui")]
 build-ui:
     npm run build
 
-[working-directory: "ui"]
+# Check UI and chart-entry JavaScript syntax.
+[group("UI")]
+[working-directory("ui")]
 check-ui:
     npm run check
 
-[working-directory: "ui"]
+# Run UI unit tests without opening native windows.
+[group("UI")]
+[working-directory("ui")]
 test-ui:
     npm test
 
-[working-directory: "ui"]
+# Build the UI and run browser visual/interaction regression tests.
+[group("UI")]
+[working-directory("ui")]
 test-visuals:
     npm run test:visuals
 
-# Generate native application and tray icons from the SVG source.
-icons:
-    python scripts/generate-icons.py
+# Generate missing or outdated native icons before compiling.
+[group("Rust")]
+prep-native:
+    "{{ python }}" scripts/generate-icons.py --if-needed
 
-# Build the debug executable used by local examples.
-build: build-ui
+# Force regeneration of application and tray icons from SVG.
+[group("Rust")]
+icons:
+    "{{ python }}" scripts/generate-icons.py
+
+# Build the debug CLI/Host after preparing UI assets and native icons.
+[group("Rust")]
+build: build-ui prep-native
     cargo build --manifest-path src-tauri/Cargo.toml
 
-# Build the release executable.
-build-release: build-ui
+# Build the release CLI/Host after preparing UI assets and native icons.
+[group("Rust")]
+build-release: build-ui prep-native
     cargo build --release --manifest-path src-tauri/Cargo.toml
 
-# Generate the SDK version from Cargo (also automatic during pip installation).
-prepare-python:
-    python python/build_version.py
-
-# Print the single product version.
-version:
-    @python python/build_version.py --print
-
-test-python: prepare-python
-    python -m pytest python/tests -q
-
-# Run progress.py; requires an installed SDK and a local debug build (just build).
-[positional-arguments]
-demo-python *args: prepare-python
-    python python/examples/progress.py --executable "src-tauri/target/debug/popu{{ if os() == "windows" { ".exe" } else { "" } }}" "$@"
-
-test-rust: build-ui
+# Run Rust unit/integration tests; interactive window tests remain opt-in.
+[group("Rust")]
+test-rust: build-ui prep-native
     cargo test --locked --manifest-path src-tauri/Cargo.toml
 
-# Checks without opening native windows; UI assets are built before Rust tests.
-check: check-ui test-ui test-python test-rust
+# Check Rust formatting without changing source files.
+[group("Rust")]
+fmt-check:
+    cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
-# Native visual smoke test requires the user's Host to be stopped first.
+# Windows/WebView2 smoke test; exit the existing Host before running.
+[group("Rust")]
+[windows]
 test-native: build
-    node scripts/native-visual-smoke.mjs
+    "{{ python }}" scripts/dev.py native-smoke
 
-# Build a local Windows wheel; publishing remains a separate release step.
-wheel: build-release
-    python scripts/stage-python-runtime.py
-    python -m build --wheel --outdir dist python
-
-# Clean the build artifacts for the debug and release executables.
+# Clean Cargo build artifacts only (respects CARGO_TARGET_DIR).
+[group("Rust")]
 clean:
     cargo clean --manifest-path src-tauri/Cargo.toml
 
-# Run a fixture with its optional trusted external-template sidecar.
-cli executable request:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    executable="{{executable}}"
-    request="{{request}}"
-    template_sidecar="${request%.json}.template"
-    args=(request "$request")
-    
-    if [[ -f "$template_sidecar" ]]; then
-        IFS= read -r template_dir < "$template_sidecar"
-        template_dir="${template_dir%$'\r'}"
-        if [[ -z "$template_dir" ]]; then
-            echo "Empty template sidecar: $template_sidecar" >&2
-            exit 12
-        fi
-        args+=(--template "$template_dir")
-    fi
-    "$executable" "${args[@]}"
+# Generate the SDK version from Cargo (also automatic during pip installation).
+[group("Python")]
+prep-python:
+    "{{ python }}" python/build_version.py
 
-# Build and run a debug executable with a protocol fixture.
-test file="dialog-confirm.json": build
-    just --quiet cli "src-tauri/target/debug/popu" "protocol/examples/{{file}}"
+# Run SDK tests after preparing its generated version module.
+[group("Python")]
+test-python: prep-python
+    "{{ python }}" -m pytest python/tests -q
 
-# Build once, then run protocol fixtures whose filenames begin with `prefix`.
-# For example: `just build-test notification` or `just build-test dialog`.
-build-test prefix="": build
-    #!/usr/bin/env bash
-    set -euo pipefail
-    shopt -s nullglob
-    prefix="{{prefix}}"
-    examples=(protocol/examples/"$prefix"*.json)
-    executable=src-tauri/target/debug/popu
-    
-    if (( ${#examples[@]} == 0 )); then
-        echo "No protocol examples found for prefix: $prefix" >&2
-        exit 1
-    fi
-    for example in "${examples[@]}"; do
-        printf '\n==> %s\n' "$example"
-        if just --quiet cli "$executable" "$example"; then
-            continue
-        else
-            status=$?
-        fi
-        case "$status" in
-            10|11) ;;
-            *) exit "$status" ;;
-        esac
-    done
+# Build a local Windows wheel; publishing remains a separate release step.
+[group("Python")]
+[windows]
+wheel: build-release
+    "{{ python }}" scripts/stage-python-runtime.py
+    "{{ python }}" -m build --wheel --outdir dist python
+
+# Run progress.py; requires an installed SDK and a local debug build (just build).
+[group("Demo")]
+[positional-arguments]
+demo-python *args: prep-python
+    "{{ python }}" scripts/dev.py python -- "$@"
+
+# Build and run one JSON fixture and its optional trusted template sidecar.
+[group("Demo")]
+[positional-arguments]
+demo-fixture file="dialog-confirm.json": build
+    "{{ python }}" scripts/dev.py fixture -- "$1"
+
+# Build once, then run fixtures with a filename prefix (empty means all).
+[group("Demo")]
+[positional-arguments]
+demo-fixtures prefix="": build
+    "{{ python }}" scripts/dev.py fixtures -- "$1"
 
 # Build the release executable, then run a protocol fixture.
-build-test-release file="dialog-confirm.json": build-release
-    just --quiet cli "src-tauri/target/release/popu" "protocol/examples/{{file}}"
-
-# Run every protocol fixture through the shared prefix-based entry point.
-build-test-all:
-    just build-test
+[group("Demo")]
+[positional-arguments]
+demo-fixture-release file="dialog-confirm.json": build-release
+    "{{ python }}" scripts/dev.py fixture --profile release -- "$1"

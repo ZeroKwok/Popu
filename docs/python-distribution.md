@@ -25,8 +25,7 @@
 构建机器需要 Windows x64、Python 3.11+、Rust、Node.js、just、ImageMagick 和前端依赖。安装后的 SDK 不依赖构建工具。以下命令在仓库根目录执行（建议使用开发虚拟环境）：
 
 ```powershell
-just setup-ui
-just icons
+just setup
 python -m pip install build
 just wheel
 
@@ -40,6 +39,8 @@ python -m venv test-results/popu-review
 若需额外依赖库，可在 staging 时重复传入 `--dll <path>`；必须为 x64 PE DLL。staging 输出位于被 Git 忽略的 `python/src/popu/_native/`，wheel 输出位于 `dist/`。未准备或损坏的原生载荷会阻止 wheel 构建。源码 editable 安装允许不含载荷，但这时必须显式指定本地可执行文件。
 
 `just wheel` 依次构建 `ui/dist/`、原生 release 程序、版本化载荷和 wheel。UI 的依赖、脚本和测试不会进入 Tauri 嵌入资源。若只想更新 `_native`，执行 `just build-release` 后运行 `python scripts/stage-python-runtime.py`。只修改 Cargo 中的版本后，需重新编译原生程序；载荷准备不会自动拿旧 exe 冒充新版本。SDK 安装后使用随包生成的版本文件，不读取仓库中的 Cargo 清单。
+
+原生构建会先按需准备图标。载荷准备默认从 Cargo metadata 读取 release 程序位置，尊重 `CARGO_TARGET_DIR`，也可用 `--executable` 显式覆盖。当前 wheel 配方及载荷准备仅支持 Windows；Python 解释器可通过 `PYTHON` 环境变量指定。
 
 ## 运行时缓存
 

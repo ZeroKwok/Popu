@@ -5,7 +5,9 @@ import { mkdtemp, mkdir, readFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-const executable = resolve("src-tauri/target/debug/popu.exe");
+assert.equal(process.platform, "win32", "Native visual smoke testing currently supports Windows only");
+assert(process.argv[2], "Pass a native executable path, or use just test-native");
+const executable = resolve(process.argv[2]);
 await mkdir("test-results", { recursive: true });
 const directory = await mkdtemp(resolve("test-results/native-"));
 const environment = { ...process.env, LOCALAPPDATA: directory };
