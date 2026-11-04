@@ -68,7 +68,7 @@ popu request protocol/examples/dialog-confirm.json
 Windows wheel 包含原生 CLI 和 SDK，需要 Windows x64、64 位 Python 3.10+ 和 WebView2 Runtime。目前尚未发布到 PyPI，请先按[打包说明](docs/python-distribution.md)构建本地 wheel，再安装：
 
 ```powershell
-python -m pip install ./dist/popu-0.1.0-py3-none-win_amd64.whl
+python -m pip install ./dist/popu-0.1.1-py3-none-win_amd64.whl
 python -m popu --version
 ```
 
@@ -105,6 +105,8 @@ if result.status == "submitted":
 ```
 
 Python SDK 详细说明见 [python/README.md](python/README.md)。
+
+安装 wheel 后，可在任意目录执行 `python -m popu.demo progress --interval 1 --steps 5 --wait` 快速测试。它以模拟备份场景展示进度和最终摘要，所有阶段都明确标注“模拟”，不会读取、复制或修改用户的备份文件。
 
 ## 工作方式
 

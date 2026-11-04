@@ -213,23 +213,28 @@ def test_live_notification_options_and_omitted_update_values(tmp_path: Path) -> 
     assert final["duration_ms"] == 10000
 
 
-def test_backup_demo_runs_through_sdk_and_seals_its_last_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import importlib.util
+def test_progress_demo_runs_through_sdk_and_seals_its_last_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from popu.demo import progress as demo
+    from popu.demo.__main__ import main
 
-    spec = importlib.util.spec_from_file_location("progress", Path(__file__).parents[1] / "examples" / "progress.py")
-    demo = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(demo)
     client = _client(tmp_path)
-    monkeypatch.setattr(demo, "Client", lambda executable: client)
+    executables = []
+    def make_client(executable):
+        executables.append(executable)
+        return client
+    monkeypatch.setattr(demo, "Client", make_client)
     monkeypatch.setattr(demo.time, "sleep", lambda seconds: None)
-    monkeypatch.setattr(sys, "argv", ["progress.py", "--steps", "2", "--interval", "0.01"])
-    assert demo.main() == 0
+    assert main(["progress", "--steps", "2", "--interval", "0.01"]) == 0
+    assert executables == [None]  # Installed demos use the bundled runtime.
     submitted = json.loads((tmp_path / "input.json").read_text(encoding="utf-8"))
     final = json.loads((tmp_path / "update.json").read_text(encoding="utf-8"))
     assert submitted["request"]["updatable"] is True
     assert final["updatable"] is False
     assert final["reshow"] is True
     assert final["content"]["blocks"][-1]["value"] == 100
+    assert "模拟" in submitted["request"]["content"]["title"]
+    assert "模拟" in final["content"]["title"]
+    assert "未执行真实备份" in final["content"]["blocks"][0]["text"]
 
 
 def test_pending_dialog_is_accepted_without_waiting_and_reaped(tmp_path: Path) -> None:

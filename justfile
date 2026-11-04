@@ -111,7 +111,7 @@ wheel: build-release
     "{{ python }}" scripts/stage-python-runtime.py
     "{{ python }}" -m build --wheel --outdir dist python
 
-# Run progress.py; requires an installed SDK and a local debug build (just build).
+# Run the packaged progress demo with an installed SDK and a local debug build.
 [group("Demo")]
 [positional-arguments]
 demo-python *args: prep-python

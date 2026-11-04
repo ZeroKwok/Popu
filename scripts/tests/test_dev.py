@@ -6,7 +6,7 @@ from pathlib import Path
 import runpy
 import subprocess
 import sys
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -99,27 +99,30 @@ def test_python_demo_runs_in_this_process_and_preserves_arguments(tmp_path: Path
     executable = tmp_path / "popu.exe"
     executable.touch()
     monkeypatch.setattr(dev, "native_executable", lambda: executable)
-    monkeypatch.setattr(sys, "argv", ["controller"])
     observed = []
-    def run(path, *, run_name):
-        observed.append((path, run_name, list(sys.argv)))
-        raise SystemExit(130)
-    monkeypatch.setattr(dev.runpy, "run_path", run)
+    module = ModuleType("popu.demo.__main__")
+    def run(arguments):
+        observed.append(arguments)
+        return 130
+    module.main = run
+    monkeypatch.setitem(sys.modules, "popu.demo.__main__", module)
     with pytest.raises(SystemExit) as result:
         dev.python_demo(["--", "--interval", "2", "--steps", "4"])
     assert result.value.code == 130
-    assert observed[0][1] == "__main__"
-    assert observed[0][2][1:] == ["--executable", str(executable), "--interval", "2", "--steps", "4"]
+    assert observed == [["progress", "--executable", str(executable), "--interval", "2", "--steps", "4"]]
 
 
 @pytest.mark.parametrize("arguments", [["--help"], ["--executable", "some path/popU", "--wait"]])
 def test_python_help_and_override_do_not_require_a_default_native_build(monkeypatch: pytest.MonkeyPatch, arguments: list[str]) -> None:
-    monkeypatch.setattr(sys, "argv", ["controller"])
     monkeypatch.setattr(dev, "native_executable", lambda: pytest.fail("must not query Cargo"))
     seen = []
-    monkeypatch.setattr(dev.runpy, "run_path", lambda *args, **kwargs: seen.append(list(sys.argv)))
-    dev.python_demo(arguments)
-    assert seen[0][1:] == arguments
+    module = ModuleType("popu.demo.__main__")
+    module.main = lambda arguments: seen.append(arguments) or 0
+    monkeypatch.setitem(sys.modules, "popu.demo.__main__", module)
+    with pytest.raises(SystemExit) as result:
+        dev.python_demo(arguments)
+    assert result.value.code == 0
+    assert seen == [["progress", *arguments]]
 
 
 def test_windows_only_smoke_fails_before_querying_cargo(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:

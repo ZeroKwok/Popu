@@ -30,10 +30,10 @@ python -m pip install build
 just wheel
 
 python -m venv test-results/popu-review
-./test-results/popu-review/Scripts/python.exe -m pip install --no-index --no-deps ./dist/popu-0.1.0-py3-none-win_amd64.whl
+./test-results/popu-review/Scripts/python.exe -m pip install --no-index --no-deps ./dist/popu-0.1.1-py3-none-win_amd64.whl
 ./test-results/popu-review/Scripts/popu.exe --version
 ./test-results/popu-review/Scripts/python.exe -m popu templates list
-./test-results/popu-review/Scripts/python.exe python/examples/progress.py
+./test-results/popu-review/Scripts/python.exe -m popu.demo progress --wait
 ```
 
 若需额外依赖库，可在 staging 时重复传入 `--dll <path>`；必须为 x64 PE DLL。staging 输出位于被 Git 忽略的 `python/src/popu/_native/`，wheel 输出位于 `dist/`。未准备或损坏的原生载荷会阻止 wheel 构建。源码 editable 安装允许不含载荷，但这时必须显式指定本地可执行文件。
@@ -41,6 +41,8 @@ python -m venv test-results/popu-review
 `just wheel` 依次构建 `ui/dist/`、原生 release 程序、版本化载荷和 wheel。UI 的依赖、脚本和测试不会进入 Tauri 嵌入资源。若只想更新 `_native`，执行 `just build-release` 后运行 `python scripts/stage-python-runtime.py`。只修改 Cargo 中的版本后，需重新编译原生程序；载荷准备不会自动拿旧 exe 冒充新版本。SDK 安装后使用随包生成的版本文件，不读取仓库中的 Cargo 清单。
 
 原生构建会先按需准备图标。载荷准备默认从 Cargo metadata 读取 release 程序位置，尊重 `CARGO_TARGET_DIR`，也可用 `--executable` 显式覆盖。当前 wheel 配方及载荷准备仅支持 Windows；Python 解释器可通过 `PYTHON` 环境变量指定。
+
+wheel 包含 `popu.demo.progress` 的唯一实现。安装后可在任意目录执行 `python -m popu.demo progress --wait`；快速测试使用 `--interval 1 --steps 5`。这是模拟进度演示，模拟备份只是表现情境，不操作用户备份文件。仓库开发入口 `just demo-python` 调用同一实现，并使用当前 Cargo debug 程序；没有仓库外层的重复示例文件。
 
 ## 运行时缓存
 

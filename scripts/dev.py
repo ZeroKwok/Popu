@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-import runpy
 import subprocess
 import sys
 from typing import Sequence
@@ -46,7 +45,6 @@ def run_fixtures(command: Sequence[str], prefix: str) -> int:
 
 
 def python_demo(arguments: list[str]) -> None:
-    demo = ROOT / "python/examples/progress.py"
     if arguments[:1] == ["--"]:
         arguments = arguments[1:]
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
@@ -54,9 +52,10 @@ def python_demo(arguments: list[str]) -> None:
     explicit, _ = parser.parse_known_args(arguments)
     if not explicit.executable and not any(value in ("-h", "--help") for value in arguments):
         arguments = ["--executable", str(require_executable(native_executable())), *arguments]
-    sys.argv = [str(demo), *arguments]
-    # Keep the existing demo's Ctrl+C cleanup in this process.
-    runpy.run_path(str(demo), run_name="__main__")
+    # Use the installed package's sole implementation in this process, so its
+    # Ctrl+C cleanup remains responsible for the simulated task's final update.
+    from popu.demo.__main__ import main as demo_main
+    raise SystemExit(demo_main(["progress", *arguments]))
 
 
 def main(argv: Sequence[str] | None = None) -> int:

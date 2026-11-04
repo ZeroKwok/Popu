@@ -41,7 +41,7 @@ elif command == "request":
     snapshot = {"revision": 1, "state": "shown", "updatable": request["updatable"], "content": request["content"]}
     store.write_text(json.dumps(snapshot), encoding="utf-8")
     output({"status": "accepted", "request_id": "demo", "state": "shown", "revision": 1, "duplicate": False})
-    if phase in ("sleep", "cleanup", "runner"):
+    if phase in ("sleep", "cleanup", "runner", "module"):
         (root / "waiting").write_text("0")
 elif command == "update":
     update = json.loads(Path(sys.argv[5]).read_text(encoding="utf-8"))
@@ -78,13 +78,13 @@ def test_invalid_deadlines_are_rejected(timeout: float) -> None:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows console Ctrl+C regression")
-@pytest.mark.parametrize("phase", ["read", "exit", "notify", "sleep", "update", "wait", "cleanup", "entry", "runner"])
-def test_real_ctrl_c_interrupts_sdk_and_backup_demo(tmp_path: Path, phase: str) -> None:
+@pytest.mark.parametrize("phase", ["read", "exit", "notify", "sleep", "update", "wait", "cleanup", "entry", "runner", "module"])
+def test_real_ctrl_c_interrupts_sdk_and_progress_demo(tmp_path: Path, phase: str) -> None:
     command = _cli(tmp_path, phase)
-    demo = Path(__file__).parents[1] / "examples" / "progress.py"
+    repository = Path(__file__).resolve().parents[2]
     controller = tmp_path / "controller.py"
     controller.write_text('''
-import importlib.util, json, sys
+import json, runpy, sys
 from pathlib import Path
 from popu import Client
 # This private console must not inherit a launching shell's SIGINT-ignore state.
@@ -92,12 +92,15 @@ if sys.platform == "win32":
     import ctypes, signal
     ctypes.windll.kernel32.SetConsoleCtrlHandler(None, False)
     signal.signal(signal.SIGINT, signal.default_int_handler)
-command, phase, root, demo = json.loads(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), sys.argv[4]
-if phase == "runner":
-    import popu
-    sys.path.insert(0, str(Path(demo).resolve().parents[2] / "scripts"))
+command, phase, root, repository = json.loads(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
+from popu.demo import progress
+progress.Client = lambda executable=None, **kwargs: Client(command, **kwargs)
+if phase == "module":
+    sys.argv = ["popu.demo", "progress", "--interval", "60", "--steps", "2", "--wait"]
+    runpy.run_module("popu.demo", run_name="__main__")
+elif phase == "runner":
+    sys.path.insert(0, str(repository / "scripts"))
     from dev import python_demo
-    popu.Client = lambda executable=None, **kwargs: Client(command, **kwargs)
     python_demo(["--", "--executable", command[0], "--interval", "60", "--steps", "2", "--wait"])
 elif phase == "entry":
     from popu import _cli
@@ -110,14 +113,9 @@ elif phase in ("read", "exit"):
     except KeyboardInterrupt:
         raise SystemExit(130)
 else:
-    spec = importlib.util.spec_from_file_location("progress", demo)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    module.Client = lambda executable, **kwargs: Client(command, **kwargs)
     interval = "60" if phase in ("sleep", "cleanup") else "0.01"
     steps = "1" if phase == "wait" else "2"
-    sys.argv = ["progress.py", "--interval", interval, "--steps", steps, "--wait"]
-    raise SystemExit(module.main())
+    raise SystemExit(progress.main(["--interval", interval, "--steps", steps, "--wait"]))
 ''', encoding="utf-8")
     import json
 
@@ -128,7 +126,7 @@ else:
     log = tmp_path / "console.log"
     with log.open("wb") as output:
         target = subprocess.Popen(
-            [sys.executable, str(controller), json.dumps(command), phase, str(tmp_path), str(demo)],
+            [sys.executable, str(controller), json.dumps(command), phase, str(tmp_path), str(repository)],
             env=environment, stdout=output, stderr=output,
             creationflags=subprocess.CREATE_NEW_CONSOLE, startupinfo=startup,
         )
@@ -160,4 +158,4 @@ kernel.FreeConsole()
     if phase not in ("read", "exit", "notify", "cleanup", "entry"):
         snapshot = json.loads((tmp_path / "snapshot.json").read_text(encoding="utf-8"))
         assert snapshot["updatable"] is False
-        assert snapshot["content"]["title"] == ("备份完成" if phase == "wait" else "备份演示已停止")
+        assert snapshot["content"]["title"] == ("模拟进度演示完成" if phase == "wait" else "模拟进度演示已停止")

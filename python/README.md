@@ -9,12 +9,23 @@ Requires Windows x64, 64-bit Python 3.10+, and Microsoft WebView2 Runtime. The W
 PyPI publishing is not enabled yet. After [building a local wheel](../docs/python-distribution.md), install it from the repository root:
 
 ```powershell
-python -m pip install ./dist/popu-0.1.0-py3-none-win_amd64.whl
+python -m pip install ./dist/popu-0.1.1-py3-none-win_amd64.whl
 popu --version
 python -m popu --version
 ```
 
 Both CLI entries forward native arguments, input/output, and exit codes. If the Python scripts directory is absent from `PATH`, use `python -m popu`.
+
+The wheel includes a progress demonstration, runnable from any directory without a repository checkout:
+
+```powershell
+python -m popu.demo progress --wait
+# Shorter run:
+python -m popu.demo progress --interval 1 --steps 5 --wait
+python -m popu.demo progress --help
+```
+
+The mock backup scenario generates simulated file counts, data volumes, and progress. It never reads, copies, modifies, or verifies your backup files. Console output and all notification stages explicitly identify the simulation. Notifications use the real SDK and bundled native runtime. Closing a progress card hides it while the simulation continues; Ctrl+C stops the simulation and attempts a bounded final update. No build tools are required to run an installed wheel. See the [progress demo guide](examples/README.md) for timing and source-development options.
 
 For source development:
 
@@ -71,7 +82,7 @@ snapshot = client.update(receipt.request_id, snapshot["revision"], {
 
 User close hides progress and silences ordinary updates. An explicit `reshow=True` permits one further presentation by default; `reshow_suppressed` reports a consumed budget without rejecting the content. Automatic display timeout hides the card, and the next report shows it again unless the user previously closed it. `dismiss` is caller cancellation and ends the notification outright.
 
-The default template displays occurrence time, refreshed on every accepted report. Hidden contents remain current in history. After 12 hours without a successful report, the notification becomes `stale` and rejects updates. Host restart restores live records hidden without resetting this deadline. See the [complete lifecycle](../docs/live-notifications.md) and [runnable backup demo](examples/README.md).
+The default template displays occurrence time, refreshed on every accepted report. Hidden contents remain current in history. After 12 hours without a successful report, the notification becomes `stale` and rejects updates. Host restart restores live records hidden without resetting this deadline. See the [complete lifecycle](../docs/live-notifications.md) and [installed progress demo](examples/README.md).
 
 Cancelled, closed, and timed-out dialogs are normal `InteractionResult` outcomes. A custom dialog action may use exit code `12` (or any other code from 0–255); the SDK reads the Host result rather than treating that business exit code as a transport error. If a terminal dialog has no response, `show` raises `PopuError` with its terminal state.
 
