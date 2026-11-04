@@ -1,4 +1,4 @@
-"""Validate release identity, wheel contents, and an isolated Windows install."""
+"""Validate a project wheel, test an isolated install, or install into this Python."""
 from __future__ import annotations
 
 import argparse
@@ -36,6 +36,21 @@ def release_version(tag: str | None = None) -> tuple[str, str]:
     if tag is not None and tag != f"v{native}":
         raise ValueError(f"Release tag {tag!r} must equal v{native} from src-tauri/Cargo.toml")
     return native, str(python)
+
+
+def wheel_path(value: Path | None, python_version: str) -> Path:
+    path = value if value is not None else ROOT / "dist" / f"popu-{python_version}-py3-none-win_amd64.whl"
+    if not path.is_file():
+        raise FileNotFoundError(f"Wheel not found: {path}. Run `just build-wheel` first, or select a file with --wheel.")
+    return path.resolve(strict=True)
+
+
+def install_wheel(path: Path) -> None:
+    require_windows("Installing the bundled wheel")
+    print(f"Installing {path.name} into {sys.executable}", flush=True)
+    subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-index", "--no-deps", str(path)], check=True)
+    print("Run the demo with this interpreter:", flush=True)
+    print(subprocess.list2cmdline([sys.executable, "-m", "popu.demo", "progress"]), flush=True)
 
 
 def inspect_wheel(path: Path, native_version: str, python_version: str) -> dict:
@@ -180,28 +195,37 @@ print(json.dumps({'package':str(Path(popu.__file__).resolve()),'version':popu.__
         report["isolated_install"] = "passed"
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", help="Require exact v<Cargo-version> release identity")
-    parser.add_argument("--version-only", action="store_true")
-    parser.add_argument("--wheel", type=Path)
-    parser.add_argument("--smoke", action="store_true")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--version-only", action="store_true")
+    modes.add_argument("--smoke", action="store_true", help="Test an isolated Windows install and remove the test environment")
+    modes.add_argument("--install", action="store_true", help="Reinstall the validated wheel into this interpreter's current environment")
+    parser.add_argument("--wheel", type=Path, help="Wheel path; defaults to dist/popu-<current-version>-py3-none-win_amd64.whl")
+    parser.add_argument("--twine", action="store_true", help="Also run twine check --strict with this interpreter")
     parser.add_argument("--report", type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     native, python = release_version(args.tag)
     if args.version_only:
         print(native)
         return
-    if args.wheel is None:
-        parser.error("--wheel is required unless --version-only is used")
-    path = args.wheel.resolve(strict=True)
+    try:
+        path = wheel_path(args.wheel, python)
+    except FileNotFoundError as error:
+        parser.error(str(error))
     report = inspect_wheel(path, native, python)
+    if args.twine:
+        subprocess.run([sys.executable, "-m", "twine", "check", "--strict", str(path)], check=True)
     if args.smoke:
         smoke_install(path, report)
+    if args.install:
+        install_wheel(path)
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(report, indent=2))
+    if not args.install:
+        print(json.dumps(report, indent=2))
 
 
 if __name__ == "__main__":

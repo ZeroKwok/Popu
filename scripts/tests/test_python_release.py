@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 import runpy
 import struct
+import subprocess
+import sys
 import zipfile
 
 import pytest
@@ -186,3 +188,84 @@ def test_installation_identity_accepts_short_and_long_spellings_of_the_same_root
     assert not (root / "popu").is_relative_to(alias)
     assert release["_is_within"](root / "popu", alias)
     assert release["_is_within"](alias / "popu", root)
+
+
+def test_wheel_lookup_uses_the_expected_version_or_an_explicit_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    resolve = release["wheel_path"]
+    monkeypatch.setitem(resolve.__globals__, "ROOT", tmp_path)
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "popu-0.1.0-py3-none-win_amd64.whl").touch()
+    with pytest.raises(FileNotFoundError, match="just build-wheel"):
+        resolve(None, "1.2.3rc1")
+    expected = dist / "popu-1.2.3rc1-py3-none-win_amd64.whl"
+    expected.touch()
+    assert resolve(None, "1.2.3rc1") == expected.resolve()
+    explicit = tmp_path / "download with spaces.whl"
+    explicit.touch()
+    assert resolve(explicit, "1.2.3rc1") == explicit.resolve()
+
+
+@pytest.mark.parametrize("mode", ["verify", "test", "setup"])
+def test_wheel_commands_share_validation_and_keep_install_targets_separate(tmp_path: Path, wheel_files: dict, monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
+    main = release["main"]
+    namespace = main.__globals__
+    monkeypatch.setitem(namespace, "cargo_version", lambda: "0.1.1")
+    monkeypatch.setitem(namespace, "require_windows", lambda _: None)
+    wheel = tmp_path / "dist/popu-0.1.1-py3-none-win_amd64.whl"
+    wheel.parent.mkdir()
+    write_wheel(wheel, wheel_files)
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda arguments, **kwargs: calls.append((arguments, kwargs)))
+    smoke_calls = []
+    def smoke(path, report):
+        smoke_calls.append(path)
+        report["isolated_install"] = "passed"
+    monkeypatch.setitem(namespace, "smoke_install", smoke)
+    report = tmp_path / "reports/wheel.json"
+    arguments = ["--report", str(report)]
+    if mode == "setup":
+        arguments += ["--install"]
+    else:
+        arguments += ["--twine"]
+        if mode == "test":
+            arguments += ["--smoke"]
+    main(arguments)
+    assert json.loads(report.read_text())["sha256"] == hashlib.sha256(wheel.read_bytes()).hexdigest()
+    if mode == "setup":
+        assert calls == [([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-index", "--no-deps", str(wheel.resolve())], {"check": True})]
+    else:
+        assert calls == [([sys.executable, "-m", "twine", "check", "--strict", str(wheel.resolve())], {"check": True})]
+    assert smoke_calls == ([wheel.resolve()] if mode == "test" else [])
+
+
+def test_invalid_payload_prevents_installing_into_the_current_environment(tmp_path: Path, wheel_files: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    main = release["main"]
+    monkeypatch.setitem(main.__globals__, "cargo_version", lambda: "0.1.1")
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("invalid wheel must not reach pip"))
+    wheel_files["popu/_native/popu.exe"] = pe("user32.dll")
+    wheel = tmp_path / "popu-0.1.1-py3-none-win_amd64.whl"
+    write_wheel(wheel, wheel_files)
+    with pytest.raises(ValueError, match="checksum"):
+        main(["--install", "--wheel", str(wheel)])
+
+
+@pytest.mark.parametrize("mode", ["--smoke", "--install"])
+def test_failed_metadata_check_prevents_installation(tmp_path: Path, wheel_files: dict, monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
+    main = release["main"]
+    monkeypatch.setitem(main.__globals__, "cargo_version", lambda: "0.1.1")
+    monkeypatch.setitem(main.__globals__, "smoke_install", lambda *args: pytest.fail("metadata validation failed"))
+    monkeypatch.setitem(main.__globals__, "install_wheel", lambda *args: pytest.fail("metadata validation failed"))
+    def fail(arguments, **kwargs):
+        raise subprocess.CalledProcessError(1, arguments)
+    monkeypatch.setattr(subprocess, "run", fail)
+    wheel = tmp_path / "popu-0.1.1-py3-none-win_amd64.whl"
+    write_wheel(wheel, wheel_files)
+    with pytest.raises(subprocess.CalledProcessError):
+        main([mode, "--twine", "--wheel", str(wheel)])
+
+
+def test_current_and_isolated_install_modes_cannot_be_combined() -> None:
+    with pytest.raises(SystemExit) as result:
+        release["main"](["--smoke", "--install"])
+    assert result.value.code == 2

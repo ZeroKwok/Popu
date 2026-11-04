@@ -169,7 +169,7 @@ Host 在首次请求时自动启动。调用方提交请求后获得 Host 生成
 - [可更新通知生命周期](docs/live-notifications.md)
 - [Python 安装与入门](python/README.md)
 - [Python SDK 参考](docs/python-sdk.md)
-- [Python 分发与阶段审核](docs/python-distribution.md)
+- [Python 包构建与发布](docs/python-distribution.md)
 - [JSON Schema](protocol/popu.schema.json)
 - [贡献指南](CONTRIBUTING.md)
 - [安全说明](SECURITY.md)

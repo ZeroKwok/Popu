@@ -93,9 +93,7 @@ jobs:
           if ($wheels.Count -ne 1 -or $wheels[0].Name -ne $env:WHEEL) {
             throw 'Release output must contain exactly the expected Windows wheel'
           }
-          python -m twine check --strict "dist/$env:WHEEL"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python scripts/verify-python-release.py --wheel "dist/$env:WHEEL" --report test-results/wheel-build.json
+          python scripts/verify-python-release.py --wheel "dist/$env:WHEEL" --twine --report test-results/wheel-build.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v6
         with:

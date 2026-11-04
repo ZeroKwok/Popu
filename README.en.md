@@ -169,7 +169,7 @@ Long-running notifications opt in with `updatable: true` and reuse one ID. Every
 - [Python installation and quick start](python/README.md)
 - [Python SDK reference](docs/python-sdk.md)
 - [Live notification lifecycle](docs/live-notifications.md)
-- [Python build and distribution](docs/python-distribution.md)
+- [Python package build and publishing](docs/python-distribution.md)
 - [JSON Schema](protocol/popu.schema.json)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)

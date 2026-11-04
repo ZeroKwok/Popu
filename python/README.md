@@ -136,7 +136,7 @@ To upgrade the package, run `python -m pip install --upgrade popu`.
 - [SDK reference](https://github.com/ZeroKwok/Popu/blob/master/docs/python-sdk.md): request results, window options, images, charts, and runtime behavior.
 - [Demo guide](https://github.com/ZeroKwok/Popu/blob/master/python/src/popu/demo/README.md): available examples, options, and source development.
 - [Project overview](https://github.com/ZeroKwok/Popu#readme) and [issue tracker](https://github.com/ZeroKwok/Popu/issues).
-- [Build and distribution](https://github.com/ZeroKwok/Popu/blob/master/docs/python-distribution.md): for contributors building from source.
+- [Build and publishing](https://github.com/ZeroKwok/Popu/blob/master/docs/python-distribution.md): for contributors building from source.
 
 ## License
 

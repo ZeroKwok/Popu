@@ -110,6 +110,26 @@ test-python: prep-python
 build-wheel: build-ui prep-native
     "{{ python }}" scripts/build-python-wheel.py
 
+# Validate an existing wheel and PyPI metadata; accepts --wheel and --report.
+[group("Python")]
+[positional-arguments]
+verify-wheel *args:
+    "{{ python }}" scripts/verify-python-release.py --twine --report test-results/wheel-verify.json "$@"
+
+# Validate an existing wheel and test an isolated Windows installation.
+[group("Python")]
+[windows]
+[positional-arguments]
+test-wheel *args:
+    "{{ python }}" scripts/verify-python-release.py --twine --smoke --report test-results/wheel-test.json "$@"
+
+# Reinstall a validated wheel into the selected Python environment.
+[group("Python")]
+[windows]
+[positional-arguments]
+setup-wheel *args:
+    "{{ python }}" scripts/verify-python-release.py --install "$@"
+
 # Run the packaged progress demo with an installed SDK and a local debug build.
 [group("Demo")]
 [positional-arguments]
