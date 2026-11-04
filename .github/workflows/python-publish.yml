@@ -30,7 +30,7 @@ jobs:
         with:
           python-version: '3.13'
           architecture: x64
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: npm
@@ -55,7 +55,7 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
           rustup target add x86_64-pc-windows-msvc
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -97,19 +97,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/verify-python-release.py --wheel "dist/$env:WHEEL" --report test-results/wheel-build.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: release-dists
           path: dist/*.whl
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: wheel-build-report
           path: test-results/wheel-build.json
 
   installed-wheel:
     needs: release-build
-    runs-on: windows-2022
+    # Exercise the finished wheel on GitHub's newest stable Windows image.
+    runs-on: windows-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -123,7 +124,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           architecture: x64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: release-dists
           path: dist/
@@ -133,7 +134,7 @@ jobs:
         env:
           WHEEL: ${{ needs.release-build.outputs.wheel }}
         run: python scripts/verify-python-release.py --wheel "dist/$env:WHEEL" --smoke --report "test-results/installed-${{ matrix.python }}.json"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: installed-wheel-${{ matrix.python }}
           path: test-results/installed-*.json
@@ -149,7 +150,7 @@ jobs:
       name: pypi
       url: https://pypi.org/project/popu/
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: release-dists
           path: dist/

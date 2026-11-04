@@ -97,10 +97,12 @@ Windows 上，在 CLI 启动后台 Host 之前以及显式运行 `host run` 之�
 工作流的三个 job：
 
 1. `release-build` 在 Windows Server 2022 上准备 Python、Node、Rust、just、ImageMagick 和许可证工具，运行 `just check`，构建唯一的 Windows wheel，并进行 twine 与制品内容检查。
-2. `installed-wheel` 在新的 Windows runner 上，分别使用 Python 3.10 和 3.13 检查同一 wheel。脚本创建隔离 venv、清除源码导入路径和构建工具 PATH，验证 SDK、两种 CLI 入口、内置演示帮助、UTF-8 输入、退出码、WebView2 缺失提示、缓存定位、重装与卸载后的缓存保留。它不会启动可见窗口或连接用户业务 Host。
+2. `installed-wheel` 使用 `windows-latest`，跟随 GitHub 最新稳定 Windows 镜像（当前为 Windows Server 2025），分别使用 Python 3.10 和 3.13 检查同一 wheel。脚本创建隔离 venv、清除源码导入路径和构建工具 PATH，验证 SDK、两种 CLI 入口、内置演示帮助、UTF-8 输入、退出码、WebView2 缺失提示、缓存定位、重装与卸载后的缓存保留。它不会启动可见窗口或连接用户业务 Host。原生构建固定在 Windows Server 2022，以维持较老系统的兼容基础。
 3. `pypi-publish` 仅由 GitHub Release 的 `published` 事件触发，等待所有验证成功后，在 Ubuntu 上发布下载到的原制品。只发布 wheel，不发布 sdist；使用 OIDC Trusted Publishing 和制品证明，不需要 PyPI API token。
 
 手动 `workflow_dispatch` 只构建和验证，上传 `release-dists`、构建报告和各 Python 安装报告，发布 job 会跳过。工作流文件名必须保持 `python-publish.yml`，环境名保持 `pypi`。
+
+工作流使用 Node.js 24 运行时的官方 Actions：`setup-node@v6`、`cache@v5`、`upload-artifact@v6`、`download-artifact@v7`，以及已有的 `checkout@v5` 和 `setup-python@v6`。此运行时与 UI 构建使用的 `node-version: '22'` 独立；不依赖 runner 强制迁移旧 Action 来消除 Node.js 20 弃用告警。
 
 首次发布前核对 Pending Publisher：
 
