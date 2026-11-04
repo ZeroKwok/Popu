@@ -81,8 +81,9 @@ def inspect_wheel(path: Path, native_version: str, python_version: str) -> dict:
         if embedded != [native_version]:
             raise ValueError("SDK version does not match the native application version")
         find("popu/demo/progress.py")
-        # Git checkouts can choose LF or CRLF independently of the builder.
-        if archive.read(find(".dist-info/licenses/LICENSE")).replace(b"\r\n", b"\n") != (ROOT / "LICENSE").read_bytes().replace(b"\r\n", b"\n"):
+        wheel_license = archive.read(find(".dist-info/licenses/LICENSE")).replace(b"\r\n", b"\n")
+        project_license = (ROOT / "LICENSE").read_bytes().replace(b"\r\n", b"\n")
+        if wheel_license != project_license:
             raise ValueError("Wheel license does not match the repository license")
 
         manifest_path = find("popu/_native/manifest.json")

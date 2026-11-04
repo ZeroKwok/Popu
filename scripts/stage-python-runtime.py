@@ -23,11 +23,11 @@ sys.path.insert(0, str(ROOT / "python"))
 from build_version import generate_version
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", type=Path, help="Portable x64 binary; defaults to the wheel target's release directory")
     parser.add_argument("--dll", type=Path, action="append", default=[], help="Additional native runtime DLL; repeat if needed")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     require_windows("Bundled native wheel preparation")
     version = generate_version()
     executable = (args.executable or native_executable("release", target=WINDOWS_TARGET)).resolve(strict=True)
@@ -46,7 +46,9 @@ def main() -> None:
             raise ValueError(f"invalid or duplicate DLL: {library}")
         verify_portable_binary(library.read_bytes())
         sources[library.name] = library.resolve(strict=True)
-    if (ROOT / "python/LICENSE").read_bytes() != sources["LICENSE"].read_bytes():
+    python_license = (ROOT / "python/LICENSE").read_bytes().replace(b"\r\n", b"\n")
+    project_license = sources["LICENSE"].read_bytes().replace(b"\r\n", b"\n")
+    if python_license != project_license:
         raise ValueError("python/LICENSE does not match the repository LICENSE")
     lock_hash = hashlib.sha256((ROOT / "src-tauri/Cargo.lock").read_bytes()).hexdigest()
     if not sources["RUST_THIRD_PARTY_LICENSES.txt"].read_text(encoding="utf-8").startswith(f"Cargo.lock SHA-256: {lock_hash}\n"):

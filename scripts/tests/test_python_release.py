@@ -19,6 +19,7 @@ from native_payload import imported_dlls, verify_portable_binary
 from project_paths import ROOT
 
 release = runpy.run_path(str(ROOT / "scripts/verify-python-release.py"))
+staging = runpy.run_path(str(ROOT / "scripts/stage-python-runtime.py"))
 
 
 def pe(dll: str = "kernel32.dll", *, delay: str | None = None) -> bytes:
@@ -136,11 +137,77 @@ def test_complete_wheel_passes_content_and_record_validation(tmp_path: Path, whe
     assert report["imports"] == {"popu.exe":["kernel32.dll"]}
 
 
-def test_license_verification_accepts_git_checkout_line_ending_differences(tmp_path: Path, wheel_files: dict) -> None:
-    wheel_files["popu-0.1.1.dist-info/licenses/LICENSE"] = b"project license\r\n"
+@pytest.mark.parametrize(("source", "packaged"), [(b"\n", b"\r\n"), (b"\r\n", b"\n")])
+def test_license_verification_accepts_git_checkout_line_ending_differences(tmp_path: Path, wheel_files: dict, source: bytes, packaged: bytes) -> None:
+    (tmp_path / "LICENSE").write_bytes(b"project license" + source)
+    wheel_files["popu-0.1.1.dist-info/licenses/LICENSE"] = b"project license" + packaged
     wheel = tmp_path / "popu-0.1.1-py3-none-win_amd64.whl"
     write_wheel(wheel, wheel_files)
     assert release["inspect_wheel"](wheel, "0.1.1", "0.1.1")["version"] == "0.1.1"
+
+
+def test_wheel_license_content_changes_are_rejected_with_a_valid_record(tmp_path: Path, wheel_files: dict) -> None:
+    wheel_files["popu-0.1.1.dist-info/licenses/LICENSE"] = b"different license\r\n"
+    wheel = tmp_path / "popu-0.1.1-py3-none-win_amd64.whl"
+    write_wheel(wheel, wheel_files)
+    with pytest.raises(ValueError, match="Wheel license"):
+        release["inspect_wheel"](wheel, "0.1.1", "0.1.1")
+
+
+@pytest.fixture
+def stage_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    namespace = staging["main"].__globals__
+    sources = {
+        "LICENSE": b"project license\nsecond line\n",
+        "python/LICENSE": b"project license\nsecond line\n",
+        "src-tauri/Cargo.lock": b"lockfile",
+        "ui/dist/vendor/THIRD_PARTY_LICENSES.txt": b"UI licenses",
+        "python/build/RUST_THIRD_PARTY_LICENSES.txt": f"Cargo.lock SHA-256: {hashlib.sha256(b'lockfile').hexdigest()}\nRust licenses".encode(),
+        "native/popu.exe": pe(),
+    }
+    for name, data in sources.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    monkeypatch.setitem(namespace, "ROOT", tmp_path)
+    monkeypatch.setitem(namespace, "generate_version", lambda: "0.1.1")
+    monkeypatch.setitem(namespace, "require_windows", lambda _: None)
+    monkeypatch.setitem(namespace, "native_executable", lambda *args, **kwargs: tmp_path / "native/popu.exe")
+    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "popu 0.1.1\n"))
+    return tmp_path
+
+
+@pytest.mark.parametrize(("root_license", "python_license"), [
+    (b"project license\nsecond line\n", b"project license\r\nsecond line\r\n"),
+    (b"project license\r\nsecond line\r\n", b"project license\nsecond line\n"),
+    (b"project license\r\nsecond line\n", b"project license\nsecond line\r\n"),
+])
+def test_staging_accepts_license_line_endings_and_hashes_original_bytes(stage_project: Path, root_license: bytes, python_license: bytes) -> None:
+    (stage_project / "LICENSE").write_bytes(root_license)
+    (stage_project / "python/LICENSE").write_bytes(python_license)
+    staging["main"]([])
+    bundle = stage_project / "python/src/popu/_native"
+    assert (bundle / "LICENSE").read_bytes() == root_license
+    assert (stage_project / "python/LICENSE").read_bytes() == python_license
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    assert manifest["files"]["LICENSE"] == hashlib.sha256(root_license).hexdigest()
+
+
+@pytest.mark.parametrize("python_license", [
+    b"different license\r\nsecond line\r\n",
+    b"project license \r\nsecond line\r\n",
+    b"\xef\xbb\xbfproject license\r\nsecond line\r\n",
+])
+def test_staging_rejects_real_license_changes_before_replacing_a_payload(stage_project: Path, python_license: bytes) -> None:
+    (stage_project / "python/LICENSE").write_bytes(python_license)
+    bundle = stage_project / "python/src/popu/_native"
+    bundle.mkdir(parents=True)
+    marker = bundle / "previous-payload"
+    marker.write_bytes(b"keep")
+    with pytest.raises(ValueError, match="python/LICENSE"):
+        staging["main"]([])
+    assert marker.read_bytes() == b"keep"
+    assert not (bundle / "manifest.json").exists()
 
 
 @pytest.mark.parametrize("change", ["checksum", "missing_license", "platform", "stale_license"])
