@@ -1,6 +1,6 @@
 [package]
 name = "popu"
-version = "0.1.2"
+version = "0.1.3"
 description = "Local notification management and lightweight dialogs for automation scripts and AI agents, with a persistent host, live progress updates, and notification history"
 authors = ["Popu contributors"]
 edition = "2021"
