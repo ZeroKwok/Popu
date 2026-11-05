@@ -185,7 +185,7 @@ just setup
 just build-release
 ```
 
-Windows 可执行文件位于 `src-tauri/target/release/popu.exe`。将该目录加入 `PATH`，或直接使用此路径调用。Python 源码开发可执行 `just setup-python`，一次完成 debug 构建、同步原生程序和 editable 安装，随后直接运行 `popu`、`Client()` 或 `python -m popu.demo progress`。修改 CLI/Host 后重新执行此配方即可；也可通过 `Client(executable="path/to/popu.exe")` 指定其他本地构建。正式 Windows wheel 同时包含原生可执行文件与 SDK。
+Windows 可执行文件位于 `src-tauri/target/release/popu.exe`。将该目录加入 `PATH`，或直接使用此路径调用。
 
 运行测试：
 
@@ -202,9 +202,9 @@ just build-ui
 cargo build --manifest-path src-tauri/Cargo.toml
 ```
 
-产品版本只修改 `src-tauri/Cargo.toml` 中的 `package.version`。Tauri 自动读取它，Python 构建和 editable 安装自动生成 SDK 版本文件；`just version` 显示当前版本，`just build-wheel` 构建包含原生程序的本地 wheel。Python 测试需要 pytest，wheel 构建需要 build；请在开发用虚拟环境中安装。
+产品版本只修改 `src-tauri/Cargo.toml` 中的 `package.version`。Tauri 自动读取它；`just version` 显示当前版本。
 
-直接运行 `just` 会显示分组帮助。自动化检查使用 `just check`，交互演示使用 `just demo-fixture notification-success.json`、`just demo-fixtures notification` 或 `just demo-python --wait`。演示与 wheel 载荷准备通过 Cargo metadata 获取程序路径，支持 `CARGO_TARGET_DIR`；可用 `PYTHON` 环境变量指定 Python 解释器。构建会按需生成缺失或过期的图标，`just icons` 可强制重建。`just build-wheel` 和现有 `just test-native` 目前仅在 Windows 提供。
+直接运行 `just` 会显示分组帮助。自动化检查使用 `just check`，交互演示使用 `just demo-fixture notification-success.json` 或 `just demo-fixtures notification`。演示通过 Cargo metadata 获取程序路径，支持 `CARGO_TARGET_DIR`。构建会按需生成缺失或过期的图标，`just icons` 可强制重建。`just test-native` 目前仅在 Windows 提供。
 
 欢迎通过 issue 和 pull request 参与改进，详见[贡献指南](CONTRIBUTING.md)。原生通知窗口生命周期测试见[通知窗口协调与排布](docs/notification-layout.md)；运行这些测试需要解锁的 Windows 桌面。
 

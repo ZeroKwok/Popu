@@ -185,7 +185,7 @@ just setup
 just build-release
 ```
 
-On Windows, the executable is `src-tauri/target/release/popu.exe`. Add that directory to `PATH` or invoke it by path. For Python source development, run `just setup-python` to build the debug executable, stage it, and install the editable SDK. Then use `popu`, `Client()`, or `python -m popu.demo progress` directly. Rerun the recipe after changing the CLI/Host, or use `Client(executable="path/to/popu.exe")` to select another local build. The Windows wheel includes both the native executable and SDK.
+On Windows, the executable is `src-tauri/target/release/popu.exe`. Add that directory to `PATH` or invoke it by path.
 
 Run tests:
 
@@ -202,9 +202,9 @@ just build-ui
 cargo build --manifest-path src-tauri/Cargo.toml
 ```
 
-Change only `package.version` in `src-tauri/Cargo.toml` for a product release. Tauri inherits it; Python builds and editable installs generate the SDK version automatically. `just version` prints it; `just build-wheel` builds the bundled local wheel. Install pytest and build in your development virtual environment for Python tests and wheel builds.
+Change only `package.version` in `src-tauri/Cargo.toml` for a product release. Tauri inherits it; `just version` prints the current version.
 
-Running `just` displays grouped help. Use `just check` for automated checks; use `just demo-fixture notification-success.json`, `just demo-fixtures notification`, or `just demo-python --wait` for interactive demos. Demos and native wheel staging resolve executables through Cargo metadata, including `CARGO_TARGET_DIR`. Set `PYTHON` to select an interpreter. Builds prepare missing/outdated icons automatically; `just icons` forces regeneration. The current `build-wheel` and `test-native` tasks are Windows-only.
+Running `just` displays grouped help. Use `just check` for automated checks; use `just demo-fixture notification-success.json` or `just demo-fixtures notification` for interactive demos. Demos resolve executables through Cargo metadata, including `CARGO_TARGET_DIR`. Builds prepare missing/outdated icons automatically; `just icons` forces regeneration. The current `test-native` task is Windows-only.
 
 Issues and pull requests are welcome; see [Contributing (Chinese)](CONTRIBUTING.md). Native notification lifecycle tests are documented in [notification window coordination (Chinese)](docs/notification-layout.md) and require an unlocked Windows desktop.
 
