@@ -8,7 +8,7 @@
 - 目前仅分发 Windows x64 wheel，标签为 `py3-none-win_amd64`，要求 64 位 Python 3.10+。不发布 sdist，用户安装时无需编译。
 - wheel 包含匹配版本的原生程序、Python SDK、demo、项目许可证、UI 与 Rust 依赖许可证，以及原生文件的 SHA-256 清单。
 - 原生程序使用静态 CRT；构建校验拒绝额外的 VC Redistributable 依赖。WebView2 Runtime 仍需系统已安装，缺失时提供手动安装入口。
-- SDK 默认使用包内程序，不搜索 `PATH`。运行时从不可变缓存启动，避免 Host 长驻时锁住 `site-packages`。升级和卸载不会自动停止已有 Host；缓存与版本握手规则见 [SDK 参考](python-sdk.md#runtime-and-source-development)。
+- SDK 默认使用包内程序，不搜索 `PATH`。运行时从不可变缓存启动，避免 Host 长驻时锁住 `site-packages`。升级和卸载不会自动停止已有 Host；缓存与版本握手规则见 [SDK 参考](python-sdk.md#运行时与源码开发)。
 
 ## 本地构建
 

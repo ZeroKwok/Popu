@@ -1,10 +1,12 @@
-# Popu Host architecture
+# Popu Host 架构
 
-Popu is a single-instance persistent Tauri Host for bounded local human interactions. CLI and Python processes are clients; they never own notification lifetime or create their own WebView process.
+[English](ARCHITECTURE.en.md)
 
-The repository is coordinated by root just tasks. `ui/` is an independent npm project: static source assets live in `ui/src/`, chart bundle entries in `ui/charts/`, and generated distributable assets in `ui/dist/`. Its dependencies and browser tests stay outside the embedded resource tree. The Cargo project in `src-tauri/` consumes only that UI distribution; the Python project in `python/` packages the SDK and staged native executable. Root `scripts/` contains cross-project build and native verification helpers.
+Popu 使用单实例常驻 Tauri Host，处理范围有限的本机人机交互。CLI 和 Python 进程都是客户端，不负责通知生命周期，也不单独创建 WebView 进程。
 
-`src-tauri/Cargo.toml`'s `package.version` is the sole product release version. Tauri inherits it, and Python build metadata/editable installs generate the ignored SDK `_version.py` before packaging. Installed wheels contain this generated module and never read a repository Cargo manifest. Protocol/RPC versions remain separate compatibility identifiers.
+仓库由根目录的 just 任务统一编排。`ui/` 是独立的 npm 项目：静态源码位于 `ui/src/`，图表打包入口位于 `ui/charts/`，生成的分发资源位于 `ui/dist/`。前端依赖和浏览器测试不进入嵌入资源。`src-tauri/` 下的 Cargo 项目只使用 UI 构建产物；`python/` 项目打包 SDK 和准备好的原生程序。根目录 `scripts/` 保存跨项目构建与原生验证工具。
+
+`src-tauri/Cargo.toml` 中的 `package.version` 是产品发行版本的唯一来源。Tauri 自动继承该版本，Python 构建和 editable 安装会在打包前生成被 Git 忽略的 SDK `_version.py`。安装后的 wheel 已包含此模块，不会读取仓库中的 Cargo 清单。协议版本与 RPC 版本独立用于兼容性识别。
 
 ```text
 CLI / Python SDK
@@ -18,23 +20,23 @@ Tauri Host ── RequestRegistry ── request_id → WebviewWindow
                  └─ three visible notifications + global FIFO
 ```
 
-## Lifecycle and scheduling
+## 生命周期与调度
 
-- The first client starts hidden `popu host run` and retries readiness. Listener binding is the single-instance boundary.
-- On Windows, `host_process.rs` launches the Host detached with `CreateProcessW(..., bInheritHandles = FALSE, ...)`. The Host inherits neither the submitting CLI's standard streams nor unrelated inheritable handles. Redirecting standard streams alone does not provide this isolation. Unix launches retain null standard streams through `Command`.
-- The Host generates UUID request IDs and starts every request at revision 1.
-- States are `queued`, `preparing`, `ready`, `shown`, `hidden`, `confirmed`, `cancelled`, `closed`, `expired`, `failed`, and `stale`. `hidden` is nonterminal and retains the update channel.
-- Dialogs are globally FIFO with one active window. A dialog CLI waits for a terminal response and adopts its action exit code.
-- Notifications use the primary display, never wait behind dialogs, show at most three, and remain alive after the submitting client exits. `duration_ms` starts at `ui_ready`.
-- Notification windows are always on top without requesting focus. Omitting `window.always_on_top` defaults to `true`; explicitly setting it to `false` is rejected by request validation and JSON Schema. Dialogs may still set it to `false`.
-- Closing or expiring a visible request promotes queued work and reflows the notification stack.
-- Host shutdown terminalizes ordinary requests and wakes waiters. Updatable notifications retain durable checkpoints and restore hidden on the next start, preserving their idle deadline and user intent.
+- 首个客户端在后台启动 `popu host run`，并重试等待就绪。监听入口的绑定决定单实例边界。
+- Windows 上，`host_process.rs` 通过 `CreateProcessW(..., bInheritHandles = FALSE, ...)` 分离启动 Host。Host 不继承提交方 CLI 的标准流或其他可继承句柄；仅重定向标准流不足以实现这种隔离。Unix 路径通过 `Command` 将标准流连接到空设备。
+- Host 生成 UUID 请求 ID，每个请求的初始 revision 为 1。
+- 请求状态包括 `queued`、`preparing`、`ready`、`shown`、`hidden`、`confirmed`、`cancelled`、`closed`、`expired`、`failed` 和 `stale`。`hidden` 不是终态，仍保留更新通道。
+- 对话框按全局 FIFO 排队，同一时刻只有一个活动窗口。提交对话框的 CLI 等待终态响应，并采用相应动作的退出码。
+- 通知显示在主显示器上，不受对话框队列阻塞，最多同时展示三条。提交客户端退出后，通知仍继续存在。`duration_ms` 从 `ui_ready` 开始计时。
+- 通知窗口始终置顶，不主动请求焦点。省略 `window.always_on_top` 时默认为 `true`；显式设为 `false` 会被请求校验和 JSON Schema 拒绝。对话框仍可设置为 `false`。
+- 可见请求关闭或展示超时后，队列中的后续请求会进入展示，通知栈也会重新排布。
+- Host 退出时，普通请求进入终态并唤醒等待者。可更新通知保留持久化检查点，在下次启动时恢复为隐藏状态，同时保留无更新截止时间和用户关闭意图。
 
-## Window sizing and DPI
+## 窗口尺寸与 DPI
 
-Request `window.width` and `window.height`, including the dialog and notification defaults, are logical pixels. Clients must use the same values on 1080p, 2K, and 4K displays; they must not multiply dimensions by display resolution or Windows scaling.
+请求中的 `window.width` 和 `window.height`，包括对话框与通知的默认尺寸，都使用逻辑像素。客户端在 1080p、2K 和 4K 显示器上应使用相同的值，不要按分辨率或 Windows 缩放比例手工放大尺寸。
 
-On Windows, placement keeps two coordinate spaces deliberately separate:
+Windows 窗口排布使用两套明确分离的坐标空间：
 
 ```text
 request logical size + logical margin
@@ -46,49 +48,49 @@ protocol / placement ── target monitor effective DPI ──► physical size
 WebView logical CSS viewport                         Win32 work area / set_position
 ```
 
-- `runtime.rs` selects the target monitor, reads its effective DPI, and obtains its work area in physical pixels.
-- `placement.rs` clamps logical request dimensions against the target logical work area, then derives the physical native size, margin, and position from that monitor's scale factor.
-- `host.rs` first moves a hidden window onto the target monitor, sets its logical WebView size, and applies the computed physical position. This prevents a high-DPI display from shrinking the CSS viewport or clipping a right-aligned window.
-- Notification stack offsets are physical values derived from the same placement, so spacing remains visually consistent at different DPI scales. A stack is reflowed when a notification leaves it; periodic timer ticks and content-only updates do not overwrite a user's drag.
+- `runtime.rs` 选择目标显示器，读取其有效 DPI，并获取以物理像素表示的工作区。
+- `placement.rs` 先按目标显示器的逻辑工作区限制请求尺寸，再利用缩放比例计算原生窗口的物理尺寸、间距和位置。
+- `host.rs` 先将隐藏窗口移至目标显示器，设置 WebView 的逻辑尺寸，再应用计算得到的物理位置，防止高 DPI 显示器缩小 CSS 视口或裁切靠右排列的窗口。
+- 通知栈偏移量由同一排布结果换算为物理像素，保证不同 DPI 下的视觉间距一致。通知离开栈时会触发重排；周期性计时和仅更新内容的操作不会覆盖用户拖动后的位置。
 
-`"100%" × "100%"` continues to fill the selected physical display area after conversion. The resulting logical viewport varies with DPI, as expected for a fullscreen window.
+`"100%" × "100%"` 经转换后仍填满所选的物理显示区域。逻辑视口随 DPI 变化，这是全屏窗口的预期表现。
 
-## Identity, coalescing, and updates
+## 请求标识、合并与更新
 
-`coalesce_key` is an optional live business-slot key scoped by mode. A duplicate create returns the existing ID, state, and revision without changing content. Terminalization releases the key immediately.
+`coalesce_key` 是可选的活动业务位置标识，按请求模式分别作用。重复创建会返回已有请求的 ID、状态和 revision，不修改内容。请求进入终态后立即释放该标识。
 
-Updates contain `request_id`, `expected_revision`, and a complete `content` snapshot. Success increments the revision and refreshes the occurrence time. Notifications opt in at creation with `updatable: true` (default false); the final update sets it false. Update omission preserves the current flag. Every accepted notification update restarts the display timer using the configured duration; optional `duration_ms` overrides that duration. Queued/preparing/parked notifications receive the full duration when actually shown. Invalid updates, revision conflicts and repeated readiness acknowledgements do not extend timers. Dialog updates retain their existing form-preserving behavior and original interaction deadline, and reject notification options.
+更新包含 `request_id`、`expected_revision` 和完整的 `content` 快照。成功后 revision 递增，并刷新通知发生时间。通知在创建时通过 `updatable: true` 开启更新，默认值为 `false`；最后一次更新将其设为 `false`。更新时省略此字段会保留当前值。每次成功的通知更新都会按配置的展示时长重新计时，可通过 `duration_ms` 覆盖该时长。排队、准备或暂存中的通知在实际展示时获得完整时长。无效更新、revision 冲突和重复的就绪确认不会延长计时。对话框更新继续保留表单值和原始交互截止时间，并拒绝通知专用选项。
 
-Automatic display expiry hides an updatable notification; the next report queues it again. User close hides it and silences ordinary reports. An explicit `reshow: true` may override user close once by default, counted only on actual presentation. Closing the update channel is independent of displaying its final contents. Twelve hours without an accepted report ends it as `stale`. Full behavior and examples are in [live notifications](docs/live-notifications.md).
+自动展示超时会收起可更新通知，下次上报会重新排队。用户主动关闭也会收起通知，但后续普通上报保持静默。显式设置 `reshow: true` 默认允许在主动关闭后再次展示一次，只在实际展示时消耗次数。关闭更新通道与展示最终内容相互独立。连续 12 小时没有成功上报时，请求以 `stale` 结束。完整规则与示例见[可更新通知](docs/live-notifications.md)。
 
-External templates are caller configuration supplied with `--template`. The Host canonicalizes and validates the directory before registering the request.
+外部模板属于调用方配置，通过 `--template` 提供。Host 在注册请求前解析模板目录的真实路径并进行校验。
 
 ## RPC
 
-Every frame is capped at 1 MiB. RPC version `1.0` methods are:
+每帧上限为 1 MiB。RPC 版本 `1.0` 提供以下方法：
 
-- `request.create`, `request.update`, `request.dismiss`, `request.get`, `request.wait`
+- `request.create`、`request.update`、`request.dismiss`、`request.get`、`request.wait`
 - `host.hello`
-- `host.status`, `host.stop`
-- `history.list`, `history.clear`
+- `host.status`、`host.stop`
+- `history.list`、`history.clear`
 
-Malformed JSON, unsupported versions, unknown methods, oversized frames, revision conflicts, terminal updates, and missing IDs return structured errors.
+JSON 格式错误、版本不支持、未知方法、帧过大、revision 冲突、更新已终止的请求和 ID 不存在等情况都会返回结构化错误。
 
-Each business connection begins with `host.hello` (`params.app_version`). The Host validates the CLI application version and the frame's RPC version, then returns `app_version`, `rpc_version`, `pid`, and `executable`. The client validates that identity before sending one business request on the same connection. Both versions must match exactly. A two-second handshake deadline uses nonblocking I/O, including partial frames, without limiting a later business wait. Hosts reject business calls without a handshake. `host.status` and explicitly requested `host.stop` remain available without it for upgrade recovery; status includes the running identity under `host`.
+每条业务连接先发送 `host.hello`（携带 `params.app_version`）。Host 校验 CLI 的应用版本与帧中的 RPC 版本，然后返回 `app_version`、`rpc_version`、`pid` 和 `executable`。客户端验证身份后，在同一连接提交一次业务请求。应用版本和 RPC 版本都必须完全一致。握手使用非阻塞 I/O，在两秒截止时间内处理包括半帧在内的数据，不限制后续业务等待。Host 拒绝未经握手的业务调用。`host.status` 和显式调用的 `host.stop` 无需握手，便于升级恢复；状态响应中的 `host` 字段包含当前运行身份。
 
-Only connection absence/refusal triggers automatic Host startup. Handshake failures and business transport errors never replay a request or replace an existing Host. On Windows, WebView2 availability is checked via its loader before detached startup and before direct `host run`; failure reports a manual installation link without launching an installer. The Host and Python distribution details are in [Python distribution](docs/python-distribution.md).
+只有连接不存在或被拒绝时，客户端才自动启动 Host。握手失败和业务传输错误不会触发请求重放，也不会替换已有 Host。Windows 上，在分离启动 Host 或直接执行 `host run` 之前，通过 WebView2 loader 检查运行时可用性；失败时提示手动安装入口，不启动安装程序。Host 与 Python 分发的相关操作见 [Python 包构建与发布](docs/python-distribution.md)。
 
-## History
+## 通知历史
 
-Notification history and live notification checkpoints are stored in SQLite under the Popu application-data directory. Accepted updates replace the existing history row, keeping content, revision, occurrence time and reading state consistent. Checkpoints retain the request, template location, user-close intent and reshow budget. History and checkpoint changes commit atomically before successful command replies. Dialogs and form values are never persisted. Retention keeps the newest 500 archived rows and preserves active notifications.
+通知历史和活动通知检查点存储在 Popu 应用数据目录下的 SQLite 数据库中。成功更新会替换已有历史记录，使内容、revision、发生时间和阅读状态保持一致。检查点保留请求、模板位置、用户主动关闭意图和再次展示次数。历史与检查点的变更在成功响应前原子提交。对话框及其表单值不会持久化。保留策略保存最新 500 条归档记录，并保留活动通知。
 
-The history window is a read-only master-detail view of current and archived notification snapshots. Its list shows title, presentation state and occurrence time; its detail pane renders the saved body. Viewing it never starts a timer, changes the stack or emits a business action. Clearing history also deletes hidden update channels, while preserving queued/preparing/ready/shown notifications. The coordinator serializes clearing with updates.
+历史窗口以只读的主从布局展示当前和已归档通知快照。列表显示标题、展示状态和发生时间，详情区域渲染保存的正文。查看历史不会启动计时、改变通知栈或触发业务动作。清空历史会删除隐藏通知的更新通道，同时保留 `queued`、`preparing`、`ready` 和 `shown` 状态的通知。协调器对清空与更新操作进行串行处理。
 
-When a notification snapshot is successfully recorded, or history is cleared, the Host emits a targeted `history-changed` event. The history window coalesces refresh hints and preserves the selected item when possible. No window polls the database, and an unopened history window receives no work.
+通知快照保存成功或历史清空后，Host 向历史窗口定向发送 `history-changed` 事件。历史窗口合并刷新提示，并尽量保留当前选中项。窗口不会轮询数据库；未打开的历史窗口也不会收到刷新工作。
 
-Reading is per content revision. User close acknowledges the displayed revision, while later content starts unread. The foreground history renderer acknowledges only the revision it actually rendered; a late acknowledgement cannot read a newer result. Tray reminders depend only on hidden/archived unread rows with `requires_read: true`, never on visible or queued counts.
+阅读状态按内容 revision 记录。用户关闭会确认已展示的 revision，后续内容重新进入未读状态。前台历史渲染器只确认实际渲染的 revision；迟到的确认不会将更新后的结果标为已读。托盘提醒仅取决于隐藏或归档记录中 `requires_read: true` 的未读项，不取决于可见或排队通知数量。
 
-## Public CLI
+## 公开 CLI
 
 ```text
 popu request <file|-> [--template <trusted-directory>]
@@ -100,23 +102,23 @@ popu host status
 popu host stop
 ```
 
-The internal `popu host run` command is hidden. Exit codes are 0 for success/confirmation, 10 for cancellation/close, 11 for timeout, and 12 for validation/runtime errors; an action may override its dialog client's code with 0–255 without terminating the Host.
+内部命令 `popu host run` 不在帮助中显示。退出码分别为：0 表示成功或确认，10 表示取消或关闭，11 表示超时，12 表示校验或运行错误。动作可以将对话框客户端的退出码覆盖为 0–255，不会终止 Host。
 
-## Source boundaries
+## 源码职责边界
 
-- `core.rs`: Tauri-independent registry, states, FIFO scheduling, coalescing, revision checks, and timers.
-- `ipc.rs`: bounded framing and local-socket client/listener construction.
-- `ipc/handshake.rs`: Host identity negotiation and the business connection handshake.
-- `host_client.rs`: connection acquisition and startup, without business request replay.
-- `preflight.rs`: WebView2 availability diagnostics before Host startup.
-- `host.rs`: RPC dispatch, synchronization, multi-window ownership, and UI commands.
-- `history.rs`: notification-only SQLite persistence and retention.
-- `runtime.rs`: target-monitor/DPI discovery, physical placement, and frameless-window helpers.
-- `placement.rs`: DPI-independent logical sizing plus logical-to-physical placement conversion.
-- `protocol.rs`: versioned request/response validation and logical window-dimension semantics.
+- `core.rs`：不依赖 Tauri 的注册表、状态、FIFO 调度、合并、revision 校验与计时。
+- `ipc.rs`：有界帧处理以及本地套接字客户端和监听器的构造。
+- `ipc/handshake.rs`：Host 身份协商与业务连接握手。
+- `host_client.rs`：连接获取与启动，不重放业务请求。
+- `preflight.rs`：Host 启动前的 WebView2 可用性诊断。
+- `host.rs`：RPC 分发、同步、多窗口管理与 UI 命令。
+- `history.rs`：仅通知的 SQLite 持久化与保留策略。
+- `runtime.rs`：目标显示器与 DPI 查询、物理位置应用及无边框窗口辅助操作。
+- `placement.rs`：独立于 DPI 的逻辑尺寸计算，以及逻辑坐标到物理坐标的转换。
+- `protocol.rs`：版本化请求与响应校验，以及逻辑窗口尺寸语义。
 
-The Python SDK invokes the public CLI and exposes create/update/dismiss/status/wait. It does not implement a second server or a notification lifetime pipe.
+Python SDK 调用公开 CLI，提供 create、update、dismiss、status 和 wait，不实现第二套服务端或用于维持通知生命周期的管道。
 
-The SDK requires Python 3.10+ and the current Host CLI. Acceptance receipts are parsed strictly; pre-Host response compatibility is not provided. A shared CLI invocation wrapper owns the stdout pipe, stderr temporary file and process cleanup. Notifications and management read one UTF-8 JSON line before waiting for the CLI to exit, without draining trailing stdout to EOF. There is no stdout spool file or receipt polling. A worker performs each blocking response read; bounded queue/process waits on the calling thread allow Windows Ctrl+C dispatch and optional per-operation client deadlines. Interrupts and deadlines kill/reap the CLI before joining its reader and closing streams. Windows SDK CLIs run without a console, and the native Host launcher isolates inherited handles. After a dialog is accepted, its foreground deadline is cleared and a background reader drains remaining stdout in bounded chunks and reaps the CLI. Every SDK `wait` invokes the public `wait` command and returns the full Host snapshot, so results do not depend on which Python client submitted the request. Business action exit codes, including 12, are read from that snapshot rather than interpreted as transport errors. Temporary request/update files are removed after use, interruption or submission failure.
+SDK 要求 Python 3.10+ 和当前 Host CLI。接受回执采用严格解析，不兼容引入 Host 之前的响应格式。共用的 CLI 调用封装负责 stdout 管道、stderr 临时文件和进程清理。通知与管理调用先读取一行 UTF-8 JSON，再等待 CLI 退出，不等待 stdout 尾部 EOF，也不使用 stdout 暂存文件或轮询回执。阻塞读取由工作线程执行；调用线程使用有界队列等待和进程等待，使 Windows 能分发 Ctrl+C，并支持可选的单次操作截止时间。中断或超时时，先结束并回收 CLI，再等待读取线程并关闭流。Windows SDK 启动的 CLI 不带控制台，原生 Host 启动器负责隔离继承句柄。对话框被接受后，清除前台提交截止时间，由后台读取器以有界块排空剩余 stdout 并回收 CLI。每次 SDK `wait` 都调用公开 `wait` 命令并返回完整 Host 快照，因此结果不依赖提交请求的 Python 客户端。业务动作退出码（包括 12）从快照中读取，不解释为传输错误。临时请求和更新文件会在使用、中断或提交失败后移除。
 
-Python notification builders explicitly emit topmost windows on the primary work area; dialog builders retain configurable topmost/display/area/size options. Both builders expose content alignment and live coalescing keys. Complete request mappings remain available for forms, arbitrary severities, and custom actions.
+Python 通知构造器显式设置主显示器工作区内的置顶窗口；对话框构造器保留置顶、显示器、区域和尺寸选项。两类构造器均提供内容对齐和活动合并键。表单、任意严重级别和自定义动作仍可通过完整请求字典提交。

@@ -52,7 +52,7 @@ if result.status == "submitted" and result.action == "confirm":
     print("Deployment confirmed")
 ```
 
-See the [Python quick start](python/README.md#update-task-progress) for progress updates and the [SDK reference](docs/python-sdk.md) for complete behavior.
+See the [Python quick start](python/README.en.md#update-task-progress) for progress updates and the [SDK reference](docs/python-sdk.en.md) for complete behavior.
 
 ### CLI
 
@@ -80,7 +80,7 @@ Save the following as `notification.json` to submit a notification from any dire
 popu request notification.json
 ```
 
-If `popu` is not on `PATH`, use `python -m popu` instead. See the [JSON Schema](protocol/popu.schema.json) and [architecture documentation](ARCHITECTURE.md) for other requests.
+If `popu` is not on `PATH`, use `python -m popu` instead. See the [JSON Schema](protocol/popu.schema.json) and [architecture documentation](ARCHITECTURE.en.md) for other requests.
 
 ## Why Popu
 
@@ -149,7 +149,7 @@ The Host starts automatically when the first request arrives. Callers receive a 
 
 Terminal notifications are saved to history; dialogs and their form values are not persisted. Only unread history entries with `requires_read: true` keep the tray reminder active.
 
-Long-running notifications opt in with `updatable: true` and reuse one ID. Every accepted update restarts the display timer using the configured duration; `duration_ms` can override it. The last update sets `updatable: false` and may request `reshow: true`. User closes silence ordinary updates, with one explicit reshow allowed by default; automatic expiry allows the next report to show again. Live records expire after 12 hours without a successful report. See [live notifications](docs/live-notifications.md) and the [Python progress demo](python/src/popu/demo/README.md).
+Long-running notifications opt in with `updatable: true` and reuse one ID. Every accepted update restarts the display timer using the configured duration; `duration_ms` can override it. The last update sets `updatable: false` and may request `reshow: true`. User closes silence ordinary updates, with one explicit reshow allowed by default; automatic expiry allows the next report to show again. Live records expire after 12 hours without a successful report. See [live notifications (Chinese)](docs/live-notifications.md) and the [Python progress demo (Chinese)](python/src/popu/demo/README.md).
 
 ## Notification and window rules
 
@@ -164,15 +164,15 @@ Long-running notifications opt in with `updatable: true` and reuse one ID. Every
 ## Documentation
 
 - [中文版 README](README.md)
-- [Architecture](ARCHITECTURE.md)
-- [Notification window coordination and layout](docs/notification-layout.md)
-- [Python installation and quick start](python/README.md)
-- [Python SDK reference](docs/python-sdk.md)
-- [Live notification lifecycle](docs/live-notifications.md)
-- [Python package build and publishing](docs/python-distribution.md)
+- [Architecture](ARCHITECTURE.en.md)
+- [Notification window coordination and layout (Chinese)](docs/notification-layout.md)
+- [Python installation and quick start](python/README.en.md)
+- [Python SDK reference](docs/python-sdk.en.md)
+- [Live notification lifecycle (Chinese)](docs/live-notifications.md)
+- [Python package build and publishing (Chinese)](docs/python-distribution.md)
 - [JSON Schema](protocol/popu.schema.json)
-- [Contributing](CONTRIBUTING.md)
-- [Security](SECURITY.md)
+- [Contributing (Chinese)](CONTRIBUTING.md)
+- [Security (Chinese)](SECURITY.md)
 
 ## Build and test
 
@@ -206,7 +206,7 @@ Change only `package.version` in `src-tauri/Cargo.toml` for a product release. T
 
 Running `just` displays grouped help. Use `just check` for automated checks; use `just demo-fixture notification-success.json`, `just demo-fixtures notification`, or `just demo-python --wait` for interactive demos. Demos and native wheel staging resolve executables through Cargo metadata, including `CARGO_TARGET_DIR`. Set `PYTHON` to select an interpreter. Builds prepare missing/outdated icons automatically; `just icons` forces regeneration. The current `build-wheel` and `test-native` tasks are Windows-only.
 
-Issues and pull requests are welcome; see [Contributing](CONTRIBUTING.md). Native notification lifecycle tests are documented in [notification window coordination](docs/notification-layout.md) and require an unlocked Windows desktop.
+Issues and pull requests are welcome; see [Contributing (Chinese)](CONTRIBUTING.md). Native notification lifecycle tests are documented in [notification window coordination (Chinese)](docs/notification-layout.md) and require an unlocked Windows desktop.
 
 ## Scope
 

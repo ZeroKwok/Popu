@@ -1,8 +1,10 @@
-# Python SDK reference
+# Python SDK 参考
 
-For installation, runnable examples, and troubleshooting, start with the [Python package guide](../python/README.md). This reference covers request handling, notification lifetimes, window options, visuals, and runtime behavior.
+[English](python-sdk.en.md)
 
-## Requests and results
+安装、可运行示例和常见问题见 [Python 包入门](../python/README.md)。本参考说明请求处理、通知生命周期、窗口选项、图像与图表，以及运行时行为。
+
+## 请求与结果
 
 ```python
 from popu import Client, DialogRequest, Notification
@@ -20,13 +22,13 @@ snapshot = client.update(receipt.request_id, receipt.revision, {
 client.dismiss(receipt.request_id)
 ```
 
-`create` and `notify` return `RequestReceipt` (`NotificationReceipt` is an alias) with `status="accepted"`, a Host-generated `request_id`, `state`, `revision`, and `duplicate`. Acceptance can mean `queued`; it does not mean the window has already appeared. `create` returns after acceptance for dialogs as well as notifications; `show` waits and returns an `InteractionResult` containing `status`, `action`, and `values`.
+`create` 和 `notify` 返回 `RequestReceipt`（`NotificationReceipt` 为其别名），包含 `status="accepted"`、Host 生成的 `request_id`、`state`、`revision` 和 `duplicate`。接受时请求可能仍处于 `queued`，不代表窗口已经展示。无论通知还是对话框，`create` 都在请求被接受后返回；`show` 会继续等待，并返回包含 `status`、`action` 和 `values` 的 `InteractionResult`。
 
-`status`, `update`, `dismiss`, and `wait` return Host snapshot dictionaries. `wait` reads the authoritative terminal snapshot, including revision, content, timestamps, response and exit code; a hidden updatable notification is not terminal. The same request can be managed from another client using its ID. Updating requires the latest revision and replaces the entire content. Every accepted notification update restarts its display timer using the configured duration; optional `duration_ms` overrides that duration. Updates preserve a dialog's original interaction deadline. Revision conflicts, missing IDs, validation failures, sealed updates and subprocess/JSON errors raise `PopuError`.
+`status`、`update`、`dismiss` 和 `wait` 返回 Host 快照字典。`wait` 读取权威终态快照，包括 revision、内容、时间戳、响应和退出码；隐藏的可更新通知尚未进入终态。其他客户端也可以通过请求 ID 管理同一请求。更新必须使用最新 revision，并替换完整内容。每次成功的通知更新都会按配置的展示时长重新计时，可用 `duration_ms` 覆盖该时长。对话框更新保留原始交互截止时间。revision 冲突、ID 不存在、校验失败、更新通道已关闭，以及子进程或 JSON 错误都会抛出 `PopuError`。
 
-## Live notifications
+## 可更新通知
 
-Notifications default to `updatable=False` and reject updates. Opt in at creation for progress reports. Update omission preserves this flag; the last report sets `updatable=False`, atomically saving the final contents and rejecting further updates. There is no `final` field. Dialog content updates do not use notification options.
+通知默认 `updatable=False`，不接受更新。进度上报需要在创建时显式开启更新。更新时省略此选项会保留当前值；最后一次上报设置 `updatable=False`，原子保存最终内容并拒绝后续更新。不使用 `final` 字段。对话框内容更新不使用通知专用选项。
 
 ```python
 receipt = client.notify(Notification.success(title="Backing up", updatable=True))
@@ -39,23 +41,23 @@ snapshot = client.update(receipt.request_id, snapshot["revision"], {
 }, updatable=False, reshow=True, duration_ms=10000)
 ```
 
-User close hides progress and silences ordinary updates. An explicit `reshow=True` permits one further presentation by default; `reshow_suppressed` reports a consumed budget without rejecting the content. Automatic display timeout hides the card, and the next report shows it again unless the user previously closed it. `dismiss` is caller cancellation and ends the notification outright.
+用户主动关闭会收起进度并使普通更新保持静默。显式传入 `reshow=True`，默认允许额外展示一次；次数耗尽时通过 `reshow_suppressed` 告知，但仍接受内容更新。自动展示超时也会收起卡片，但只要用户之前没有主动关闭，下次上报就会再次展示。`dismiss` 表示调用方取消，会直接结束通知。
 
-The default template displays occurrence time, refreshed on every accepted report. Hidden contents remain current in history. After 12 hours without a successful report, the notification becomes `stale` and rejects updates. Host restart restores live records hidden without resetting this deadline. See the [complete lifecycle](https://github.com/ZeroKwok/Popu/blob/HEAD/docs/live-notifications.md) and [installed progress demo](https://github.com/ZeroKwok/Popu/blob/HEAD/python/src/popu/demo/README.md).
+默认模板展示通知发生时间，每次成功上报都会刷新。隐藏内容仍在历史中保持最新。连续 12 小时没有成功上报后，通知进入 `stale` 状态并拒绝更新。Host 重启后将活动记录恢复为隐藏状态，不重置该截止时间。完整规则见[通知生命周期](https://github.com/ZeroKwok/Popu/blob/HEAD/docs/live-notifications.md)，可运行示例见[包内进度演示](https://github.com/ZeroKwok/Popu/blob/HEAD/python/src/popu/demo/README.md)。
 
-Cancelled, closed, and timed-out dialogs are normal `InteractionResult` outcomes. A custom dialog action may use exit code `12` (or any other code from 0–255); the SDK reads the Host result rather than treating that business exit code as a transport error. If a terminal dialog has no response, `show` raises `PopuError` with its terminal state.
+对话框取消、关闭或超时都是正常的 `InteractionResult` 结果。自定义动作可使用 `12` 或其他 0–255 范围内的退出码；SDK 读取 Host 结果，不会将这种业务退出码当作传输错误。对话框终态没有响应时，`show` 会抛出包含终态信息的 `PopuError`。
 
-`Client.create`, `Client.show`, `Client.notify`, and the module-level `show`/`notify` helpers accept `template=Path(...)` for a trusted custom template directory. The default client uses its bundled version rather than searching `PATH`; `Client(executable=...)` overrides this explicitly. CLI communication uses UTF-8 JSON lines through a stdout pipe; there is no stdout temporary file or receipt polling. Notifications and management commands read their response line before waiting for the CLI to exit, without waiting for trailing pipe EOF. Stderr uses a temporary file so diagnostic bursts cannot block receipt delivery. After accepting a dialog, the SDK drains remaining stdout in bounded chunks and reaps its CLI in the background even if `wait` is never called; the Host owns the request lifetime and is launched without inherited CLI handles.
+`Client.create`、`Client.show`、`Client.notify` 及模块级 `show` / `notify` 辅助函数均接受 `template=Path(...)`，指定可信的自定义模板目录。默认客户端使用包内匹配版本，不搜索 `PATH`；可通过 `Client(executable=...)` 显式覆盖。CLI 使用 stdout 管道传输 UTF-8 JSON 行，不创建 stdout 临时文件或轮询回执。通知和管理命令先读取响应行，再等待 CLI 退出，不等待管道尾部 EOF。stderr 使用临时文件，避免大量诊断阻塞回执。对话框被接受后，即使调用方从未执行 `wait`，SDK 也会在后台以有界块排空剩余 stdout 并回收 CLI；请求生命周期由 Host 管理，Host 启动时不继承 CLI 句柄。
 
-CLI response reads and process waits remain interruptible on Windows: the blocking pipe read runs in a worker, while the calling thread uses bounded waits to dispatch Ctrl+C. Interrupting a call kills and reaps only its CLI and propagates `KeyboardInterrupt`; it does not stop the Host or implicitly cancel the request. SDK CLI processes run without a console on Windows so Ctrl+C is handled by the Python caller. The interactive `popu` / `python -m popu` entry point instead preserves the terminal console and standard streams, while using a separate native process group so Python remains responsible for Ctrl+C cleanup.
+Windows 上的响应读取和进程等待可以被中断：阻塞管道读取由工作线程执行，调用线程使用有界等待以分发 Ctrl+C。中断只结束并回收当前 CLI，然后向上传递 `KeyboardInterrupt`，不会停止 Host 或隐式取消请求。SDK 启动的 Windows CLI 不带控制台，由 Python 调用方处理 Ctrl+C。交互式 `popu` / `python -m popu` 入口则保留终端控制台和标准流，并让原生进程使用独立进程组，仍由 Python 负责 Ctrl+C 清理。
 
-`Client(timeout=2)` optionally limits each synchronous CLI operation to two seconds, including reading its response and waiting for process exit. The default is no deadline. Expiry raises `PopuError` and cleans up the CLI. A dialog's submission deadline ends at acceptance; it does not limit the later background reader or replace `timeout_seconds`. An explicitly configured client deadline also applies to a foreground `wait` call.
+`Client(timeout=2)` 可选地将每次同步 CLI 操作限制为两秒，包括读取响应与等待进程退出。默认不设截止时间。超时会抛出 `PopuError` 并清理 CLI。对话框提交截止时间在请求被接受后结束，不限制后续后台读取，也不替代 `timeout_seconds`。显式配置的客户端截止时间同样适用于前台 `wait` 调用。
 
-## Window options
+## 窗口选项
 
-Notifications are always submitted with `window.always_on_top=True`; `Notification.success` does not expose a non-topmost option. It defaults to the primary display work area and rejects `area=ScreenArea.SCREEN`. Raw request dictionaries are validated by the CLI/Host, which reject notification `always_on_top=False`.
+通知始终使用 `window.always_on_top=True`；`Notification.success` 不提供取消置顶的选项。默认使用主显示器工作区，并拒绝 `area=ScreenArea.SCREEN`。原始请求字典由 CLI / Host 校验，同样拒绝通知的 `always_on_top=False`。
 
-Dialog builders support `always_on_top`, `screen`, `area`, `width`, and `height`. Sizes are logical pixels or percentage strings, without manual DPI multiplication. Both builders support `vertical_align` and `coalesce_key`:
+对话框构造器支持 `always_on_top`、`screen`、`area`、`width` 和 `height`。尺寸使用逻辑像素或百分比字符串，无需手工按 DPI 放大。两类构造器均支持 `vertical_align` 和 `coalesce_key`：
 
 ```python
 from popu import Screen, ScreenArea, VerticalAlign
@@ -68,19 +70,19 @@ request = DialogRequest.confirm(
 receipt = client.notify(Notification.success(title="Backup", coalesce_key="job:backup"))
 ```
 
-For other severities, forms, or custom dialog actions, pass a complete protocol request dictionary to `create`, `show`, or `notify`. No separate Python transport or renderer is required.
+其他严重级别、表单或自定义对话框动作，可通过完整协议请求字典传给 `create`、`show` 或 `notify`，无需另行实现 Python 传输层或渲染器。
 
-## Reading requirements
+## 阅读要求
 
-Notifications accept `requires_read=True` (default: `False`):
+通知接受 `requires_read=True`，默认值为 `False`：
 
 ```python
 client.notify(Notification.success(title="Review backup results", requires_read=True))
 ```
 
-After timeout, all notifications remain unread in history, but only those requiring reading keep the tray reminder active. Displayed or queued notifications do not trigger the tray reminder; it represents only unread history requiring reading. Viewing an individual detail in the foreground history window marks it read; opening the window does not acknowledge the whole list. Reading does not change the request's terminal state. Dialogs do not accept this field.
+超时后，通知以未读状态保留在历史中，但只有声明阅读要求的通知会持续触发托盘提醒。已展示或排队的通知不会触发该提醒；它只代表历史中仍需阅读的未读内容。前台历史窗口中查看单条详情会将其标为已读，打开窗口不会批量确认整个列表。阅读不改变请求终态。对话框不接受此字段。
 
-Both builders accept `blocks=[...]` and an optional `icon` image source. Use `image_source` to capture a local SVG/PNG/JPEG/WebP file, or `svg_source` for SVG text; the submitted data is self-contained and remains available in history.
+两类构造器均接受 `blocks=[...]` 和可选的 `icon` 图像源。使用 `image_source` 读取本地 SVG、PNG、JPEG 或 WebP 文件，或使用 `svg_source` 提交 SVG 文本；提交的数据是自包含的，在历史中仍可使用。
 
 ```python
 from popu import chart_block, image_block, image_source, svg_source
@@ -101,22 +103,22 @@ picture = image_block(image_source("report.svg", alt="Report graphic"), height=2
 client.notify(Notification.success(title="Report", blocks=[picture], height=400))
 ```
 
-Chart blocks accept generic Vega-Lite 6 specifications with inline data and render interactive SVG without network access. Hover shows encoded field values by default; use `encoding.tooltip` to customize labels and formatting, or `null` to disable. Native Vega-Lite `params` support nearest-point hover, highlighting, legend selection, and scale-bound zoom/pan when declared in the spec. Compilation runs in a local worker; a CSP-compatible live Vega view handles rendering and interaction. Image blocks remain static. Changing the mark/encodings is sufficient for lines, bars and heatmaps. Visual `height` is within 64–1200; an image data URI is limited to 256 KiB, a chart spec to 128 KiB, and the complete content to 768 KiB. SVG scripts and external resources are rejected.
+图表块接受包含内联数据的通用 Vega-Lite 6 规格，离线渲染为可交互 SVG。默认悬浮提示展示编码字段值；可通过 `encoding.tooltip` 自定义标签和格式，或设为 `null` 禁用。规格中声明 Vega-Lite 原生 `params` 时，支持最近点悬浮、高亮、图例选择以及绑定坐标轴缩放和平移。编译在本地 worker 中执行，兼容 CSP 的实时 Vega 视图负责渲染和交互。图片块仍为静态内容，修改图表 mark 或编码即可展示折线、柱状图和热力图。图像与图表的 `height` 范围为 64–1200；图像 data URI 上限为 256 KiB，图表规格上限为 128 KiB，完整内容上限为 768 KiB。SVG 中的脚本与外部资源会被拒绝。
 
-## Runtime and source development
+## 运行时与源码开发
 
-For source development:
+源码开发使用 editable 安装：
 
 ```powershell
 python -m pip install -e ./python
 ```
 
-Use `Client(executable="path/to/popu.exe")` with a local build. A command sequence such as `["path/to/popu.exe"]` is also accepted. Editable installation does not build or download a native executable. The SDK targets the current Host protocol and does not accept pre-Host response formats.
+通过 `Client(executable="path/to/popu.exe")` 使用本地构建，也接受 `["path/to/popu.exe"]` 形式的命令序列。editable 安装不会构建或下载原生程序。SDK 面向当前 Host 协议，不接受引入 Host 之前的响应格式。
 
-The product version is maintained only in `src-tauri/Cargo.toml`. Builds and editable installs generate `_version.py` automatically; the installed SDK is self-contained. `just test-python` also prepares the version before running tests. For an uninstalled source checkout on `PYTHONPATH`, run `just prep-python` first. Build metadata requires the complete checkout; users should install the Windows wheel.
+产品版本只在 `src-tauri/Cargo.toml` 中维护。构建和 editable 安装自动生成 `_version.py`，安装后的 SDK 可独立使用。`just test-python` 也会在测试前准备版本。直接通过 `PYTHONPATH` 使用未安装的源码时，先运行 `just prep-python`。生成构建元数据需要完整仓库；安装用户应使用 wheel。
 
-By default, the CLI and SDK verify the bundled payload and copy it to `%LOCALAPPDATA%\Popu\runtime\<version>-win_amd64-<manifest-hash>\`. Native processes run from this immutable cache, so an active Host does not lock files inside `site-packages` during upgrade or uninstall. Old caches are retained; automatic cleanup is not implemented.
+默认情况下，CLI 和 SDK 校验包内清单，再将载荷复制到 `%LOCALAPPDATA%\Popu\runtime\<version>-win_amd64-<manifest-hash>\`。原生进程从此不可变缓存运行，避免长驻 Host 在升级或卸载时锁住 `site-packages` 内的文件。旧缓存会保留，目前未实现自动清理。
 
-Before a business request, the native CLI and Host require matching application and RPC versions through a handshake on the same connection. A legacy or incompatible Host produces a diagnostic before submission; Python raises `PopuError`. Inspect it with `python -m popu host status`, then explicitly stop it with `python -m popu host stop` or exit from its tray menu when ready. Popu never automatically stops an existing Host. Management commands remain available without the business handshake. Handshakes have a two-second deadline; this does not limit a dialog's business wait. A submitted business request is not automatically replayed after a transport failure.
+提交业务请求前，原生 CLI 和 Host 在同一连接上握手，要求应用版本与 RPC 版本完全一致。旧版或不兼容 Host 会在提交前返回诊断，Python 抛出 `PopuError`。可通过 `python -m popu host status` 查询；确认可以结束当前交互后，再执行 `python -m popu host stop` 或从托盘退出。Popu 不会自动停止已有 Host。管理命令无需业务握手即可使用。握手有两秒截止时间，不限制对话框的业务等待。已提交业务请求在传输失败后不会自动重放。
 
-Before starting a new Host, the CLI checks WebView2 availability. Missing/unavailable runtimes produce a manual installation link and the loader diagnostic rather than a background startup timeout. This check does not install software or open the browser. See [build and publishing](https://github.com/ZeroKwok/Popu/blob/HEAD/docs/python-distribution.md) for package verification and release procedures.
+启动新 Host 前，CLI 会检查 WebView2 可用性。运行时缺失或不可用时，提供手动安装链接和 loader 诊断，不会等待到后台启动超时。这项检查不安装软件，也不打开浏览器。包校验和发布操作见[构建与发布指南](https://github.com/ZeroKwok/Popu/blob/HEAD/docs/python-distribution.md)。

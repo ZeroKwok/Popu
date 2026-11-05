@@ -52,7 +52,7 @@ if result.status == "submitted" and result.action == "confirm":
     print("Deployment confirmed")
 ```
 
-进度更新示例见 [Python 入门](python/README.md#update-task-progress)，完整接口见 [SDK 参考](docs/python-sdk.md)。
+进度更新示例见 [Python 入门](python/README.md#更新任务进度)，完整接口见 [SDK 参考](docs/python-sdk.md)。
 
 ### CLI
 
