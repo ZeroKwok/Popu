@@ -4,10 +4,10 @@ from __future__ import annotations
 import argparse
 from typing import Sequence
 
-from . import progress
+from . import gold, progress
 
 
-DEMOS = {"progress": progress}
+DEMOS = {"progress": progress, "gold": gold}
 
 
 def main(argv: Sequence[str] | None = None) -> int:

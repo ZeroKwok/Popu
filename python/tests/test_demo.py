@@ -3,13 +3,14 @@ from __future__ import annotations
 import pytest
 
 from popu import PopuError
-from popu.demo import progress
+from popu.demo import gold, progress
 from popu.demo.__main__ import main
 
 
-@pytest.mark.parametrize("arguments", [["--help"], ["progress", "--help"]])
+@pytest.mark.parametrize("arguments", [["--help"], ["progress", "--help"], ["gold", "--help"]])
 def test_demo_help_explains_simulation_without_resolving_a_runtime(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, arguments: list[str]) -> None:
     monkeypatch.setattr(progress, "Client", lambda *args: pytest.fail("help must not start a client"))
+    monkeypatch.setattr(gold, "Client", lambda *args: pytest.fail("help must not start a client"))
     with pytest.raises(SystemExit) as result:
         main(arguments)
     assert result.value.code == 0
