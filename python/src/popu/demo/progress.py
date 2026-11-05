@@ -1,4 +1,4 @@
-"""Show simulated task progress and a final summary with the Popu SDK."""
+"""Show a simulated workspace backup and its final summary with the Popu SDK."""
 import argparse
 import sys
 import time
@@ -9,8 +9,16 @@ from popu import Client, PopuError
 def progress_content(percent: int) -> dict:
     return {
         "severity": "info",
-        "title": "Simulated task",
-        "blocks": [{"type": "progress", "value": percent}],
+        "title": "Backing up your workspace",
+        "blocks": [
+            {"type": "paragraph", "text": "Documents, photos, and project files.\nSimulation only."},
+            {"type": "properties", "items": [
+                {"label": "Files", "text": f"{120 * percent // 100} / 120"},
+                {"label": "Data", "text": f"{2.4 * percent / 100:.1f} / 2.4 GB"},
+                {"label": "Destination", "text": "Local vault / Daily snapshot"},
+            ]},
+            {"type": "progress", "title": "Creating daily snapshot", "value": percent},
+        ],
     }
 
 
@@ -28,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
             "version": "1.0",
             "mode": "notify",
             "template": "notification",
+            "window": {"width": 440, "height": 350},
+            "duration_ms": 15000,
             "updatable": True,
             "content": progress_content(0),
         })
@@ -43,10 +53,15 @@ def main(argv: list[str] | None = None) -> int:
         time.sleep(1)
         final_content = {
             "severity": "success",
-            "title": "Demo completed",
+            "title": "Workspace backup complete",
             "blocks": [
-                {"type": "paragraph", "text": "Simulation finished. No files were modified."},
-                {"type": "progress", "value": 100},
+                {"type": "paragraph", "text": "Daily snapshot completed.\nSimulation only. "},
+                {"type": "properties", "items": [
+                    {"label": "Files", "text": "120 backed up"},
+                    {"label": "Data", "text": "2.4 GB"},
+                    {"label": "Destination", "text": "Local vault / Daily snapshot"},
+                ]},
+                {"type": "progress", "title": "Snapshot ready", "value": 100},
             ],
         }
         client.update(
@@ -80,7 +95,7 @@ def _stop_notification(executable: str | None, request_id: str) -> None:
         snapshot = client.status(request_id)
         if snapshot.get("updatable"):
             client.update(request_id, snapshot["revision"], {
-                "severity": "warning", "title": "Demo stopped",
+                "severity": "warning", "title": "Backup demo stopped",
                 "blocks": [{"type": "paragraph", "text": "Simulation interrupted. No files were modified."}],
             }, updatable=False, duration_ms=5000)
     except (PopuError, KeyboardInterrupt) as error:

@@ -233,9 +233,9 @@ def test_progress_demo_runs_through_sdk_and_seals_its_last_report(tmp_path: Path
     assert final["reshow"] is True
     assert final["content"]["blocks"][-1]["value"] == 100
     assert submitted["request"]["content"]["severity"] == "info"
-    assert submitted["request"]["content"]["title"] == "Simulated task"
-    assert final["content"]["title"] == "Demo completed"
-    assert "No files were modified" in final["content"]["blocks"][0]["text"]
+    assert submitted["request"]["content"]["title"] == "Backing up your workspace"
+    assert final["content"]["title"] == "Workspace backup complete"
+    assert "Simulation only." in final["content"]["blocks"][0]["text"]
 
 
 def test_pending_dialog_is_accepted_without_waiting_and_reaped(tmp_path: Path) -> None:
