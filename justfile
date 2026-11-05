@@ -99,9 +99,11 @@ clean:
 prep-python:
     "{{ python }}" python/build_version.py
 
-# Install the editable SDK into the selected Python environment.
+# Build and stage the debug runtime, then install the editable SDK.
 [group("Python")]
-setup-python:
+[windows]
+setup-python: build
+    "{{ python }}" scripts/stage-python-runtime.py --dev
     "{{ python }}" -m pip install -e ./python
 
 # Run SDK tests after preparing its generated version module.

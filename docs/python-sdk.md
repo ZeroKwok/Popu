@@ -107,13 +107,15 @@ client.notify(Notification.success(title="Report", blocks=[picture], height=400)
 
 ## 运行时与源码开发
 
-在仓库根目录执行 editable 安装：
+在仓库根目录构建并安装开发环境（目前仅支持 Windows）：
 
 ```powershell
 just setup-python
 ```
 
-通过 `Client(executable="path/to/popu.exe")` 使用本地构建，也接受 `["path/to/popu.exe"]` 形式的命令序列。editable 安装不会构建或下载原生程序。SDK 面向当前 Host 协议，不接受引入 Host 之前的响应格式。
+该配方依次构建 debug CLI/Host、以 `--dev` 模式同步至 `python/src/popu/_native`、执行 `pip install -e ./python`。随后可直接使用 `Client()`、`popu` 和包内 demo；修改 CLI/Host 后重新执行即可。同步路径通过 Cargo metadata 解析，支持 `CARGO_TARGET_DIR`。单独执行 `pip install -e ./python` 不会构建或同步原生程序。
+
+通过 `Client(executable="path/to/popu.exe")` 可指定其他本地构建，也接受 `["path/to/popu.exe"]` 形式的命令序列。SDK 面向当前 Host 协议，不接受引入 Host 之前的响应格式。
 
 产品版本只在 `src-tauri/Cargo.toml` 中维护。构建和 editable 安装自动生成 `_version.py`，安装后的 SDK 可独立使用。`just test-python` 也会在测试前准备版本。直接通过 `PYTHONPATH` 使用未安装的源码时，先运行 `just prep-python`。生成构建元数据需要完整仓库；安装用户应使用 wheel。
 

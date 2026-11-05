@@ -53,9 +53,10 @@ python -m popu.demo progress --help
 
 ```sh
 just setup-python
-just build
 just demo-python --wait
 ```
+
+`just setup-python` 完成 debug 构建、开发载荷同步和 editable 安装，之后也可直接运行 `python -m popu.demo progress --wait`。修改 CLI/Host 后重新执行此配方即可。
 
 `just demo-python` 运行同一份包内进度示例，显式选择 Cargo 当前构建目录中的 debug 程序，支持 `CARGO_TARGET_DIR`，可透传示例参数。也可使用 `--executable` 指定同版本的本地程序；`--help` 不需要先构建原生程序。
 

@@ -89,6 +89,8 @@ def inspect_wheel(path: Path, native_version: str, python_version: str) -> dict:
         manifest_path = find("popu/_native/manifest.json")
         prefix = manifest_path.removesuffix("manifest.json")
         manifest = json.loads(archive.read(manifest_path))
+        if manifest.get("development"):
+            raise ValueError("Development native payload cannot be distributed in a wheel; rebuild with `just build-wheel`.")
         if manifest["version"] != native_version or manifest["platform"] != "win_amd64":
             raise ValueError("Native manifest version/platform mismatch")
         files = manifest["files"]

@@ -107,13 +107,15 @@ Chart blocks accept generic Vega-Lite 6 specifications with inline data and rend
 
 ## Runtime and source development
 
-For source development, install the editable SDK from the repository root:
+For source development, build and install the development environment from the repository root (currently Windows only):
 
 ```powershell
 just setup-python
 ```
 
-Use `Client(executable="path/to/popu.exe")` with a local build. A command sequence such as `["path/to/popu.exe"]` is also accepted. Editable installation does not build or download a native executable. The SDK targets the current Host protocol and does not accept pre-Host response formats.
+This recipe builds the debug CLI/Host, stages it into `python/src/popu/_native` with `--dev`, then runs `pip install -e ./python`. You can then use `Client()`, `popu`, and the packaged demos directly. Rerun the recipe after changing the CLI/Host. Staging resolves paths through Cargo metadata and respects `CARGO_TARGET_DIR`. Running `pip install -e ./python` alone does not build or stage a native executable.
+
+Use `Client(executable="path/to/popu.exe")` to select another local build. A command sequence such as `["path/to/popu.exe"]` is also accepted. The SDK targets the current Host protocol and does not accept pre-Host response formats.
 
 The product version is maintained only in `src-tauri/Cargo.toml`. Builds and editable installs generate `_version.py` automatically; the installed SDK is self-contained. `just test-python` also prepares the version before running tests. For an uninstalled source checkout on `PYTHONPATH`, run `just prep-python` first. Build metadata requires the complete checkout; users should install the Windows wheel.
 

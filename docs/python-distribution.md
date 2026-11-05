@@ -93,7 +93,11 @@ just test-wheel --wheel "path with spaces/popu-<版本>-py3-none-win_amd64.whl" 
 just setup-wheel
 ```
 
-该入口先校验制品内容，再使用配方选定的 Python 执行 `pip install --force-reinstall --no-index --no-deps`，将指定 wheel 安装到该解释器的当前环境。同版本也会重新安装；如果当前使用 editable SDK，会切换为 wheel 安装。 需要切回源码开发时，可运行 `just setup-python`，等价于使用同一解释器执行 `pip install -e ./python`；该入口不构建原生程序。
+该入口先校验制品内容，再使用配方选定的 Python 执行 `pip install --force-reinstall --no-index --no-deps`，将指定 wheel 安装到该解释器的当前环境。同版本也会重新安装；如果当前使用 editable SDK，会切换为 wheel 安装。需要切回源码开发时，可运行 `just setup-python`，依次构建 debug CLI/Host、同步开发载荷到 `_native`、使用同一解释器执行 `pip install -e ./python`。修改 CLI/Host 后重新执行此配方即可。
+
+`scripts/stage-python-runtime.py` 共用一套同步流程：默认从 wheel 专用 target 的 release 目录准备发行载荷，检查静态 CRT、版本、架构和完整许可；`--dev` 默认选择 Cargo 当前 debug 构建，只校验版本、架构并生成文件哈希，不要求发行许可，也允许动态 CRT。两种模式均支持 `--executable` 和 `--dll`，通过 Cargo metadata 支持 `CARGO_TARGET_DIR`。已有构建可单独执行 `python scripts/stage-python-runtime.py --dev` 进行轻量同步。
+
+开发清单包含 `development: true`，wheel 构建和制品验证都会拒绝它。`just build-wheel` 会重新准备完整的发行载荷，覆盖开发载荷。默认 CLI/SDK 仍通过清单哈希选择运行时缓存，更新 `_native` 不会自动停止已有 Host。
 
 默认使用 `python`，可通过 `PYTHON` 环境变量指定解释器。安装前会打印目标解释器路径，安装后打印使用该解释器运行 demo 的命令。它不会创建额外环境、启动 demo、停止 Host 或重新构建制品。
 

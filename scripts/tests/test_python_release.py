@@ -210,6 +210,101 @@ def test_staging_rejects_real_license_changes_before_replacing_a_payload(stage_p
     assert not (bundle / "manifest.json").exists()
 
 
+@pytest.mark.parametrize("dev", [False, True])
+def test_staging_selects_the_matching_cargo_build(stage_project: Path, monkeypatch: pytest.MonkeyPatch, dev: bool) -> None:
+    calls = []
+
+    def executable(*args, **kwargs):
+        calls.append((args, kwargs))
+        return stage_project / "native/popu.exe"
+
+    monkeypatch.setitem(staging["main"].__globals__, "native_executable", executable)
+    staging["main"](["--dev"] if dev else [])
+    expected = ((), {}) if dev else (("release",), {"target": "x86_64-pc-windows-msvc"})
+    assert calls == [expected]
+    manifest = json.loads((stage_project / "python/src/popu/_native/manifest.json").read_text())
+    assert manifest.get("development", False) is dev
+
+
+def test_dev_staging_only_needs_binaries_and_replaces_stale_release_files(stage_project: Path) -> None:
+    staging["main"]([])
+    for name in ("LICENSE", "python/LICENSE", "src-tauri/Cargo.lock", "ui/dist/vendor/THIRD_PARTY_LICENSES.txt", "python/build/RUST_THIRD_PARTY_LICENSES.txt"):
+        (stage_project / name).unlink()
+    binary = pe("VCRUNTIME140D.dll")
+    (stage_project / "native/popu.exe").write_bytes(binary)
+    library = stage_project / "native/helper.dll"
+    library.write_bytes(pe("MSVCP140D.dll"))
+    staging["main"](["--dev", "--executable", str(stage_project / "native/popu.exe"), "--dll", str(library)])
+    bundle = stage_project / "python/src/popu/_native"
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    assert set(path.name for path in bundle.iterdir()) == {"popu.exe", "helper.dll", "manifest.json"}
+    assert manifest["development"] is True
+    assert manifest["files"] == {"popu.exe": hashlib.sha256(binary).hexdigest(), "helper.dll": hashlib.sha256(library.read_bytes()).hexdigest()}
+
+
+@pytest.mark.parametrize("change", ["architecture", "version"])
+def test_dev_staging_validates_before_replacing_payload(stage_project: Path, monkeypatch: pytest.MonkeyPatch, change: str) -> None:
+    staging["main"]([])
+    bundle = stage_project / "python/src/popu/_native"
+    original = (bundle / "manifest.json").read_bytes()
+    if change == "architecture":
+        binary = bytearray(pe())
+        struct.pack_into("<H", binary, 0x84, 0x14C)
+        (stage_project / "native/popu.exe").write_bytes(binary)
+    else:
+        monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "popu 9.9.9\n"))
+    with pytest.raises(ValueError):
+        staging["main"](["--dev"])
+    assert (bundle / "manifest.json").read_bytes() == original
+
+
+def test_release_staging_still_rejects_dynamic_crt(stage_project: Path) -> None:
+    (stage_project / "native/popu.exe").write_bytes(pe("VCRUNTIME140.dll"))
+    with pytest.raises(ValueError, match="static CRT"):
+        staging["main"]([])
+
+
+def test_release_staging_replaces_development_manifest_and_files(stage_project: Path) -> None:
+    library = stage_project / "native/helper.dll"
+    library.write_bytes(pe())
+    staging["main"](["--dev", "--dll", str(library)])
+    staging["main"]([])
+    bundle = stage_project / "python/src/popu/_native"
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    assert "development" not in manifest
+    assert set(manifest["files"]) == {"popu.exe", "LICENSE", "THIRD_PARTY_LICENSES.txt", "RUST_THIRD_PARTY_LICENSES.txt"}
+    assert not (bundle / "helper.dll").exists()
+
+
+@pytest.mark.parametrize("dev", [False, True])
+def test_wheel_build_rejects_dev_payload_but_accepts_release(stage_project: Path, monkeypatch: pytest.MonkeyPatch, dev: bool) -> None:
+    import build_version
+    import setuptools
+    from setuptools.errors import SetupError
+
+    monkeypatch.setattr(setuptools, "setup", lambda **kwargs: None)
+    monkeypatch.setattr(build_version, "generate_version", lambda: "0.1.1")
+    config = runpy.run_path(str(ROOT / "python/setup.py"))
+    validate = config["validate_payload"]
+    monkeypatch.setitem(validate.__globals__, "__file__", str(stage_project / "python/setup.py"))
+    staging["main"](["--dev"] if dev else [])
+    if dev:
+        with pytest.raises(SetupError, match="Development native payload.*just build-wheel"):
+            validate("0.1.1")
+    else:
+        validate("0.1.1")
+
+
+def test_release_verifier_rejects_dev_payload_even_with_complete_licenses(tmp_path: Path, wheel_files: dict) -> None:
+    manifest = json.loads(wheel_files["popu/_native/manifest.json"])
+    manifest["development"] = True
+    wheel_files["popu/_native/manifest.json"] = json.dumps(manifest).encode()
+    wheel = tmp_path / "popu-0.1.1-py3-none-win_amd64.whl"
+    write_wheel(wheel, wheel_files)
+    with pytest.raises(ValueError, match="Development native payload"):
+        release["inspect_wheel"](wheel, "0.1.1", "0.1.1")
+
+
 @pytest.mark.parametrize("change", ["checksum", "missing_license", "platform", "stale_license"])
 def test_invalid_wheel_is_rejected_even_with_a_correct_record(tmp_path: Path, wheel_files: dict, change: str) -> None:
     if change == "checksum":

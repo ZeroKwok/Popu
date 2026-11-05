@@ -22,6 +22,8 @@ def validate_payload(version: str) -> None:
     bundle = Path(__file__).parent / "src" / "popu" / "_native"
     try:
         manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+        if manifest.get("development"):
+            raise SetupError("Development native payload cannot be packaged in a wheel. Run `just build-wheel` to prepare a release payload.")
         if manifest["version"] != version or manifest["platform"] != "win_amd64" or "popu.exe" not in manifest["files"]:
             raise ValueError("payload version or platform mismatch")
         if not isinstance(manifest["files"], dict):
