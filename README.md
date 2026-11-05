@@ -185,7 +185,7 @@ just setup
 just build-release
 ```
 
-Windows 可执行文件位于 `src-tauri/target/release/popu.exe`。将该目录加入 `PATH`，或直接使用此路径调用。源码开发可执行 `python -m pip install -e ./python`，并通过 `Client(executable="src-tauri/target/release/popu.exe")` 指定本地构建；editable 安装不会构建或下载二进制。正式 Windows wheel 则同时包含原生可执行文件与 SDK。
+Windows 可执行文件位于 `src-tauri/target/release/popu.exe`。将该目录加入 `PATH`，或直接使用此路径调用。源码开发可执行 `just setup-python`，并通过 `Client(executable="src-tauri/target/release/popu.exe")` 指定本地构建；editable 安装不会构建或下载二进制。正式 Windows wheel 则同时包含原生可执行文件与 SDK。
 
 运行测试：
 

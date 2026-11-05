@@ -52,7 +52,7 @@ python -m popu.demo progress --help
 在仓库根目录执行：
 
 ```sh
-python -m pip install -e ./python
+just setup-python
 just build
 just demo-python --wait
 ```

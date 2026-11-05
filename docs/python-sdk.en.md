@@ -107,10 +107,10 @@ Chart blocks accept generic Vega-Lite 6 specifications with inline data and rend
 
 ## Runtime and source development
 
-For source development:
+For source development, install the editable SDK from the repository root:
 
 ```powershell
-python -m pip install -e ./python
+just setup-python
 ```
 
 Use `Client(executable="path/to/popu.exe")` with a local build. A command sequence such as `["path/to/popu.exe"]` is also accepted. Editable installation does not build or download a native executable. The SDK targets the current Host protocol and does not accept pre-Host response formats.

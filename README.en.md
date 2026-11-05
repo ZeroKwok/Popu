@@ -185,7 +185,7 @@ just setup
 just build-release
 ```
 
-On Windows, the executable is `src-tauri/target/release/popu.exe`. Add that directory to `PATH` or invoke it by path. For source development, run `python -m pip install -e ./python` and use `Client(executable="src-tauri/target/release/popu.exe")`; editable installs do not build or download binaries. The Windows wheel includes both the native executable and SDK.
+On Windows, the executable is `src-tauri/target/release/popu.exe`. Add that directory to `PATH` or invoke it by path. For source development, run `just setup-python` and use `Client(executable="src-tauri/target/release/popu.exe")`; editable installs do not build or download binaries. The Windows wheel includes both the native executable and SDK.
 
 Run tests:
 

@@ -99,6 +99,11 @@ clean:
 prep-python:
     "{{ python }}" python/build_version.py
 
+# Install the editable SDK into the selected Python environment.
+[group("Python")]
+setup-python:
+    "{{ python }}" -m pip install -e ./python
+
 # Run SDK tests after preparing its generated version module.
 [group("Python")]
 test-python: prep-python

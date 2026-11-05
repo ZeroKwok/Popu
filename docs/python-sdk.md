@@ -107,10 +107,10 @@ client.notify(Notification.success(title="Report", blocks=[picture], height=400)
 
 ## 运行时与源码开发
 
-源码开发使用 editable 安装：
+在仓库根目录执行 editable 安装：
 
 ```powershell
-python -m pip install -e ./python
+just setup-python
 ```
 
 通过 `Client(executable="path/to/popu.exe")` 使用本地构建，也接受 `["path/to/popu.exe"]` 形式的命令序列。editable 安装不会构建或下载原生程序。SDK 面向当前 Host 协议，不接受引入 Host 之前的响应格式。

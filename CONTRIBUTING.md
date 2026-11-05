@@ -11,7 +11,7 @@ just test-visuals
 just fmt-check
 ```
 
-根目录 just 负责跨项目编排。UI 源码、图表入口、npm 配置和前端测试位于 `ui/`，生成到 `ui/dist/`；Cargo 只读取这个产物。`scripts/` 保留跨项目打包和原生 smoke 工具。首次检出需安装 ImageMagick 并生成原生图标；Python 测试与构建工具请在开发虚拟环境中安装 pytest、packaging、build 和 twine。
+根目录 just 负责跨项目编排。 Python 源码开发使用 `just setup-python`，将 SDK 以 editable 方式安装到配方选定的解释器环境；可通过 `PYTHON` 指定解释器。UI 源码、图表入口、npm 配置和前端测试位于 `ui/`，生成到 `ui/dist/`；Cargo 只读取这个产物。`scripts/` 保留跨项目打包和原生 smoke 工具。首次检出需安装 ImageMagick 并生成原生图标；Python 测试与构建工具请在开发虚拟环境中安装 pytest、packaging、build 和 twine。
 
 `just` 默认只显示帮助；配方按 Project、UI、Rust、Python、Demo 分组。`check` 包含无人工交互的工具、SDK、UI 和 Rust 测试；`fmt-check` 单独检查 Rust 格式。需要人操作或展示窗口的示例使用 `demo-*`，原生 smoke 显式运行 `test-native`。旧的 `test <fixture>`、`build-test`、`build-test-release` 分别改为 `demo-fixture`、`demo-fixtures`、`demo-fixture-release`；空前缀表示全部示例，不再提供冗余的 `build-test-all`。
 

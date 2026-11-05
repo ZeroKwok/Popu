@@ -93,7 +93,7 @@ just test-wheel --wheel "path with spaces/popu-<版本>-py3-none-win_amd64.whl" 
 just setup-wheel
 ```
 
-该入口先校验制品内容，再使用配方选定的 Python 执行 `pip install --force-reinstall --no-index --no-deps`，将指定 wheel 安装到该解释器的当前环境。同版本也会重新安装；如果当前使用 editable SDK，会切换为 wheel 安装。
+该入口先校验制品内容，再使用配方选定的 Python 执行 `pip install --force-reinstall --no-index --no-deps`，将指定 wheel 安装到该解释器的当前环境。同版本也会重新安装；如果当前使用 editable SDK，会切换为 wheel 安装。 需要切回源码开发时，可运行 `just setup-python`，等价于使用同一解释器执行 `pip install -e ./python`；该入口不构建原生程序。
 
 默认使用 `python`，可通过 `PYTHON` 环境变量指定解释器。安装前会打印目标解释器路径，安装后打印使用该解释器运行 demo 的命令。它不会创建额外环境、启动 demo、停止 Host 或重新构建制品。
 
