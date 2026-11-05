@@ -107,9 +107,9 @@ def test_python_demo_runs_in_this_process_and_preserves_arguments(tmp_path: Path
     module.main = run
     monkeypatch.setitem(sys.modules, "popu.demo.__main__", module)
     with pytest.raises(SystemExit) as result:
-        dev.python_demo(["--", "--interval", "2", "--steps", "4"])
+        dev.python_demo(["--", "--wait"])
     assert result.value.code == 130
-    assert observed == [["progress", "--executable", str(executable), "--interval", "2", "--steps", "4"]]
+    assert observed == [["progress", "--executable", str(executable), "--wait"]]
 
 
 @pytest.mark.parametrize("arguments", [["--help"], ["--executable", "some path/popU", "--wait"]])

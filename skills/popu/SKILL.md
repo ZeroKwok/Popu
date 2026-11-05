@@ -26,7 +26,7 @@ Use one dialog for one decision. A progress notification reports the caller's ta
 - Both `popu` and `python -m popu` expose the CLI. Use `--version`, `--help`, and `templates list` to inspect an installation without creating a request. The Host starts automatically on the first business request; do not start a second Host manually.
 - `Client()` resolves the bundled version rather than searching `PATH`. Use `Client(executable=...)` only for a caller-selected local build or deployment override.
 - An incompatible running Host is rejected before submission. Inspect `host status`; stop or exit the old Host only when ending its active interactions is appropriate and authorized by the task. Do not replace it as an automatic retry.
-- `python -m popu.demo progress` demonstrates simulated progress without accessing backup files. Add `--wait` to wait for the final presentation to end. Keep demo console messages in English; choose actual notification text for the user's language.
+- `python -m popu.demo progress` demonstrates a simulated task without modifying user files. Add `--wait` to wait for the final presentation to end. Keep demo console messages in English; choose actual notification text for the user's language.
 
 Read [integration examples](references/examples.md) when implementing SDK calls, raw requests, progress updates, or visuals. For nontrivial raw JSON, consult the authoritative [request schema](https://github.com/ZeroKwok/Popu/blob/master/protocol/popu.schema.json) and [update schema](https://github.com/ZeroKwok/Popu/blob/master/protocol/update.schema.json); in a source checkout, use the local `protocol/` files and examples.
 

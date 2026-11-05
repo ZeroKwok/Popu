@@ -15,7 +15,7 @@ python -m popu templates list
 
 Currently supported: Windows x64, 64-bit Python 3.10+, and [Microsoft WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/). Popu supplies a manual installation link when the runtime is missing; it does not install WebView2 automatically.
 
-The packaged simulation is `python -m popu.demo progress`; add `--wait` to wait for the final presentation. It does not operate on backup files.
+The packaged simulation is `python -m popu.demo progress`; add `--wait` to wait for the final presentation. It simulates a short task without modifying user files.
 
 ## Python notification
 

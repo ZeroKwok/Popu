@@ -1,109 +1,87 @@
-"""Demonstrate simulated progress through the Popu Python SDK.
-
-The mock backup scenario only generates progress and statistics. It never
-reads, copies, modifies, or verifies your backup files.
-
-Run after installing Popu:
-    python -m popu.demo progress
-Add --wait to wait for the final presentation to end.
-
-Close the progress card: subsequent reports stay silent, and the final report
-requests the single allowed reshow. Leave it open to see in-place updates, or
-use --interval 6 --display-seconds 5 to see automatic expiry and the next report.
-"""
-from __future__ import annotations
-
+"""Show simulated task progress and a final summary with the Popu SDK."""
 import argparse
-import math
 import sys
 import time
-from pathlib import Path
-from typing import Sequence
 
-from popu import Client, Notification, PopuError
+from popu import Client, PopuError
 
 
-def content(percent: int, elapsed: float, *, finished: bool = False) -> dict:
-    simulated_files = 2000 * percent // 100
+def progress_content(percent: int) -> dict:
     return {
-        "severity": "success" if finished else "info",
-        "title": "模拟进度演示完成" if finished else "模拟进度演示 · 进行中",
-        "blocks": [
-            {"type": "paragraph", "text": "模拟进度演示已完成。未执行真实备份，未对你的备份文件做任何操作。" if finished else "以模拟备份场景展示进度，文件数量和数据量均为模拟。不会读取、复制或修改你的备份文件。"},
-            {"type": "properties", "items": [
-                {"label": "文件（模拟）", "text": f"{simulated_files:,} / 2,000"},
-                {"label": "数据量（模拟）", "text": f"{2.4 * percent / 100:.2f} / 2.40 GB"},
-                {"label": "演示耗时", "text": f"{elapsed:.0f} 秒"},
-                {"label": "场景", "text": "模拟备份 · 虚拟目标"},
-            ]},
-            {"type": "progress", "title": "模拟进度", "value": percent},
-        ],
+        "severity": "info",
+        "title": "Simulated task",
+        "blocks": [{"type": "progress", "value": percent}],
     }
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m popu.demo progress", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--executable", type=Path, help="Path to a local popu executable; defaults to the bundled runtime")
-    parser.add_argument("--interval", type=float, default=3, help="Seconds between reports (default: 3)")
-    parser.add_argument("--steps", type=int, default=12, help="Number of report intervals (default: 12)")
-    parser.add_argument("--display-seconds", type=float, default=20, help="Initial display duration (default: 20)")
-    parser.add_argument("--final-seconds", type=float, default=10, help="Final display duration (default: 10)")
-    parser.add_argument("--wait", action="store_true", help="Wait for the final presentation to end")
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m popu.demo progress", description=__doc__)
+    parser.add_argument("--wait", action="store_true", help="Wait for the final notification to close")
+    parser.add_argument("--executable", help="Use a local Popu executable for source development")
     args = parser.parse_args(argv)
-    if not math.isfinite(args.interval) or args.interval <= 0 or args.steps < 1 or not 0.5 <= args.display_seconds <= 86400 or not 0.5 <= args.final_seconds <= 86400:
-        parser.error("interval must be finite and positive, steps >= 1, and display durations between 0.5 and 86400 seconds")
 
     receipt = None
-    finished = False
     try:
-        print("Simulated progress demo (mock backup): no backup files will be read, copied, or modified.", flush=True)
+        print("Simulated progress demo. No files will be modified.", flush=True)
         client = Client(args.executable)
-        initial = content(0, 0)
-        notification = Notification.success(
-            title=initial["title"], blocks=initial["blocks"], updatable=True,
-            duration_ms=round(args.display_seconds * 1000), width=440, height=360,
-        ).as_dict()
-        notification["content"] = initial
-        receipt = client.notify(notification)
+        receipt = client.notify({
+            "version": "1.0",
+            "mode": "notify",
+            "template": "notification",
+            "updatable": True,
+            "content": progress_content(0),
+        })
         revision = receipt.revision
-        started = time.monotonic()
-        print(f"Notification ID: {receipt.request_id}", flush=True)
-        print("Close the card to hide progress; press Ctrl+C to stop. The final summary requests one reshow.", flush=True)
-        for step in range(1, args.steps + 1):
-            time.sleep(args.interval)
-            percent = step * 100 // args.steps
-            is_final = step == args.steps
-            snapshot = client.update(
-                receipt.request_id, revision, content(percent, time.monotonic() - started, finished=is_final),
-                **({"updatable": False, "reshow": True, "duration_ms": round(args.final_seconds * 1000)} if is_final else {}),
-            )
+
+        # Each update replaces the full content and returns a new revision.
+        for percent in (20, 40, 60, 80):
+            time.sleep(1)
+            snapshot = client.update(receipt.request_id, revision, progress_content(percent))
             revision = snapshot["revision"]
-            finished = is_final
-            print(f"{percent:3d}% | state={snapshot['state']} | revision={revision} | reshow_suppressed={snapshot.get('reshow_suppressed', False)}", flush=True)
+            print(f"Progress: {percent}%", flush=True)
+
+        time.sleep(1)
+        final_content = {
+            "severity": "success",
+            "title": "Demo completed",
+            "blocks": [
+                {"type": "paragraph", "text": "Simulation finished. No files were modified."},
+                {"type": "progress", "value": 100},
+            ],
+        }
+        client.update(
+            receipt.request_id,
+            revision,
+            final_content,
+            updatable=False,
+            reshow=True,
+            duration_ms=10000,
+        )
+        print("Progress: 100%\nDemo completed.", flush=True)
         if args.wait:
-            result = client.wait(receipt.request_id)
-            print(f"Archived: {result['state']}. View the final summary in notification history from the tray.", flush=True)
+            client.wait(receipt.request_id)
+            print("Final notification finished.", flush=True)
     except KeyboardInterrupt:
-        print("\nSimulated progress demo stopped.", flush=True)
-        if receipt is not None and not finished:
+        print("\nDemo stopped.", flush=True)
+        if receipt is not None:
             _stop_notification(args.executable, receipt.request_id)
         return 130
     except PopuError as error:
-        print(f"Could not run the simulated progress demo: {error}", file=sys.stderr, flush=True)
+        print(f"Could not run the demo: {error}", file=sys.stderr, flush=True)
         return 1
     return 0
 
 
-def _stop_notification(executable: Path | None, request_id: str) -> None:
-    # An interrupted update may already have reached the Host. Fetch its latest
-    # revision, and bound both cleanup commands so shutdown cannot hang.
+def _stop_notification(executable: str | None, request_id: str) -> None:
+    # An interrupted update may already be accepted. Read its latest revision;
+    # use bounded cleanup so stopping the example cannot hang.
     try:
         client = Client(executable, timeout=1)
         snapshot = client.status(request_id)
         if snapshot.get("updatable"):
             client.update(request_id, snapshot["revision"], {
-                "severity": "warning", "title": "模拟进度演示已停止",
-                "blocks": [{"type": "paragraph", "text": "模拟进度演示被中断。未执行真实备份，未对你的备份文件做任何操作。"}],
+                "severity": "warning", "title": "Demo stopped",
+                "blocks": [{"type": "paragraph", "text": "Simulation interrupted. No files were modified."}],
             }, updatable=False, duration_ms=5000)
     except (PopuError, KeyboardInterrupt) as error:
         print(f"Notification cleanup skipped: {error or 'interrupted again'}", flush=True)

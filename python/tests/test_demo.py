@@ -16,7 +16,7 @@ def test_demo_help_explains_simulation_without_resolving_a_runtime(monkeypatch: 
     assert "simulat" in capsys.readouterr().out.lower()
 
 
-@pytest.mark.parametrize("arguments", [[], ["backup"], ["progress", "--interval", "nan"], ["progress", "--interval", "inf"], ["progress", "--steps", "0"], ["progress", "--unknown"]])
+@pytest.mark.parametrize("arguments", [[], ["backup"], ["progress", "--interval", "1"], ["progress", "--steps", "2"], ["progress", "--display-seconds", "5"], ["progress", "--final-seconds", "5"], ["progress", "--executable"], ["progress", "--unknown"]])
 def test_invalid_demo_arguments_fail_before_submitting_any_notification(monkeypatch: pytest.MonkeyPatch, arguments: list[str]) -> None:
     monkeypatch.setattr(progress, "Client", lambda *args: pytest.fail("invalid options must not start a client"))
     with pytest.raises(SystemExit) as result:
@@ -31,7 +31,7 @@ def test_demo_startup_errors_are_reported_without_a_traceback(monkeypatch: pytes
     assert main(["progress"]) == 1
     output = capsys.readouterr()
     assert "Simulated progress demo" in output.out
-    assert "no backup files will be read, copied, or modified" in output.out
+    assert "No files will be modified." in output.out
     assert "bundled runtime unavailable" in output.err
     assert (output.out + output.err).isascii()
 
@@ -45,9 +45,11 @@ def test_demo_console_is_english_during_updates_wait_and_cleanup(monkeypatch: py
             pass
 
         def notify(self, notification):
+            assert str(notification).isascii()
             return RequestReceipt("demo", "shown", 1)
 
         def update(self, request_id, revision, content, **kwargs):
+            assert str(content).isascii()
             if phase == "error":
                 raise PopuError("update failed")
             if phase != "complete":
@@ -66,18 +68,17 @@ def test_demo_console_is_english_during_updates_wait_and_cleanup(monkeypatch: py
 
     monkeypatch.setattr(progress, "Client", DemoClient)
     monkeypatch.setattr(progress.time, "sleep", lambda _: None)
-    result = main(["progress", "--steps", "2", "--wait"])
+    result = main(["progress", "--wait"])
     assert result == (0 if phase == "complete" else 1 if phase == "error" else 130)
     output = capsys.readouterr()
     assert (output.out + output.err).isascii()
-    assert "Notification ID: demo" in output.out
     if phase == "complete":
-        assert "100% | state=shown" in output.out
-        assert "Archived: completed" in output.out
+        assert "Progress: 100%" in output.out
+        assert "Final notification finished." in output.out
     elif phase == "error":
-        assert "Could not run the simulated progress demo: update failed" in output.err
+        assert "Could not run the demo: update failed" in output.err
     else:
-        assert "Simulated progress demo stopped." in output.out
+        assert "Demo stopped." in output.out
         assert "Notification cleanup skipped:" in output.out
 
 

@@ -224,7 +224,7 @@ def test_progress_demo_runs_through_sdk_and_seals_its_last_report(tmp_path: Path
         return client
     monkeypatch.setattr(demo, "Client", make_client)
     monkeypatch.setattr(demo.time, "sleep", lambda seconds: None)
-    assert main(["progress", "--steps", "2", "--interval", "0.01"]) == 0
+    assert main(["progress"]) == 0
     assert executables == [None]  # Installed demos use the bundled runtime.
     submitted = json.loads((tmp_path / "input.json").read_text(encoding="utf-8"))
     final = json.loads((tmp_path / "update.json").read_text(encoding="utf-8"))
@@ -232,9 +232,10 @@ def test_progress_demo_runs_through_sdk_and_seals_its_last_report(tmp_path: Path
     assert final["updatable"] is False
     assert final["reshow"] is True
     assert final["content"]["blocks"][-1]["value"] == 100
-    assert "模拟" in submitted["request"]["content"]["title"]
-    assert "模拟" in final["content"]["title"]
-    assert "未执行真实备份" in final["content"]["blocks"][0]["text"]
+    assert submitted["request"]["content"]["severity"] == "info"
+    assert submitted["request"]["content"]["title"] == "Simulated task"
+    assert final["content"]["title"] == "Demo completed"
+    assert "No files were modified" in final["content"]["blocks"][0]["text"]
 
 
 def test_pending_dialog_is_accepted_without_waiting_and_reaped(tmp_path: Path) -> None:
