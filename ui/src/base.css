@@ -70,14 +70,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .popu-icon img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .popu-title { min-width:0; margin: 1px 0 0; font-size: 18px; line-height: 1.35; font-weight: 650; overflow-wrap:anywhere; }
 .popu-body { display:flex; flex:1 1 auto; flex-direction:column; min-width:0; min-height:0; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; }
+/* Reserve the same text width during measurement and after overflow appears. */
+html.popu-auto-height .popu-body { scrollbar-gutter: stable; }
+html.popu-measuring #app { height: auto; }
+html.popu-measuring [data-popu-size-root] { height: auto; max-height: none; }
+html.popu-measuring .popu-body { flex: none; overflow-y: hidden; }
 .popu-content { display:grid; flex:none; min-width:0; gap:14px; margin:12px 0 14px; color:#525866; }
 .popu-content[data-popu-vertical-align="center"] { margin-block:auto; padding-block:12px 14px; }
 .popu-block { min-width:0; }
 .popu-block-title { margin:0 0 6px; font-size:13px; }
 .popu-visual { display: grid; min-width: 0; gap: 6px; margin: 0; }
-.popu-visual img { display: block; max-width: 100%; width: 100%; height: auto; object-fit: contain; object-position: left center; }
+.popu-visual img { display: block; max-width: 100%; width: 100%; height: 100%; object-fit: contain; object-position: left center; }
+.popu-image-frame { width: 100%; min-width: 0; overflow: hidden; }
 .popu-visual figcaption { color: inherit; font-size: 12px; overflow-wrap: anywhere; }
-.popu-chart { position: relative; width: 100%; min-width: 0; }
+.popu-chart { position: relative; width: 100%; min-width: 0; overflow: auto; overscroll-behavior: contain; }
 .popu-chart svg { display: block; max-width: 100%; height: auto; }
 .popu-chart-tooltip { position: fixed; z-index: 10000; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; max-width: min(320px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: hidden; padding: 9px 12px; border: 1px solid #c9ced8; border-radius: 7px; background: #fff; color: #202124; box-shadow: 0 3px 12px #0003; font-size: 12px; line-height: 1.4; pointer-events: none; }
 .popu-chart-tooltip strong, .popu-chart-tooltip span { overflow-wrap: anywhere; white-space: pre-wrap; }

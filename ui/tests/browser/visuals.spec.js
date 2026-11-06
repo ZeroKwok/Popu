@@ -23,6 +23,7 @@ function fixtureViewport(fixture) {
 }
 
 async function mockHost(page, fixture, history = [], foreground = true, opened = true) {
+  await page.exposeFunction("resizeNative", (size) => page.setViewportSize(size));
   fixture = { ...fixture, actions: (fixture.actions ?? []).map((action) => ({ style: "primary", submit: false, ...action })) };
   const mode = fixture.mode === "notify" ? "notification" : "confirm";
   const template = {
@@ -52,7 +53,13 @@ async function mockHost(page, fixture, history = [], foreground = true, opened =
           throw '{"code":"revision_conflict","current_revision":2}';
         }
         if (command === "get_bootstrap") return { request: fixture, revision: 1, occurred_at_ms: Date.now() - 15000, template, maximized: fixture.window?.width === "100%" && fixture.window?.height === "100%" };
-        if (command === "ui_ready") { window.__readyRevisions.push(args.revision); window.__presented = true; return; }
+        if (command === "ui_ready") { window.popuLockSize?.(); window.__readyRevisions.push(args.revision); window.__presented = true; return; }
+        if (command === "fit_window") {
+          const min = fixture.mode === "dialog" ? 160 : 120;
+          const max = fixture.mode === "dialog" ? 720 : 480;
+          await window.resizeNative({ width: innerWidth, height: Math.max(min, Math.min(max, args.measurement?.height ?? (fixture.mode === "dialog" ? 300 : 220))) });
+          return true;
+        }
         if (command === "render_failed") { window.__failed = args.message; return; }
         if (command === "history_presented") { window.__historyPresented = true; return opened; }
         if (command === "history_trace") return;
@@ -221,7 +228,7 @@ test("long content remains scrollable and its end is reachable", async ({ page }
 for (const name of examples) {
   test(`${name} renders offline without overflow or CSP violations`, async ({ page }, testInfo) => {
     const fixture = readJson(`protocol/examples/${name}`);
-    await page.setViewportSize({ width: fixture.window.width, height: fixture.window.height });
+    await page.setViewportSize(fixtureViewport(fixture));
     const violations = [];
     const network = [];
     page.on("console", (message) => { if (/Content Security Policy|Refused to|EvalError/.test(message.text())) violations.push(message.text()); });

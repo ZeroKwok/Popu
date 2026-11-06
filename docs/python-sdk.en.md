@@ -67,7 +67,7 @@ Notifications are always submitted with `window.always_on_top=True`; `Notificati
 
 Dialog builders support `always_on_top`, `screen`, `area`, `width`, and `height`. Sizes are logical pixels or percentage strings, without manual DPI multiplication. Both builders support `vertical_align` and `coalesce_key`.
 
-When omitted, notification dimensions default to `360 × 220` and dialog dimensions to `440 × 300`. These include the title, notification timestamp, margins, and actions. Richer progress or images should specify enough height. An explicit height does not receive an additional timestamp allowance; content exceeding the body remains scrollable.
+Default widths are `360` for notifications and `440` for dialogs. Omit `height` to fit the initial whole-window layout within `120–480` or `160–720`, respectively, also limited by the display area and vertical margins. Supplying only `width` is supported. The window size stays fixed after first presentation; content updates and image loading use the existing space, with scrolling for overflowing content. Images reserve a fixed height before decoding (default 320), and charts default to a fixed height of 220. Explicit window heights retain their previous semantics, including title, timestamp, margins, and actions.
 
 For example:
 

@@ -3,7 +3,7 @@
 use tauri::{LogicalSize, PhysicalPosition, WebviewWindow};
 
 use crate::placement::WindowPlacement;
-use crate::protocol::{Request, Screen, ScreenArea};
+use crate::protocol::{Screen, ScreenArea};
 use crate::placement::Display;
 
 pub const EXIT_OK: i32 = 0;
@@ -82,16 +82,12 @@ fn set_window_cloaked(hwnd: windows_sys::Win32::Foundation::HWND, cloaked: bool)
 #[cfg(not(windows))]
 pub(crate) fn reveal_windows_window(_window: &WebviewWindow) -> Result<(), String> { Ok(()) }
 
-pub(crate) fn resolve_window_placement(request: &Request) -> Result<WindowPlacement, String> {
-    Ok(resolve_display(request.window.screen, request.window.area)?.resolve(request))
-}
-
 pub(crate) fn notification_display() -> Result<Display, String> {
     resolve_display(Screen::Primary, ScreenArea::WorkArea)
 }
 
 #[cfg(windows)]
-fn resolve_display(screen: Screen, area_kind: ScreenArea) -> Result<Display, String> {
+pub(crate) fn resolve_display(screen: Screen, area_kind: ScreenArea) -> Result<Display, String> {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY};
     use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
@@ -116,7 +112,7 @@ fn resolve_display(screen: Screen, area_kind: ScreenArea) -> Result<Display, Str
 }
 
 #[cfg(not(windows))]
-fn resolve_display(_screen: Screen, _area: ScreenArea) -> Result<Display, String> {
+pub(crate) fn resolve_display(_screen: Screen, _area: ScreenArea) -> Result<Display, String> {
     Ok(Display { area: crate::placement::Rect { x: 0, y: 0, width: 1920, height: 1080 }, scale: 1.0 })
 }
 

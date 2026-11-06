@@ -71,7 +71,7 @@ function renderProgress(block, section) {
   section.append(row);
 }
 
-function renderBlock(block, renderForm, signal, pending) {
+function renderBlock(block, renderForm, signal, pending, waitForImages) {
   const section = document.createElement("section");
   section.className = `popu-block popu-block-${block.type}`;
   appendBlockTitle(section, block.title);
@@ -88,7 +88,8 @@ function renderBlock(block, renderForm, signal, pending) {
   } else if (block.type === "progress") {
     renderProgress(block, section);
   } else if (block.type === "image" || block.type === "chart") {
-    pending.push(renderVisualBlock(section, block, signal));
+    const rendering = renderVisualBlock(section, block, signal);
+    if (block.type === "chart" || waitForImages) pending.push(rendering);
   } else if (block.type === "form" && renderForm) {
     renderForm(block, section);
   } else if (block.type !== "form") {
@@ -98,7 +99,7 @@ function renderBlock(block, renderForm, signal, pending) {
 }
 
 // Only dialogs supply a form renderer; notifications and history remain read-only.
-export function renderContentBlocks(root, blocks = [], verticalAlign = "start", renderForm = null) {
+export function renderContentBlocks(root, blocks = [], verticalAlign = "start", renderForm = null, { waitForImages = true } = {}) {
   if (!root) return Promise.resolve();
   controllers.get(root)?.abort();
   const controller = new AbortController();
@@ -107,7 +108,7 @@ export function renderContentBlocks(root, blocks = [], verticalAlign = "start", 
   root.dataset.popuVerticalAlign = verticalAlign;
   root.replaceChildren();
   for (const block of blocks) {
-    const section = renderBlock(block, renderForm, controller.signal, pending);
+    const section = renderBlock(block, renderForm, controller.signal, pending, waitForImages);
     if (section.childElementCount > 0) root.append(section);
   }
   root.hidden = root.childElementCount === 0;

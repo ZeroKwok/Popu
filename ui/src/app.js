@@ -1,6 +1,7 @@
 import { renderContentBlocks } from "./content-renderer.js";
 import { renderContentIcon } from "./visual-renderer.js";
 import { renderNotificationTime } from "./notification-time.js";
+import { measureWindow } from "./window-sizing.js";
 
 const invoke = window.__TAURI__.core.invoke;
 
@@ -9,6 +10,8 @@ let renderVersion = 0;
 let pendingContent = Promise.resolve();
 let presentedRevision = 0;
 let actionPending = false;
+let sizeLocked = false;
+window.popuLockSize = () => { sizeLocked = true; };
 
 const nonDragSelector = [
   "button",
@@ -203,10 +206,9 @@ function renderContent(content, preserveForm = false) {
   const version = ++renderVersion;
   const values = preserveForm ? collectValues() : null;
   setText("title", content.title);
-  pendingContent = Promise.all([
-    renderContentIcon(element("icon"), content),
-    renderContentBlocks(element("content"), content.blocks ?? [], content.vertical_align ?? "center", renderFormBlock),
-  ]).catch((error) => { if (version === renderVersion) throw error; });
+  renderContentIcon(element("icon"), content);
+  pendingContent = renderContentBlocks(element("content"), content.blocks ?? [], content.vertical_align ?? "center", renderFormBlock, { waitForImages: false })
+    .catch((error) => { if (version === renderVersion) throw error; });
   if (values) restoreValues(values);
   return pendingContent;
 }
@@ -227,8 +229,21 @@ async function announceReady() {
   do {
     ready = pendingContent;
     revision = bootstrap.revision;
+    // Images already own their final boxes and decode independently. Charts
+    // retain their bounded semantic validation before readiness is announced.
     await ready;
     await waitForPresentationFrame();
+    if (!sizeLocked && bootstrap.request.window?.height == null && ready === pendingContent) {
+      let fitted = false;
+      for (let attempt = 0; attempt < 3 && !fitted && ready === pendingContent; attempt++) {
+        fitted = await invoke("fit_window", { revision, measurement: measureWindow() });
+        await waitForPresentationFrame();
+      }
+      if (!fitted && ready === pendingContent) {
+        await invoke("fit_window", { revision, measurement: null });
+        await waitForPresentationFrame();
+      }
+    }
   } while (ready !== pendingContent);
   // Capture the painted version, not the latest Host version at click time.
   presentedRevision = revision;
@@ -358,6 +373,7 @@ async function start() {
   bootstrap = await invoke("get_bootstrap");
   const app = document.getElementById("app");
   document.documentElement.classList.toggle("popu-maximized", bootstrap.maximized);
+  document.documentElement.classList.toggle("popu-auto-height", bootstrap.request.window?.height == null);
   app.innerHTML = bootstrap.template.html;
   const style = document.createElement("style");
   style.textContent = bootstrap.template.css;

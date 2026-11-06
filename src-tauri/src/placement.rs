@@ -1,4 +1,5 @@
-use crate::protocol::{Position, Request};
+use crate::protocol::{Mode, Position, Request, WindowDimension};
+use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rect {
@@ -38,6 +39,124 @@ impl Display {
     }
 }
 
+/// A renderer measurement in CSS/logical pixels, never native coordinates.
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct ContentSize {
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Runtime geometry, separate from the caller's immutable request. Content may
+/// change the preferred height until first presentation; afterwards only display
+/// constraints can affect the actual size. Parking/revealing keeps this state.
+pub struct WindowLayout {
+    display: Display,
+    position: Position,
+    width: WindowDimension,
+    height: Option<WindowDimension>,
+    fallback: u32,
+    min_height: u32,
+    max_height: u32,
+    preferred_height: Option<u32>,
+    locked: bool,
+}
+
+impl WindowLayout {
+    pub fn new(request: &Request, display: Display) -> Self {
+        let defaults = request.default_window_size();
+        let (min_height, max_height) = match request.mode {
+            Mode::Dialog => (160, 720),
+            Mode::Notify => (120, 480),
+        };
+        Self {
+            display,
+            position: if request.mode == Mode::Notify {
+                Position::BottomRight
+            } else {
+                request.position
+            },
+            width: request
+                .window
+                .width
+                .clone()
+                .unwrap_or(WindowDimension::Pixels(defaults.0)),
+            height: request.window.height.clone(),
+            fallback: defaults.1 as u32,
+            min_height,
+            max_height,
+            preferred_height: None,
+            locked: false,
+        }
+    }
+
+    fn bounds(&self) -> (u32, u32) {
+        logical_area(self.display.area, self.display.scale)
+    }
+
+    pub fn placement(&self) -> WindowPlacement {
+        let bounds = self.bounds();
+        let height = if let Some(height) = &self.height {
+            height.resolve(bounds.1)
+        } else {
+            let max = self.max_height.min(bounds.1.saturating_sub(32).max(1));
+            self.preferred_height
+                .unwrap_or(self.fallback)
+                .clamp(self.min_height.min(max), max)
+        };
+        resolve_size(
+            self.position,
+            (self.width.resolve(bounds.0), height),
+            self.display.area,
+            self.display.scale,
+            16,
+        )
+    }
+
+    /// False asks the renderer to retry at the current width. Missing/invalid
+    /// measurements retain a bounded fallback, including for legacy templates.
+    pub fn measure(&mut self, measurement: Option<ContentSize>) -> bool {
+        if !self.accepts_content_size() {
+            return true;
+        }
+        if let Some(size) = measurement {
+            let width = f64::from(self.placement().logical_size.0);
+            if !size.width.is_finite() || (size.width - width).abs() > 1.0 {
+                return false;
+            }
+            self.preferred_height = (size.height.is_finite() && size.height > 0.0)
+                .then(|| size.height.ceil().min(f64::from(u32::MAX)) as u32);
+        } else {
+            self.preferred_height = None;
+        }
+        true
+    }
+
+    pub fn accepts_content_size(&self) -> bool {
+        !self.locked && self.height.is_none()
+    }
+
+    pub fn lock(&mut self) {
+        // Store the resolved preference, rather than unbounded content height,
+        // so changing screens cannot grow a previously shown window unexpectedly.
+        if self.height.is_none() && !self.locked {
+            self.preferred_height = Some(self.placement().logical_size.1);
+        }
+        self.locked = true;
+    }
+
+    pub fn set_display(&mut self, display: Display) {
+        self.display = display;
+    }
+}
+
+fn logical_area(area: Rect, scale: f64) -> (u32, u32) {
+    let scale = scale.max(f64::MIN_POSITIVE);
+    (
+        ((area.width as f64 / scale).round() as u32).max(1),
+        ((area.height as f64 / scale).round() as u32).max(1),
+    )
+}
+
 pub fn select_monitor(monitors: &[Rect], cursor: Point) -> Option<Rect> {
     monitors
         .iter()
@@ -55,12 +174,23 @@ pub fn resolve(
     scale_factor: f64,
     logical_margin: u32,
 ) -> WindowPlacement {
+    resolve_size(
+        request.position,
+        request.window_size(logical_area(area, scale_factor)),
+        area,
+        scale_factor,
+        logical_margin,
+    )
+}
+
+fn resolve_size(
+    position: Position,
+    logical_size: (u32, u32),
+    area: Rect,
+    scale_factor: f64,
+    logical_margin: u32,
+) -> WindowPlacement {
     let scale_factor = scale_factor.max(f64::MIN_POSITIVE);
-    let logical_area = (
-        ((area.width as f64 / scale_factor).round() as u32).max(1),
-        ((area.height as f64 / scale_factor).round() as u32).max(1),
-    );
-    let logical_size = request.window_size(logical_area);
     let size = (
         ((logical_size.0 as f64 * scale_factor).round() as u32).min(area.width),
         ((logical_size.1 as f64 * scale_factor).round() as u32).min(area.height),
@@ -68,7 +198,7 @@ pub fn resolve(
     let physical_margin = (logical_margin as f64 * scale_factor).round() as u32;
     let margin_x = physical_margin.min(area.width.saturating_sub(size.0));
     let margin_y = physical_margin.min(area.height.saturating_sub(size.1));
-    let position = match request.position {
+    let position = match position {
         Position::BottomRight => Point {
             x: area.x + (area.width - size.0 - margin_x) as i32,
             y: area.y + (area.height - size.1 - margin_y) as i32,
@@ -185,4 +315,134 @@ mod tests {
         assert_eq!(placement.position, Point { x: 3088, y: 1688 });
     }
 
+    fn layout(window: &str) -> WindowLayout {
+        WindowLayout::new(
+            &request(window),
+            Display {
+                area: Rect {
+                    x: -1920,
+                    y: 0,
+                    width: 1920,
+                    height: 1040,
+                },
+                scale: 1.0,
+            },
+        )
+    }
+
+    #[test]
+    fn content_height_uses_limits_and_can_shrink_before_first_show() {
+        let mut layout = layout(r#"{"width":500}"#);
+        for (natural, expected) in [(40.0, 160), (410.2, 411), (5000.0, 720), (200.0, 200)] {
+            assert!(layout.measure(Some(ContentSize {
+                width: 500.0,
+                height: natural
+            })));
+            assert_eq!(layout.placement().logical_size, (500, expected));
+        }
+    }
+
+    #[test]
+    fn shown_size_survives_content_updates_parking_and_dpi_changes() {
+        let mut layout = layout("{}");
+        layout.measure(Some(ContentSize {
+            width: 440.0,
+            height: 401.0,
+        }));
+        layout.lock();
+        layout.measure(Some(ContentSize {
+            width: 440.0,
+            height: 2000.0,
+        }));
+        let display = Display {
+            area: Rect {
+                x: 0,
+                y: 0,
+                width: 3840,
+                height: 2160,
+            },
+            scale: 2.0,
+        };
+        layout.set_display(display);
+        assert_eq!(layout.placement().logical_size, (440, 401));
+        assert_eq!(layout.placement().size, (880, 802));
+        layout.set_display(Display {
+            area: Rect {
+                height: 200,
+                ..display.area
+            },
+            scale: 2.0,
+        });
+        assert_eq!(layout.placement().logical_size.1, 68);
+        layout.set_display(display);
+        assert_eq!(layout.placement().logical_size.1, 401);
+    }
+
+    #[test]
+    fn stale_width_and_invalid_measurements_do_not_corrupt_geometry() {
+        let mut layout = layout("{}");
+        assert!(!layout.measure(Some(ContentSize {
+            width: 360.0,
+            height: 600.0
+        })));
+        assert!(layout.measure(Some(ContentSize {
+            width: 440.0,
+            height: f64::NAN
+        })));
+        assert_eq!(layout.placement().logical_size, (440, 300));
+        layout.measure(Some(ContentSize {
+            width: 440.0,
+            height: 400.0,
+        }));
+        layout.measure(None);
+        assert_eq!(layout.placement().logical_size.1, 300);
+    }
+
+    #[test]
+    fn explicit_height_keeps_percentage_and_pixel_semantics() {
+        for (window, expected) in [(r#"{"height":100}"#, 100), (r#"{"height":"100%"}"#, 1040)] {
+            let mut layout = layout(window);
+            layout.measure(Some(ContentSize {
+                width: 440.0,
+                height: 600.0,
+            }));
+            assert_eq!(layout.placement().logical_size.1, expected);
+        }
+    }
+
+    #[test]
+    fn notification_limits_and_tiny_display_override_the_minimum() {
+        let request =
+            Request::parse(r#"{"version":"1.0","mode":"notify","content":{"title":"Test"}}"#)
+                .unwrap();
+        let mut layout = WindowLayout::new(
+            &request,
+            Display {
+                area: Rect {
+                    x: 0,
+                    y: 0,
+                    width: 1920,
+                    height: 1040,
+                },
+                scale: 1.0,
+            },
+        );
+        for (height, expected) in [(10.0, 120), (2000.0, 480)] {
+            layout.measure(Some(ContentSize {
+                width: 360.0,
+                height,
+            }));
+            assert_eq!(layout.placement().logical_size.1, expected);
+        }
+        layout.set_display(Display {
+            area: Rect {
+                x: 0,
+                y: 0,
+                width: 240,
+                height: 100,
+            },
+            scale: 1.0,
+        });
+        assert_eq!(layout.placement().logical_size, (240, 68));
+    }
 }

@@ -510,10 +510,10 @@ impl Request {
     }
 
     pub fn default_window_size(&self) -> (f64, f64) {
+        // Provisional/fallback geometry only. WindowLayout resolves omitted
+        // heights from the renderer before the first native presentation.
         match self.mode {
             Mode::Dialog => (440.0, 300.0),
-            // Budget for the timestamp row as well as short notification text.
-            // Richer progress/image content still needs an explicit height.
             Mode::Notify => (360.0, 220.0),
         }
     }

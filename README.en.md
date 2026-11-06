@@ -110,7 +110,7 @@ Automation often needs to tell a person what happened or wait for an explicit de
 - structured actions, form values, terminal states, and exit codes;
 - paragraphs, properties, lists, progress, images, and Vega-Lite charts;
 - content updates with revision conflict detection;
-- frameless, transparent local windows with request-configured dimensions.
+- frameless, transparent local windows; supply just a width to fit initial content height, with a fixed size after first presentation.
 
 ### Integration
 

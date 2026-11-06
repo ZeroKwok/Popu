@@ -13,6 +13,7 @@ npm run test:visuals
 ```
 
 - `src/`：HTML、CSS、界面 JavaScript 和内置模板。
+- `src/window-sizing.js`：首次显示前的自然高度测量；高度边界及尺寸锁定由 Host 的 `WindowLayout` 管理，详见[尺寸约定](../docs/window-sizing.md)。
 - `charts/`：交给 esbuild 打包的图表运行时与 worker 入口。
 - `scripts/`：资源构建和浏览器测试服务器。
 - `tests/`：JS 单元测试与 Playwright 回归；协议示例读取仓库共享的 `protocol/`。

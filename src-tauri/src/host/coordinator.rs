@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use super::*;
 use crate::core::Effect;
 use crate::notifications::Layout;
-use crate::placement::Display;
+use crate::placement::{ContentSize, Display, WindowLayout};
 
 pub(super) enum Command {
     Create(CreateParams),
@@ -31,6 +31,12 @@ pub(super) enum Command {
 
 pub(super) enum Task {
     Command(Command, Sender<Result<Value, Value>>),
+    Fit {
+        id: Uuid,
+        revision: u64,
+        measurement: Option<ContentSize>,
+        reply: Sender<Result<bool, String>>,
+    },
     Ready {
         id: Uuid,
         revision: u64,
@@ -81,6 +87,7 @@ pub(super) fn start(app: AppHandle, state: Arc<HostState>) {
             state,
             display: None,
             sizes: HashMap::new(),
+            layouts: HashMap::new(),
             closing: HashMap::new(),
             unhealthy: HashMap::new(),
             dirty: false,
@@ -119,6 +126,7 @@ struct Coordinator {
     state: Arc<HostState>,
     display: Option<Display>,
     sizes: HashMap<Uuid, (u32, u32)>,
+    layouts: HashMap<Uuid, WindowLayout>,
     closing: HashMap<Uuid, u32>,
     unhealthy: HashMap<Uuid, u8>,
     dirty: bool,
@@ -129,6 +137,10 @@ struct Coordinator {
 impl Coordinator {
     fn handle(&mut self, task: Task) {
         match task {
+            Task::Fit { id, revision, measurement, reply } => {
+                let result = self.fit(id, revision, measurement);
+                let _ = reply.send(result);
+            }
             Task::Command(command, reply) => {
                 let mut result = self.command(command);
                 if let Err(error) = self.flush() { result = Err(error); }
@@ -386,6 +398,7 @@ impl Coordinator {
                     if let Err(error) = result { self.fail(id, &error); }
                 }
                 Effect::Close(id) => {
+                    self.layouts.remove(&id);
                     let notification = self
                         .state
                         .registry
@@ -544,6 +557,21 @@ impl Coordinator {
         }
     }
 
+    fn fit(&mut self, id: Uuid, revision: u64, measurement: Option<ContentSize>) -> Result<bool, String> {
+        let snapshot = self.state.registry.lock().unwrap().summary(id).map_err(|e| e.to_string())?;
+        if snapshot.revision != revision || !matches!(snapshot.state, crate::core::RequestState::Preparing | crate::core::RequestState::Ready) {
+            return Ok(true); // Updates to a shown/hidden window never resize it.
+        }
+        let layout = self.layouts.get_mut(&id).ok_or("window layout missing")?;
+        if !layout.accepts_content_size() { return Ok(true); }
+        if !layout.measure(measurement) { return Ok(false); }
+        let window = self.app.get_webview_window(&id.to_string()).ok_or("native window missing")?;
+        windows::resize(&window, layout.placement())?;
+        #[cfg(windows)]
+        runtime::configure_frameless_windows_window(&window, false)?;
+        Ok(true)
+    }
+
     fn ready(&mut self, id: Uuid, revision: u64) -> Result<(), String> {
         // A newer content update has its own readiness acknowledgement. An old
         // renderer callback must not reveal half-rendered replacement content.
@@ -610,6 +638,8 @@ impl Coordinator {
             // Normal appends preserve existing user drags. Membership removal
             // compacts the whole stack before another builder is started.
         }
+        self.layouts.get_mut(&id).ok_or("window layout missing")?.lock();
+        window.eval("window.popuLockSize?.()").map_err(|e| e.to_string())?;
         let observation = windows::reveal(&window)?;
         self.state
             .registry
@@ -656,28 +686,9 @@ impl Coordinator {
         }
         let next = self.state.registry.lock().unwrap().next_notification();
         if let Some(id) = next {
-            let request = self
-                .state
-                .registry
-                .lock()
-                .unwrap()
-                .request(id)
-                .cloned()
-                .unwrap();
-            let fits = self.display().and_then(|display| {
-                let size = if let Some(window) = self.app.get_webview_window(&id.to_string()) {
-                    let size = window.inner_size().map_err(|e| e.to_string())?;
-                    (size.width, size.height)
-                } else {
-                    Layout::new(display).notification_size(&request).size
-                };
-                self.plan(Some((id, size)))
-            });
-            match fits {
-                Ok(Some(_)) => self.prepare(id),
-                Ok(None) => {} // Strict FIFO: a smaller newcomer cannot pass the head.
-                Err(error) => eprintln!("Popu notification scheduling paused: {error}"),
-            }
+            // Only the head can prepare. Admission uses its final measured size
+            // in present(), never a guessed height before a WebView exists.
+            self.prepare(id);
         }
     }
 
@@ -705,11 +716,14 @@ impl Coordinator {
         }
         let result = (|| {
             templates::resolve(&request, template_dir.as_deref()).map_err(|e| e.to_string())?;
-            let placement = if request.mode == Mode::Notify {
-                Layout::new(self.display()?).notification_size(&request)
+            let display = if request.mode == Mode::Notify {
+                self.display()?
             } else {
-                runtime::resolve_window_placement(&request)?
+                runtime::resolve_display(request.window.screen, request.window.area)?
             };
+            let layout = WindowLayout::new(&request, display);
+            let placement = layout.placement();
+            self.layouts.insert(id, layout);
             windows::create(&self.app, id, &request, placement)
         })();
         if let Err(error) = result {
@@ -732,14 +746,9 @@ impl Coordinator {
                     .unwrap()
                     .visible_notification_ids();
                 for id in ids {
-                    let request = self
-                        .state
-                        .registry
-                        .lock()
-                        .unwrap()
-                        .request(id)
-                        .cloned()
-                        .unwrap();
+                    let Some(layout) = self.layouts.get_mut(&id) else { continue; };
+                    layout.set_display(display);
+                    let placement = layout.placement();
                     let result = self
                         .app
                         .get_webview_window(&id.to_string())
@@ -748,7 +757,7 @@ impl Coordinator {
                             windows::conceal(&window)?;
                             windows::resize(
                                 &window,
-                                Layout::new(display).notification_size(&request),
+                                placement,
                             )?;
                             #[cfg(windows)]
                             runtime::configure_frameless_windows_window(&window, false)?;
@@ -773,18 +782,13 @@ impl Coordinator {
                     if self.state.registry.lock().unwrap().is_presented(id) {
                         continue;
                     }
-                    let request = self
-                        .state
-                        .registry
-                        .lock()
-                        .unwrap()
-                        .request(id)
-                        .cloned()
-                        .unwrap();
+                    let Some(layout) = self.layouts.get_mut(&id) else { continue; };
+                    layout.set_display(display);
+                    let placement = layout.placement();
                     if let Some(window) = self.app.get_webview_window(&id.to_string()) {
                         let result = windows::resize(
                             &window,
-                            Layout::new(display).notification_size(&request),
+                            placement,
                         )
                         .and_then(|_| {
                             #[cfg(windows)]

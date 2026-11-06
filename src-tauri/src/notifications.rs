@@ -1,7 +1,6 @@
 //! Geometry for one notification stack. No window handles or mutable scheduler state.
 
-use crate::placement::{Display, Point, WindowPlacement};
-use crate::protocol::{Position, Request};
+use crate::placement::{Display, Point};
 
 pub struct Layout {
     pub display: Display,
@@ -10,12 +9,6 @@ pub struct Layout {
 impl Layout {
     pub fn new(display: Display) -> Self {
         Self { display }
-    }
-
-    pub fn notification_size(self, request: &Request) -> WindowPlacement {
-        let mut request = request.clone();
-        request.position = Position::BottomRight;
-        self.display.resolve(&request)
     }
 
     /// All sizes and coordinates are physical; spacing is converted once per plan.

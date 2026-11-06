@@ -33,7 +33,9 @@ export function renderContentIcon(element, content, signal) {
   image.alt = content.icon.alt;
   image.draggable = false;
   element.append(image);
-  return loadImage(image, content.icon.src, signal);
+  return loadImage(image, content.icon.src, signal).catch(() => {
+    if (!signal?.aborted && image.parentElement === element) element.textContent = "!";
+  });
 }
 
 function compileChart(spec, width, height, signal) {
@@ -152,8 +154,10 @@ export async function renderVisualBlock(section, block, signal) {
     const chart = document.createElement("div");
     chart.className = "popu-chart";
     chart.dataset.popuNoDrag = "";
+    chart.tabIndex = 0;
+    chart.setAttribute("role", "region");
     chart.setAttribute("aria-label", block.spec.description ?? block.title ?? "Chart");
-    chart.style.minHeight = `${block.height ?? 220}px`;
+    chart.style.height = `${block.height ?? 220}px`;
     figure.append(chart);
     section.append(figure);
     await Promise.resolve();
@@ -163,8 +167,11 @@ export async function renderVisualBlock(section, block, signal) {
   const image = document.createElement("img");
   image.draggable = false;
   image.alt = block.source.alt;
-  image.style.maxHeight = `${block.height ?? 320}px`;
-  figure.append(image);
+  const frame = document.createElement("div");
+  frame.className = "popu-image-frame";
+  frame.style.height = `${block.height ?? 320}px`;
+  frame.append(image);
+  figure.append(frame);
   if (block.caption) {
     const caption = document.createElement("figcaption");
     caption.textContent = block.caption;
@@ -173,5 +180,10 @@ export async function renderVisualBlock(section, block, signal) {
   section.append(figure);
   // Callers attach the section synchronously before we measure its width.
   await Promise.resolve();
-  if (!signal.aborted) await loadImage(image, block.source.src, signal);
+  if (!signal.aborted) {
+    try { await loadImage(image, block.source.src, signal); }
+    catch (error) {
+      if (!signal.aborted) frame.textContent = `Unable to render image: ${error.message}`;
+    }
+  }
 }

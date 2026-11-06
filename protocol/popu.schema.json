@@ -20,7 +20,7 @@
         "screen": { "enum": ["cursor", "primary"] },
         "area": { "enum": ["work_area", "screen"] },
         "width": { "$ref": "#/$defs/windowDimension", "description": "Whole-window logical width or percentage. Defaults to 360 for notify, 440 for dialog." },
-        "height": { "$ref": "#/$defs/windowDimension", "description": "Whole-window logical height or percentage, including title, timestamp and actions. Defaults to 220 for notify, 300 for dialog." }
+        "height": { "$ref": "#/$defs/windowDimension", "description": "Whole-window logical height or percentage. When omitted, fits initial content within 120-480 for notify or 160-720 for dialog, limited by the display area minus margins. Size stays fixed after first presentation." }
       }
     },
     "content": {
@@ -99,7 +99,7 @@
         "properties": {
           "type": { "const": "image" }, "title": { "$ref": "#/$defs/blockTitle" },
           "source": { "$ref": "#/$defs/imageSource" }, "caption": { "$ref": "#/$defs/blockText" },
-          "height": { "type": "integer", "minimum": 64, "maximum": 1200 }
+          "height": { "type": "integer", "minimum": 64, "maximum": 1200, "description": "Reserved image container height in logical pixels, including before decoding. Defaults to 320." }
         }
       },
       {
@@ -107,7 +107,7 @@
         "properties": {
           "type": { "const": "chart" }, "title": { "$ref": "#/$defs/blockTitle" }, "engine": { "const": "vega_lite" },
           "spec": { "type": "object", "anyOf": [{ "required": ["mark"] }, { "required": ["layer"] }, { "required": ["hconcat"] }, { "required": ["vconcat"] }, { "required": ["concat"] }, { "required": ["facet"] }, { "required": ["repeat"] }] },
-          "height": { "type": "integer", "minimum": 64, "maximum": 1200 }
+          "height": { "type": "integer", "minimum": 64, "maximum": 1200, "description": "Fixed chart container height in logical pixels. Defaults to 220." }
         }
       },
       { "type": "object", "additionalProperties": false, "required": ["type", "text"], "properties": { "type": { "const": "paragraph" }, "title": { "$ref": "#/$defs/blockTitle" }, "text": { "$ref": "#/$defs/blockText" } } },

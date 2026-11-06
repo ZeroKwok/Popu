@@ -1,6 +1,6 @@
 {
   "version": "1.0", "mode": "dialog", "template": "confirm",
-  "window": { "width": 720, "height": 500 },
+  "window": { "width": 720 },
   "content": {
     "severity": "info", "title": "Review an externally generated image", "vertical_align": "start",
     "icon": { "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3QgeD0iMiIgeT0iMiIgd2lkdGg9IjI4IiBoZWlnaHQ9IjI4IiByeD0iNyIgZmlsbD0iI2U3YWQyMSIvPjxwYXRoIGQ9Ik03IDIxTDEyIDEzTDE5IDE4TDI1IDkiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMyIvPjwvc3ZnPg==", "alt": "Custom trend icon" },

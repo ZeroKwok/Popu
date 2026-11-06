@@ -36,7 +36,7 @@ Tauri Host ── RequestRegistry ── request_id → WebviewWindow
 
 Request `window.width` and `window.height`, including the dialog and notification defaults, are logical pixels. Clients must use the same values on 1080p, 2K, and 4K displays; they must not multiply dimensions by display resolution or Windows scaling.
 
-Notifications default to `360 × 220`, and dialogs to `440 × 300`. These are whole-window sizes including margins, title, notification timestamp, and actions, not the available body size. The notification default reserves a timestamp row and room for short content; richer progress, images, or charts should specify a height. Explicit dimensions are used as requested without adding another timestamp allowance. Content that exceeds the body or a smaller work area remains accessible by scrolling.
+Default widths are `360` for notifications and `440` for dialogs. An omitted height fits the initial whole-window layout within `120–480` or `160–720`, respectively, capped by the target area minus 16 logical pixels at each vertical edge. The size locks at first presentation; later content changes use internal scrolling. Images reserve a fixed box before decoding (default 320); charts use a fixed height (default 220). Explicit window heights keep their existing semantics. External templates without measurement support use a bounded fallback height of 220 or 300. See [initial content sizing](docs/window-sizing.md) for the implementation contract.
 
 On Windows, placement keeps two coordinate spaces deliberately separate:
 

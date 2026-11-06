@@ -191,7 +191,7 @@ mod host {
                 .unwrap();
             let (done, result) = mpsc::channel();
             let app = host_builder(Arc::clone(&state)).any_thread().manage(Fault::default())
-                .invoke_handler(tauri::generate_handler![super::get_bootstrap, self::ui_ready, super::finish, super::render_failed])
+                .invoke_handler(tauri::generate_handler![super::get_bootstrap, super::fit_window, self::ui_ready, super::finish, super::render_failed])
                 .setup(move |app| {
                     let app = app.handle().clone();
                     coordinator::start(app.clone(), Arc::clone(&state));
@@ -240,6 +240,46 @@ mod host {
                             clear(&endpoint, &state, &app)?;
                             eprintln!("PASS real IPC: strict FIFO and size-aware admission");
 
+                            // Real WebView measurement: only width is supplied.
+                            // Updates and a retained HWND's reshow must reuse the
+                            // original logical height, including malicious late fits.
+                            let auto = create(&endpoint, json!({"version":"1.0","mode":"notify","template":"notification","updatable":true,
+                                "duration_ms":60000,"window":{"width":420},"content":{"title":"Automatic height",
+                                "blocks":[{"type":"paragraph","text":"A line of initial content.\n".repeat(30)}]}}))?;
+                            wait("auto height notification shown", || shown(&state, auto))?;
+                            let window = app.get_webview_window(&auto.to_string()).unwrap();
+                            let initial = window.inner_size().map_err(|e| e.to_string())?;
+                            let expected_height = (480.0 * display.scale).round() as u32;
+                            if initial.width != (420.0 * display.scale).round() as u32 || initial.height != expected_height {
+                                return Err(format!("auto height did not use measured limits: {initial:?}"));
+                            }
+                            rpc(&endpoint, "request.update", json!({"request_id":auto,"expected_revision":1,"content":{"title":"Short update"}}))?;
+                            wait("updated auto notification presented", || state.registry.lock().unwrap().presented_revision(auto).ok() == Some(2))?;
+                            let (reply, receiver) = mpsc::channel();
+                            coordinator::send(&state, Task::Fit { id: auto, revision: 2,
+                                measurement: Some(super::placement::ContentSize { width: 420.0, height: 120.0 }), reply })?;
+                            receiver.recv_timeout(Duration::from_secs(5)).map_err(|e| e.to_string())??;
+                            if window.inner_size().map_err(|e| e.to_string())? != initial { return Err("content update resized shown window".into()); }
+                            window.close().map_err(|e| e.to_string())?;
+                            wait("auto notification retained hidden", || state.registry.lock().unwrap().snapshot(auto).is_ok_and(|s| s.state == crate::core::RequestState::Hidden))?;
+                            rpc(&endpoint, "request.update", json!({"request_id":auto,"expected_revision":2,"reshow":true,"content":{"title":"Reshown short update"}}))?;
+                            wait("auto notification reshown", || shown(&state, auto))?;
+                            if window.inner_size().map_err(|e| e.to_string())? != initial { return Err("reshow discarded locked height".into()); }
+                            clear(&endpoint, &state, &app)?;
+
+                            let dialog = create(&endpoint, json!({"version":"1.0","mode":"dialog","window":{"width":460},
+                                "content":{"title":"Automatic dialog","blocks":[{"type":"paragraph","text":"Initial dialog content. ".repeat(20)}]},
+                                "actions":[{"id":"ok","label":"OK","submit":true}]}))?;
+                            wait("auto dialog shown", || state.registry.lock().unwrap().is_presented(dialog))?;
+                            let size = app.get_webview_window(&dialog.to_string()).unwrap().inner_size().map_err(|e| e.to_string())?;
+                            let logical_height = f64::from(size.height) / display.scale;
+                            if size.width != (460.0 * display.scale).round() as u32 || !(160.0..=720.0).contains(&logical_height) {
+                                return Err(format!("unexpected auto dialog size: {size:?}"));
+                            }
+                            rpc(&endpoint, "request.dismiss", json!({"request_id":dialog}))?;
+                            wait("auto dialog removed", || app.get_webview_window(&dialog.to_string()).is_none())?;
+                            eprintln!("PASS real sizing: measured height, fixed updates, retained reshow and dialog");
+
                             let lower = request(&endpoint, "Recovery lower", 180, 60000)?;
                             let upper = request(&endpoint, "Recovery upper", 180, 60000)?;
                             wait("pair presented", || shown(&state, lower) && shown(&state, upper))?;
@@ -283,6 +323,9 @@ mod host {
                             if !shown(&state, timed) { return Err("content update did not restart the display timer".into()); }
                             wait("automatic expiry", || state.registry.lock().unwrap().snapshot(timed).unwrap().state.is_terminal())?;
                             wait("expired native window removed", || app.get_webview_window(&timed.to_string()).is_none())?;
+                            // Native destruction may finish before the worker's
+                            // persistence flush at the end of the same turn.
+                            wait("expiry archived", || state.history.lock().unwrap().as_ref().unwrap().get(&timed.to_string()).is_ok_and(|item| item.state == "expired"))?;
                             let item = state.history.lock().unwrap().as_ref().unwrap().get(&timed.to_string()).map_err(|e| e.to_string())?;
                             if item.state != "expired" || item.read_at_ms.is_some() { return Err("expiry did not preserve unread history".into()); }
 
@@ -361,7 +404,8 @@ mod host {
                                 while state.registry.lock().unwrap().active_notification_count() > 0 {
                                     wait("mixed-size stack settled", || {
                                         let registry = state.registry.lock().unwrap();
-                                        let settled = !registry.visible_notification_ids().is_empty() && registry.pending_notification().is_none();
+                                        let settled = !registry.visible_notification_ids().is_empty()
+                                            && registry.pending_notification().is_none_or(|id| !registry.is_preparing(id));
                                         drop(registry);
                                         settled && assert_stack(&app, &state).is_ok()
                                     })?;

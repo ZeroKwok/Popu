@@ -109,7 +109,7 @@ pub fn run() -> i32 {
 
 fn host_builder(state: Arc<HostState>) -> tauri::Builder<tauri::Wry> {
     tauri::Builder::default().manage(state)
-        .invoke_handler(tauri::generate_handler![get_bootstrap, submit, finish, render_failed, ui_ready, history_presented, history_trace, history_list, history_get, history_clear, history_mark_read])
+        .invoke_handler(tauri::generate_handler![get_bootstrap, submit, finish, render_failed, fit_window, ui_ready, history_presented, history_trace, history_list, history_get, history_clear, history_mark_read])
         .on_window_event(handle_window_event)
 }
 
@@ -382,6 +382,14 @@ async fn history_clear(state: State<'_, Arc<HostState>>) -> Result<usize, String
     tauri::async_runtime::spawn_blocking(move || coordinator::call(&state, Command::ClearHistory))
         .await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
         .map(|value| value["count"].as_u64().unwrap_or(0) as usize)
+}
+
+#[tauri::command]
+async fn fit_window(window: WebviewWindow, state: State<'_, Arc<HostState>>, revision: u64, measurement: Option<placement::ContentSize>) -> Result<bool, String> {
+    let (reply, receiver) = mpsc::channel();
+    coordinator::send(&state, Task::Fit { id: id_for(&window)?, revision, measurement, reply })?;
+    tauri::async_runtime::spawn_blocking(move || receiver.recv().map_err(|e| e.to_string()))
+        .await.map_err(|e| e.to_string())??
 }
 
 #[tauri::command]
