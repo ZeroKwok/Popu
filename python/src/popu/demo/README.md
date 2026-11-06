@@ -9,7 +9,7 @@ python -m pip install popu
 python -m popu.demo progress
 ```
 
-可选加上 `--wait`，等待最终通知结束展示后再退出：
+通知类示例可选加上 `--wait`，等待通知结束展示后再退出；交互类示例会自动等待用户操作：
 
 ```sh
 python -m popu.demo progress --wait
@@ -30,6 +30,9 @@ python -m popu.demo progress --help
 | --- | --- | --- |
 | `python -m popu.demo progress` | [进度与最终摘要](#进度与最终摘要) | 模拟任务进度、后台更新、关闭后的再次展示和结果历史 |
 | `python -m popu.demo gold` | [黄金行业简报](#黄金行业简报) | 单次推送、最近 30 天价格曲线、关键指标和模拟行业动态 |
+| `python -m popu.demo confirm` | [发布前确认](#发布前确认) | 发布摘要、确认与取消，以及脚本结果分支 |
+| `python -m popu.demo form` | [发布计划表单](#发布计划表单) | 文本、选项、复选框和结构化返回值 |
+| `python -m popu.demo alert` | [服务异常告警](#服务异常告警) | 关键指标、可复制诊断文本和历史未读提醒 |
 
 ## 进度与最终摘要
 
@@ -60,6 +63,39 @@ python -m popu.demo gold --wait
 价格采用固定的 30 个模拟日收盘值，日期从运行当天向前排列 30 天，单位为美元/金衡盎司。指标由同一组数据计算；价格和行业评论均为虚构，不访问行情服务。弹窗和控制台均使用英文，通知展示 20 秒，`--wait` 等待通知结束展示，不要求标记已读。
 
 示例保留 `--executable` 参数以指定本地程序；已安装 editable SDK 时可直接执行上述命令。内容集中在 `notification()`，可以替换数据和文案来制作自己的单次推送。
+
+## 发布前确认
+
+```sh
+python -m popu.demo confirm
+```
+
+[confirm.py](confirm.py) 使用 `DialogRequest.confirm(...)` 展示版本、环境、发布范围、检查结果和变更摘要，再通过 `Client.show(...)` 等待操作。点击批准后，`result.status` 为 `submitted`；取消、关闭或 180 秒超时都会进入跳过分支。这些是正常交互结果，示例返回 0；调用失败返回 1，Ctrl+C 返回 130。
+
+示例仅打印是否批准，不执行真实发布。
+
+## 发布计划表单
+
+```sh
+python -m popu.demo form
+```
+
+[form.py](form.py) 使用完整请求字典定义发布版本、目标环境、发布说明、可选的检查开关和必选的确认框。版本格式为 `数字.数字.数字`；必填项与格式检查通过后才能提交。`Client.show(...)` 返回后，通过 `result.values` 获取结构化输入，并输出 JSON。取消、关闭或 300 秒超时不处理表单值。
+
+示例不保存配置或执行部署，所有环境均为模拟。与通知示例不同，交互会自动等待结果，不需要 `--wait`。
+
+## 服务异常告警
+
+```sh
+python -m popu.demo alert
+python -m popu.demo alert --wait
+```
+
+[alert.py](alert.py) 一次推送模拟 API 异常，包含错误率、影响范围、时间窗口、可选中复制的诊断片段和建议检查项。通知设置 `requires_read: true`，展示 15 秒。
+
+关闭或自动超时后，记录仍保留在历史中；未读且要求阅读的历史通知会触发托盘提醒。打开历史列表不会将全部通知标为已读，需要在前台查看这一条的详情。`--wait` 只等待通知结束展示，不等待已读，也不会代替用户标记已读。演示结束后可打开详情阅读，清除这条演示告警的未读提醒。
+
+三个示例的弹窗与控制台均使用英文，支持 `--executable` 指定本地程序；内容均为假数据。
 
 ## 源码开发
 
