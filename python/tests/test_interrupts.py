@@ -162,4 +162,4 @@ kernel.FreeConsole()
     if phase not in ("read", "exit", "notify", "cleanup", "entry"):
         snapshot = json.loads((tmp_path / "snapshot.json").read_text(encoding="utf-8"))
         assert snapshot["updatable"] is False
-        assert snapshot["content"]["title"] == ("Workspace backup complete" if phase == "wait" else "Backup demo stopped")
+        assert snapshot["content"]["title"] == ("Release candidate ready" if phase == "wait" else "Build demo stopped")
