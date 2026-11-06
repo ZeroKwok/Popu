@@ -47,6 +47,8 @@ Write a request to a caller-controlled file, then invoke `popu request <request.
 
 Branch on both the terminal status and intended action before executing the user's decision. Treat cancelled, closed, and timed-out dialogs as expected outcomes. `PopuError` reports invocation, validation, compatibility, or protocol failures. Ctrl+C propagates `KeyboardInterrupt` and reaps the SDK's CLI; it does not stop the Host or cancel an accepted request. An optional `Client(timeout=...)` bounds synchronous CLI operations, separately from a dialog's `timeout_seconds`.
 
+The Host binds dialog actions to the latest presented content revision. Actions wait while replacement content renders; a rejected stale action preserves input and requires review. Enter in a text or number field submits only when exactly one submit action exists; multiple submit actions require a button choice, and textarea Enter retains a newline. Esc cancels dialogs but does not dismiss notifications. `acknowledged_revision` is a Host-maintained snapshot field, never an input to requests or updates.
+
 If a response is lost after submission, reconcile a known request ID through status or wait rather than blindly submitting again. Notifications and accepted dialogs remain owned by the Host after the submitting process exits.
 
 ## Manage task progress and final summaries

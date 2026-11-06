@@ -394,13 +394,13 @@ async fn ui_ready(window: WebviewWindow, state: State<'_, Arc<HostState>>, revis
 }
 
 #[tauri::command]
-async fn submit(window: WebviewWindow, state: State<'_, Arc<HostState>>, action: String, values: Map<String, Value>) -> Result<(), String> {
-    coordinator::call_async(Arc::clone(state.inner()), Command::Submit { id: id_for(&window)?, action, values }).await
+async fn submit(window: WebviewWindow, state: State<'_, Arc<HostState>>, revision: u64, action: String, values: Map<String, Value>) -> Result<(), String> {
+    coordinator::call_async(Arc::clone(state.inner()), Command::Submit { id: id_for(&window)?, revision, action, values }).await
 }
 
 #[tauri::command]
-async fn finish(window: WebviewWindow, state: State<'_, Arc<HostState>>, status: ResponseStatus, action: Option<String>) -> Result<(), String> {
-    coordinator::call_async(Arc::clone(state.inner()), Command::Finish { id: id_for(&window)?, status, action }).await
+async fn finish(window: WebviewWindow, state: State<'_, Arc<HostState>>, revision: u64, status: ResponseStatus, action: Option<String>) -> Result<(), String> {
+    coordinator::call_async(Arc::clone(state.inner()), Command::Finish { id: id_for(&window)?, revision, status, action }).await
 }
 
 #[tauri::command]
@@ -417,12 +417,18 @@ fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
         return;
     }
     let Ok(id) = Uuid::parse_str(window.label()) else { return };
+    let state = window.app_handle().state::<Arc<HostState>>();
     let task = match event {
-        WindowEvent::CloseRequested { api, .. } => { api.prevent_close(); Task::Closed(id) }
+        WindowEvent::CloseRequested { api, .. } => {
+            api.prevent_close();
+            // Capture before enqueueing: the coordinator can process a newer
+            // readiness event before it handles this native close.
+            let revision = state.registry.lock().unwrap().presented_revision(id).unwrap_or(0);
+            Task::Closed { id, revision }
+        }
         WindowEvent::Destroyed => Task::Destroyed(id),
         _ => return,
     };
-    let state = window.app_handle().state::<Arc<HostState>>();
     let _ = coordinator::send(&state, task);
 }
 

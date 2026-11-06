@@ -7,6 +7,8 @@ const invoke = window.__TAURI__.core.invoke;
 let bootstrap;
 let renderVersion = 0;
 let pendingContent = Promise.resolve();
+let presentedRevision = 0;
+let actionPending = false;
 
 const nonDragSelector = [
   "button",
@@ -37,6 +39,20 @@ function renderFormBlock(block, section) {
   form.className = "popu-form";
   form.dataset.popuForm = "";
   form.noValidate = true;
+  // noValidate only skips browser validation; implicit submission can still
+  // navigate/reload the WebView and lose input instead of returning a Host result.
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitDefaultAction();
+  });
+  // Browsers handle Enter differently with one versus multiple inputs. Use the
+  // same Popu action in both cases, leaving IME confirmation and textarea editing alone.
+  form.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.isComposing || event.target.tagName === "TEXTAREA") return;
+    if (!(event.target instanceof HTMLInputElement) || !["text", "number"].includes(event.target.type)) return;
+    event.preventDefault();
+    submitDefaultAction();
+  });
   for (const field of block.fields) form.append(renderField(field));
   section.append(form);
 }
@@ -196,6 +212,7 @@ function renderContent(content, preserveForm = false) {
 }
 
 window.popuApplyUpdate = (content, revision, occurredAtMs) => {
+  setActionsEnabled(false);
   bootstrap.request.content = content;
   bootstrap.revision = revision;
   bootstrap.occurred_at_ms = occurredAtMs ?? bootstrap.occurred_at_ms;
@@ -213,7 +230,12 @@ async function announceReady() {
     await ready;
     await waitForPresentationFrame();
   } while (ready !== pendingContent);
+  // Capture the painted version, not the latest Host version at click time.
+  presentedRevision = revision;
   await invoke("ui_ready", { revision });
+  // Another update may arrive while the Host handles readiness. Its content
+  // needs its own acknowledgement before actions can become available again.
+  if (ready === pendingContent) setActionsEnabled(true);
 }
 
 async function waitForPresentationFrame() {
@@ -229,16 +251,62 @@ async function waitForPresentationFrame() {
 }
 
 function showValidationError(message) {
-  const firstField = document.querySelector(".popu-field");
-  if (!firstField) return;
-  let error = firstField.querySelector(".popu-error");
+  // Confirmation dialogs can have no fields; revision conflicts still need
+  // a visible error without discarding the user's current input.
+  const root = element("actions") ?? element("content");
+  if (!root) return;
+  let error = root.querySelector(".popu-error");
   if (!error) {
     error = document.createElement("div");
     error.className = "popu-error";
     error.setAttribute("role", "alert");
-    firstField.append(error);
+    root.append(error);
   }
   error.textContent = message;
+}
+
+function setActionsEnabled(enabled) {
+  for (const button of element("actions")?.querySelectorAll("button") ?? []) {
+    button.disabled = !enabled || actionPending;
+  }
+}
+
+function submitDefaultAction() {
+  const actions = bootstrap.request.actions.filter((action) => action.submit);
+  // Multiple submit actions may have different business outcomes; Enter must
+  // not silently choose one merely because it appears first.
+  if (actions.length === 1) performAction(actions[0]);
+}
+
+async function performAction(action) {
+  // Keyboard/form submissions bypass disabled buttons, so enforce the same
+  // presentation and in-flight guards at the shared action entry point.
+  if (actionPending || presentedRevision !== bootstrap.revision) return;
+  const revision = presentedRevision;
+  if (action.submit) {
+    const forms = document.querySelectorAll("[data-popu-form]");
+    if ([...forms].some((form) => !form.reportValidity())) return;
+  }
+  actionPending = true;
+  setActionsEnabled(false);
+  try {
+    if (action.submit) {
+      await invoke("submit", { revision, action: action.id, values: collectValues() });
+    } else {
+      await invoke("finish", { revision, status: action.result_status, action: action.id });
+    }
+  } catch (error) {
+    const message = String(error);
+    showValidationError(/revision_conflict|content_not_presented/.test(message)
+      ? "The content changed. Please review it and try again." : message);
+  } finally {
+    actionPending = false;
+    setActionsEnabled(presentedRevision === bootstrap.revision);
+  }
+}
+
+function closeRequest(status) {
+  invoke("finish", { revision: presentedRevision, status, action: null }).catch(showValidationError);
 }
 
 function renderActions(actions) {
@@ -252,19 +320,8 @@ function renderActions(actions) {
     button.className = `popu-button popu-button-${action.style}`;
     button.dataset.testid = `action-${action.id}`;
     button.textContent = action.label;
-    button.addEventListener("click", async () => {
-      try {
-        if (action.submit) {
-          const forms = document.querySelectorAll("[data-popu-form]");
-          if ([...forms].some((form) => !form.reportValidity())) return;
-          await invoke("submit", { action: action.id, values: collectValues() });
-        } else {
-          await invoke("finish", { status: action.result_status, action: action.id });
-        }
-      } catch (error) {
-        showValidationError(String(error));
-      }
-    });
+    button.disabled = presentedRevision !== bootstrap.revision;
+    button.addEventListener("click", () => performAction(action));
     root.append(button);
   }
 }
@@ -315,10 +372,12 @@ async function start() {
   renderActions(bootstrap.request.actions);
   installDragRegions();
 
-  document.querySelector("[data-popu-action='close']")?.addEventListener("click", () => invoke("finish", { status: "closed", action: null }));
+  document.querySelector("[data-popu-action='close']")?.addEventListener("click", () => closeRequest("closed"));
   document.addEventListener("keydown", (event) => {
+    // Esc cancels a dialog; it must not acknowledge or hide notifications.
     if (event.key === "Escape" && bootstrap.request.mode === "dialog") {
-      invoke("finish", { status: "cancelled", action: null });
+      event.preventDefault();
+      closeRequest("cancelled");
     }
   });
   await announceReady();

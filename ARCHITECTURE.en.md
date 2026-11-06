@@ -65,6 +65,10 @@ Automatic display expiry hides an updatable notification; the next report queues
 
 External templates are caller configuration supplied with `--template`. The Host canonicalizes and validates the directory before registering the request.
 
+Content acceptance and presentation are tracked separately. The Host advances its internal presented revision only on current-version `ui_ready` for a shown window, or when a ready window is actually revealed; checkpoints do not restore it. UI close events carry the painted revision at the time of the action. Native close events capture the Host's presented revision when received, so delayed closes cannot acknowledge later content. Dialog actions must match the latest presented revision; conflicts keep the window and input intact and ask the user to review again. Actions are disabled while replacement content is preparing. Closing without an action, or cancelling with Esc, can still end a dialog.
+
+Forms submit through Popu actions and prevent browser navigation. Enter in a text or number input submits only when exactly one action has `submit: true`, validating all form blocks; multiple submit actions require an explicit button choice. Enter in a textarea retains a newline. Notifications do not support Esc dismissal; Esc cancels dialogs.
+
 ## RPC
 
 Every frame is capped at 1 MiB. RPC version `1.0` methods are:
@@ -72,9 +76,11 @@ Every frame is capped at 1 MiB. RPC version `1.0` methods are:
 - `request.create`, `request.update`, `request.dismiss`, `request.get`, `request.wait`
 - `host.hello`
 - `host.status`, `host.stop`
-- `history.list`, `history.clear`
+- `history.list`, `history.get`, `history.clear`
 
 Malformed JSON, unsupported versions, unknown methods, oversized frames, revision conflicts, terminal updates, and missing IDs return structured errors.
+
+Currently, `persistence_failed` does not guarantee that nothing happened: the Registry or window may already have changed, and the Host retries saving in the background. With a known ID, reconcile revision and content through `status`. If creation returned no ID, repeating a request with its original `coalesce_key` can reuse only a still-active request. Without that key, or after the original request ends, retrying is not guaranteed to be idempotent; do not blindly replay it.
 
 Each business connection begins with `host.hello` (`params.app_version`). The Host validates the CLI application version and the frame's RPC version, then returns `app_version`, `rpc_version`, `pid`, and `executable`. The client validates that identity before sending one business request on the same connection. Both versions must match exactly. A two-second handshake deadline uses nonblocking I/O, including partial frames, without limiting a later business wait. Hosts reject business calls without a handshake. `host.status` and explicitly requested `host.stop` remain available without it for upgrade recovery; status includes the running identity under `host`.
 
@@ -84,11 +90,15 @@ Only connection absence/refusal triggers automatic Host startup. Handshake failu
 
 Notification history and live notification checkpoints are stored in SQLite under the Popu application-data directory. Accepted updates replace the existing history row, keeping content, revision, occurrence time and reading state consistent. Checkpoints retain the request, template location, user-close intent and reshow budget. History and checkpoint changes commit atomically before successful command replies. Dialogs and form values are never persisted. Retention keeps the newest 500 archived rows and preserves active notifications.
 
+The 500-row limit applies to database archives, not the Host's in-memory request count; terminal Registry records currently have no automatic eviction. `status` / `wait` read the current Host Registry; the history window and `history.*` read SQLite. Restart restores remaining active notification checkpoints, not archived IDs or dialogs. A retained history entry therefore does not guarantee that its old ID is queryable through `status` / `wait`. Clearing hidden history removes its update channel; later queries or updates return a missing-ID error.
+
 The history window is a read-only master-detail view of current and archived notification snapshots. Its list shows title, presentation state and occurrence time; its detail pane renders the saved body. Viewing it never starts a timer, changes the stack or emits a business action. Clearing history also deletes hidden update channels, while preserving queued/preparing/ready/shown notifications. The coordinator serializes clearing with updates.
 
 When a notification snapshot is successfully recorded, or history is cleared, the Host emits a targeted `history-changed` event. The history window coalesces refresh hints and preserves the selected item when possible. No window polls the database, and an unopened history window receives no work.
 
 Reading is per content revision. User close acknowledges the displayed revision, while later content starts unread. The foreground history renderer acknowledges only the revision it actually rendered; a late acknowledgement cannot read a newer result. Tray reminders depend only on hidden/archived unread rows with `requires_read: true`, never on visible or queued counts.
+
+The snapshot's `acknowledged_revision` is maintained internally by the Host for close or caller-dismissal acknowledgements; it is not a request input. History viewing records reading separately with revision checks. Queued one-shot notifications generally do not appear in history before terminalization. Continued updates restart visible notification timers, and no maximum queue waiting time is currently guaranteed.
 
 ## Public CLI
 

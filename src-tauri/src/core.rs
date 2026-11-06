@@ -54,6 +54,8 @@ pub struct RequestSnapshot {
     pub hidden_reason: Option<RequestState>,
     pub reshow_count: u32,
     pub reshow_suppressed: bool,
+    /// Host-maintained close/dismiss acknowledgement; history viewing records
+    /// reading separately, so this alone is not the complete read state.
     pub acknowledged_revision: u64,
     pub content: Content,
     pub created_at: SystemTime,
@@ -116,6 +118,8 @@ pub enum RegistryError {
     NotificationExpired,
     #[error("revision conflict (current revision: {current_revision})")]
     RevisionConflict { current_revision: u64 },
+    #[error("content is not yet presented; review the latest content before acting")]
+    ContentNotPresented,
     #[error("a shown dialog's form structure cannot be changed")]
     FormStructureChanged,
     #[error("updated content is invalid: {message}")]
@@ -136,6 +140,10 @@ struct Record {
     reshow_pending: bool,
     reshow_suppressed: bool,
     acknowledged_revision: u64,
+    // A restored checkpoint has no visible window. Persisting this would let
+    // a close acknowledge content that this Host process has never presented.
+    #[serde(skip)]
+    presented_revision: u64,
     shown_at: Option<SystemTime>,
     #[serde(skip)]
     phase_started: Option<Instant>,
@@ -214,6 +222,7 @@ impl RequestRegistry {
                 reshow_pending: false,
                 reshow_suppressed: false,
                 acknowledged_revision: 0,
+                presented_revision: 0,
                 shown_at: None,
                 phase_started: None,
                 visible_duration: Duration::ZERO,
@@ -322,6 +331,13 @@ impl RequestRegistry {
             .is_some_and(|r| r.state == RequestState::Shown)
     }
 
+    pub fn presented_revision(&self, id: Uuid) -> Result<u64, RegistryError> {
+        self.records
+            .get(&id)
+            .map(|r| r.presented_revision)
+            .ok_or(RegistryError::NotFound)
+    }
+
     pub fn is_preparing(&self, id: Uuid) -> bool {
         self.records
             .get(&id)
@@ -386,7 +402,10 @@ impl RequestRegistry {
                 r.state = RequestState::Ready;
                 r.phase_started = None;
             }
-            RequestState::Ready | RequestState::Shown => {}
+            // Readiness counts as presentation only for an already visible
+            // window; a preparing/parked window must first be revealed.
+            RequestState::Shown => r.presented_revision = r.revision,
+            RequestState::Ready => {}
             _ => return Err(RegistryError::Terminal),
         }
         self.dirty.insert(id);
@@ -405,6 +424,7 @@ impl RequestRegistry {
             return Err(RegistryError::Terminal);
         }
         r.state = RequestState::Shown;
+        r.presented_revision = r.revision;
         if r.reshow_pending {
             r.reshow_count += 1;
             r.reshow_pending = false;
@@ -538,6 +558,28 @@ impl RequestRegistry {
         response: Response,
         exit_code: i32,
     ) -> Result<Vec<Effect>, RegistryError> {
+        self.complete_with_revision(id, response, exit_code, None)
+    }
+
+    /// UI events capture the rendered version when the user acts. A delayed
+    /// close must not acknowledge content presented after that event.
+    pub fn complete_from_ui(
+        &mut self,
+        id: Uuid,
+        response: Response,
+        exit_code: i32,
+        revision: u64,
+    ) -> Result<Vec<Effect>, RegistryError> {
+        self.complete_with_revision(id, response, exit_code, Some(revision))
+    }
+
+    fn complete_with_revision(
+        &mut self,
+        id: Uuid,
+        response: Response,
+        exit_code: i32,
+        revision: Option<u64>,
+    ) -> Result<Vec<Effect>, RegistryError> {
         let r = self.records.get(&id).ok_or(RegistryError::NotFound)?;
         if r.state.is_terminal() {
             return Err(RegistryError::Terminal);
@@ -545,6 +587,24 @@ impl RequestRegistry {
         if r.state == RequestState::Hidden {
             return Ok(vec![]);
         }
+        // An action is a decision about specific content, even after an update
+        // has overtaken its UI event. Closing/Esc have no action and must remain
+        // available while replacement content is still preparing.
+        if r.request.mode == Mode::Dialog && response.action.is_some() {
+            if revision.is_some_and(|revision| revision != r.revision) {
+                return Err(RegistryError::RevisionConflict {
+                    current_revision: r.revision,
+                });
+            }
+            if r.state != RequestState::Shown || r.presented_revision != r.revision {
+                return Err(RegistryError::ContentNotPresented);
+            }
+        }
+        // Bound the event's version by what the Host actually presented; the
+        // frontend may have painted a version whose readiness is still queued.
+        let acknowledged = revision
+            .unwrap_or(r.presented_revision)
+            .min(r.presented_revision);
         let state = match response.status {
             ResponseStatus::Submitted | ResponseStatus::Confirmed => RequestState::Confirmed,
             ResponseStatus::Cancelled => RequestState::Cancelled,
@@ -553,7 +613,8 @@ impl RequestRegistry {
         };
         if matches!(state, RequestState::Closed | RequestState::Cancelled) {
             if let Some(r) = self.records.get_mut(&id) {
-                r.acknowledged_revision = r.revision;
+                // A delayed older event must not undo an existing acknowledgement.
+                r.acknowledged_revision = r.acknowledged_revision.max(acknowledged);
             }
         }
         if self
@@ -1313,6 +1374,109 @@ mod tests {
         assert_eq!(r.clear_hidden(), [id]);
         assert!(matches!(r.snapshot(id), Err(RegistryError::NotFound)));
         assert_eq!(r.next_notification(), Some(queued));
+    }
+
+    #[test]
+    fn close_during_rendering_acknowledges_only_the_presented_revision() {
+        for ui_revision in [None, Some(1)] {
+            let mut r = RequestRegistry::default();
+            let id = live(&mut r);
+            show(&mut r, id, Instant::now());
+            change(&mut r, id, UpdateOptions::default());
+            let response = r
+                .request(id)
+                .unwrap()
+                .terminal_response(ResponseStatus::Closed, None);
+            match ui_revision {
+                Some(revision) => r.complete_from_ui(id, response, 10, revision),
+                None => r.complete(id, response, 10),
+            }
+            .unwrap();
+            let snapshot = r.snapshot(id).unwrap();
+            assert_eq!(snapshot.state, RequestState::Hidden);
+            assert_eq!(snapshot.revision, 2);
+            assert_eq!(snapshot.acknowledged_revision, 1);
+        }
+    }
+
+    #[test]
+    fn delayed_close_does_not_acknowledge_a_later_presentation() {
+        let mut r = RequestRegistry::default();
+        let id = live(&mut r);
+        show(&mut r, id, Instant::now());
+        change(&mut r, id, UpdateOptions::default());
+        r.mark_ready(id).unwrap();
+        assert_eq!(r.presented_revision(id).unwrap(), 2);
+        let response = r
+            .request(id)
+            .unwrap()
+            .terminal_response(ResponseStatus::Closed, None);
+        r.complete_from_ui(id, response, 10, 1).unwrap();
+        assert_eq!(r.snapshot(id).unwrap().acknowledged_revision, 1);
+    }
+
+    #[test]
+    fn close_acknowledges_new_content_after_it_is_presented() {
+        let mut r = RequestRegistry::default();
+        let id = live(&mut r);
+        show(&mut r, id, Instant::now());
+        change(&mut r, id, UpdateOptions::default());
+        r.mark_ready(id).unwrap();
+        close_user(&mut r, id);
+        assert_eq!(r.snapshot(id).unwrap().acknowledged_revision, 2);
+    }
+
+    #[test]
+    fn closing_prepared_or_restored_content_does_not_imply_it_was_seen() {
+        let mut r = RequestRegistry::default();
+        let id = live(&mut r);
+        r.activate(id, Instant::now());
+        r.mark_ready(id).unwrap();
+        assert_eq!(r.presented_revision(id).unwrap(), 0);
+        close_user(&mut r, id);
+        assert_eq!(r.snapshot(id).unwrap().acknowledged_revision, 0);
+
+        let mut shown = RequestRegistry::default();
+        let shown_id = live(&mut shown);
+        show(&mut shown, shown_id, Instant::now());
+        assert_eq!(shown.presented_revision(shown_id).unwrap(), 1);
+        let mut restored = RequestRegistry::default();
+        restored
+            .restore(shown_id, &shown.checkpoint(shown_id).unwrap())
+            .unwrap();
+        assert_eq!(restored.presented_revision(shown_id).unwrap(), 0);
+    }
+
+    #[test]
+    fn dialog_actions_require_the_latest_presented_revision() {
+        for status in [ResponseStatus::Submitted, ResponseStatus::Confirmed] {
+            let mut r = RequestRegistry::default();
+            let id = r.create(req("dialog", None), None).request_id;
+            show(&mut r, id, Instant::now());
+            let mut content = r.snapshot(id).unwrap().content;
+            content.title = "Updated question".into();
+            r.update(id, 1, content).unwrap();
+            let response = r
+                .request(id)
+                .unwrap()
+                .terminal_response(status, Some("ok".into()));
+            assert!(matches!(
+                r.complete_from_ui(id, response.clone(), 0, 1),
+                Err(RegistryError::RevisionConflict {
+                    current_revision: 2
+                })
+            ));
+            assert!(matches!(
+                r.complete_from_ui(id, response.clone(), 0, 2),
+                Err(RegistryError::ContentNotPresented)
+            ));
+            assert_eq!(r.snapshot(id).unwrap().state, RequestState::Shown);
+            r.mark_ready(id).unwrap();
+            // An old action can arrive even after the new content is presented.
+            assert!(r.complete_from_ui(id, response.clone(), 0, 1).is_err());
+            r.complete_from_ui(id, response, 0, 2).unwrap();
+            assert_eq!(r.snapshot(id).unwrap().state, RequestState::Confirmed);
+        }
     }
 
     #[test]

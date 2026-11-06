@@ -17,6 +17,8 @@ async function mockHost(page, fixture, history = [], foreground = true, opened =
   await page.addInitScript(({ fixture, template, history, foreground, opened }) => {
     window.__reads = [];
     window.__submitted = null;
+    window.__submissions = [];
+    window.__finished = [];
     window.__presented = false;
     window.__readyRevisions = [];
     window.__failed = null;
@@ -30,6 +32,10 @@ async function mockHost(page, fixture, history = [], foreground = true, opened =
     window.__historyRecords = history;
     window.__TAURI__ = {
       core: { invoke: async (command, args) => {
+        if (["submit", "finish"].includes(command) && window.__rejectNextAction) {
+          window.__rejectNextAction = false;
+          throw '{"code":"revision_conflict","current_revision":2}';
+        }
         if (command === "get_bootstrap") return { request: fixture, revision: 1, occurred_at_ms: Date.now() - 15000, template, maximized: false };
         if (command === "ui_ready") { window.__readyRevisions.push(args.revision); window.__presented = true; return; }
         if (command === "render_failed") { window.__failed = args.message; return; }
@@ -38,9 +44,9 @@ async function mockHost(page, fixture, history = [], foreground = true, opened =
         if (command === "history_list") { window.__listRequests++; return history.map((item) => ({ ...structuredClone(item), content: { title: item.content.title, severity: item.content.severity } })); }
         if (command === "history_get") { window.__detailRequests.push(args.requestId); return structuredClone(history.find((item) => item.request_id === args.requestId)); }
         if (command === "history_mark_read") { window.__readAttempts++; if (!window.__historyForeground) return null; window.__reads.push(args.requestId); return Date.now(); }
-        if (command === "submit") { window.__submitted = args; return; }
+        if (command === "submit") { window.__submitted = args; window.__submissions.push(args); return; }
         if (command === "history_clear") return 0;
-        if (command === "finish") return;
+        if (command === "finish") { window.__finished.push(args); return; }
         throw new Error(`Unexpected command: ${command}`);
       } },
       window: { getCurrentWindow: () => ({ startDragging: async () => { window.__dragStarts++; } }) },
@@ -48,6 +54,119 @@ async function mockHost(page, fixture, history = [], foreground = true, opened =
     };
   }, { fixture, template, history, foreground, opened });
 }
+
+function formFixture(blocks, actions = [{ id: "ok", label: "OK", submit: true }]) {
+  return { version: "1.0", mode: "dialog", template: "form", content: { title: "Enter details", blocks }, actions };
+}
+
+test("Enter in a single text field submits once without navigation", async ({ page }) => {
+  await mockHost(page, formFixture([{ type: "form", fields: [{ id: "name", type: "text", label: "Name" }] }]));
+  await page.goto("/index.html");
+  await expect(page.getByRole("button", { name: "OK", exact: true })).toBeEnabled();
+  await page.getByLabel("Name", { exact: true }).fill("Alice");
+  await page.getByLabel("Name", { exact: true }).press("Enter");
+  await expect.poll(() => page.evaluate(() => window.__submissions)).toEqual([
+    { revision: 1, action: "ok", values: { name: "Alice" } },
+  ]);
+  expect(new URL(page.url()).search).toBe("");
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Alice");
+});
+
+test("Enter validates all form blocks and collects their values", async ({ page }) => {
+  await mockHost(page, formFixture([
+    { type: "form", fields: [{ id: "name", type: "text", label: "Name" }, { id: "team", type: "text", label: "Team" }] },
+    { type: "form", fields: [{ id: "agreed", type: "checkbox", label: "Agree", required: true }] },
+  ]));
+  await page.goto("/index.html");
+  await expect(page.getByRole("button", { name: "OK", exact: true })).toBeEnabled();
+  await page.getByLabel("Name", { exact: true }).fill("Alice");
+  await page.getByLabel("Team", { exact: true }).fill("Ops");
+  await page.getByLabel("Name", { exact: true }).press("Enter");
+  expect(await page.evaluate(() => window.__submissions)).toEqual([]);
+  await page.getByLabel("Agree", { exact: true }).check();
+  await page.getByLabel("Team", { exact: true }).press("Enter");
+  await expect.poll(() => page.evaluate(() => window.__submitted?.values)).toEqual({ name: "Alice", team: "Ops", agreed: true });
+  expect(new URL(page.url()).search).toBe("");
+});
+
+test("textarea Enter keeps a newline and ambiguous submit actions require a click", async ({ page }) => {
+  await mockHost(page, formFixture([{ type: "form", fields: [
+    { id: "name", type: "text", label: "Name" }, { id: "notes", type: "textarea", label: "Notes" },
+  ] }], [{ id: "save", label: "Save", submit: true }, { id: "send", label: "Send", submit: true }]));
+  await page.goto("/index.html");
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+  await page.getByLabel("Notes", { exact: true }).fill("First");
+  await page.getByLabel("Notes", { exact: true }).press("Enter");
+  await expect(page.getByLabel("Notes", { exact: true })).toHaveValue("First\n");
+  await page.getByLabel("Name", { exact: true }).fill("Alice");
+  await page.getByLabel("Name", { exact: true }).press("Enter");
+  expect(await page.evaluate(() => window.__submissions)).toEqual([]);
+  expect(new URL(page.url()).search).toBe("");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__submitted?.action)).toBe("send");
+});
+
+test("notification close captures the painted revision and Escape does not close", async ({ page }) => {
+  const fixture = readJson("protocol/examples/notification-success.json");
+  await mockHost(page, fixture);
+  await page.goto("/index.html");
+  await expect.poll(() => page.evaluate(() => window.__readyRevisions)).toEqual([1]);
+  await page.keyboard.press("Escape");
+  expect(await page.evaluate(() => window.__finished)).toEqual([]);
+  await page.evaluate((content) => {
+    window.popuApplyUpdate({ ...content, title: "Unpainted update" }, 2);
+    document.querySelector("[data-popu-action='close']").click();
+  }, fixture.content);
+  await expect.poll(() => page.evaluate(() => window.__finished)).toEqual([
+    { revision: 1, status: "closed", action: null },
+  ]);
+});
+
+test("dialog actions wait for replacement content and preserve entered values", async ({ page }) => {
+  const fixture = formFixture([{ type: "form", fields: [{ id: "name", type: "text", label: "Name" }] }]);
+  await mockHost(page, fixture);
+  await page.goto("/index.html");
+  await expect(page.getByRole("button", { name: "OK", exact: true })).toBeEnabled();
+  await page.getByLabel("Name", { exact: true }).fill("Alice");
+  await page.evaluate((content) => {
+    window.popuApplyUpdate({ ...content, title: "Review updated details" }, 2);
+    document.querySelector("[data-testid='action-ok']").click();
+    document.querySelector("form").requestSubmit();
+    window.__duringUpdateSubmissions = window.__submissions.length;
+  }, fixture.content);
+  expect(await page.evaluate(() => window.__duringUpdateSubmissions)).toBe(0);
+  await expect(page.getByRole("button", { name: "OK", exact: true })).toBeEnabled();
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Alice");
+  await page.getByRole("button", { name: "OK", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__submitted)).toEqual({ revision: 2, action: "ok", values: { name: "Alice" } });
+});
+
+test("a rejected stale action shows an error and can be retried without losing values", async ({ page }) => {
+  await mockHost(page, formFixture([{ type: "form", fields: [{ id: "name", type: "text", label: "Name" }] }]));
+  await page.goto("/index.html");
+  await expect(page.getByRole("button", { name: "OK", exact: true })).toBeEnabled();
+  await page.getByLabel("Name", { exact: true }).fill("Alice");
+  await page.evaluate(() => { window.__rejectNextAction = true; });
+  await page.getByRole("button", { name: "OK", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveText("The content changed. Please review it and try again.");
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Alice");
+  expect(await page.evaluate(() => window.__submissions)).toEqual([]);
+  await page.getByRole("button", { name: "OK", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__submitted?.values)).toEqual({ name: "Alice" });
+});
+
+test("a dialog without fields reports rejected actions and Escape remains cancellation", async ({ page }) => {
+  await mockHost(page, formFixture([], [{ id: "confirm", label: "Confirm", result_status: "confirmed" }]));
+  await page.goto("/index.html");
+  await expect(page.getByRole("button", { name: "Confirm", exact: true })).toBeEnabled();
+  await page.evaluate(() => { window.__rejectNextAction = true; });
+  await page.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveText("The content changed. Please review it and try again.");
+  await page.keyboard.press("Escape");
+  await expect.poll(() => page.evaluate(() => window.__finished)).toEqual([
+    { revision: 1, status: "cancelled", action: null },
+  ]);
+});
 
 for (const name of examples) {
   test(`${name} renders offline without overflow or CSP violations`, async ({ page }, testInfo) => {

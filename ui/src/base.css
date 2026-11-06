@@ -98,8 +98,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .popu-field textarea { min-height: 78px; resize: vertical; }
 .popu-options { display: flex; flex-wrap: wrap; gap: 10px 16px; }
 .popu-error { color: #b42318; font-size: 12px; }
-.popu-actions { display: flex; flex: 0 0 auto; justify-content: flex-end; gap: 8px; padding-top: 18px; }
+.popu-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 18px; }
+/* Conflicts also occur in dialogs without fields; keep the action-area error
+   on its own row so the explanation does not squeeze the decision buttons. */
+.popu-actions > .popu-error { flex-basis: 100%; order: -1; }
 .popu-button { border: 0; border-radius: 7px; padding: 8px 17px; cursor: pointer; }
+.popu-button:disabled { opacity: 0.55; cursor: wait; }
 .popu-button-primary { color: #fff; background: #377dff; }
 .popu-button-secondary { color: #252a34; background: #edf0f5; }
 .popu-button-danger { color: #fff; background: #d92d20; }

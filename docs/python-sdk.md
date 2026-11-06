@@ -26,6 +26,14 @@ client.dismiss(receipt.request_id)
 
 `status`、`update`、`dismiss` 和 `wait` 返回 Host 快照字典。`wait` 读取权威终态快照，包括 revision、内容、时间戳、响应和退出码；隐藏的可更新通知尚未进入终态。其他客户端也可以通过请求 ID 管理同一请求。更新必须使用最新 revision，并替换完整内容。每次成功的通知更新都会按配置的展示时长重新计时，可用 `duration_ms` 覆盖该时长。对话框更新保留原始交互截止时间。revision 冲突、ID 不存在、校验失败、更新通道已关闭，以及子进程或 JSON 错误都会抛出 `PopuError`。
 
+`revision` 表示 Host 已接受的内容版本，`expected_revision` 是更新时的冲突检查参数。快照中的 `acknowledged_revision` 由 Host 内部维护，表示关闭或调用方撤销所确认的版本，不能在请求或更新中填写。用户关闭仅确认当时已呈现的版本，尚未展示的新内容保持未读；历史阅读另行按 revision 确认。
+
+dialog 更新准备期间动作按钮不可用；动作提交必须对应最新且已呈现的内容。版本冲突会保留输入并提示重新审阅，不会确认新版内容。文本或数字输入框按 Enter 时，仅在恰好一个提交动作存在时提交，并校验所有表单块；多个提交动作需点击选择，文本域 Enter 保留换行。Esc 取消 dialog，通知不支持 Esc 收起。
+
+`status` / `wait` 查询当前 Host 的 Registry，不查询归档历史。Host 重启后仅恢复尚存的活动通知检查点，已归档 ID 和 dialog 不重新载入；历史仍可查看不保证旧 ID 可查询。清除隐藏历史也会删除对应 ID。SQLite 最新 500 条归档的保留上限不限制 Host 的终态内存记录。
+
+当前持久化失败可能发生在 Registry 或窗口已经变化之后，后台还会重试保存。收到 `persistence_failed` 时，已知 ID 应先查询当前 revision 和内容；创建未返回 ID 时，不能保证重试不会重复。原请求的 `coalesce_key` 只对仍活动的请求去重，不提供终态后的幂等保证。
+
 ## 可更新通知
 
 通知默认 `updatable=False`，不接受更新。进度上报需要在创建时显式开启更新。更新时省略此选项会保留当前值；最后一次上报设置 `updatable=False`，原子保存最终内容并拒绝后续更新。不使用 `final` 字段。对话框内容更新不使用通知专用选项。

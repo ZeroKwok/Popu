@@ -13,11 +13,13 @@ pub(super) enum Command {
     Dismiss(Uuid),
     Submit {
         id: Uuid,
+        revision: u64,
         action: String,
         values: Map<String, Value>,
     },
     Finish {
         id: Uuid,
+        revision: u64,
         status: ResponseStatus,
         action: Option<String>,
     },
@@ -38,7 +40,7 @@ pub(super) enum Task {
         id: Uuid,
         message: String,
     },
-    Closed(Uuid),
+    Closed { id: Uuid, revision: u64 },
     Destroyed(Uuid),
     History {
         show: bool,
@@ -144,14 +146,15 @@ impl Coordinator {
                 let _ = reply.send(result);
             }
             Task::RenderFailed { id, message } => self.fail(id, &message),
-            Task::Closed(id) => {
+            Task::Closed { id, revision } => {
                 let request = self.state.registry.lock().unwrap().request(id).cloned();
                 if let Some(request) = request {
                     let result = {
-                        self.state.registry.lock().unwrap().complete(
+                        self.state.registry.lock().unwrap().complete_from_ui(
                             id,
                             request.terminal_response(ResponseStatus::Closed, None),
                             10,
+                            revision,
                         )
                     };
                     if let Ok(effects) = result {
@@ -202,7 +205,7 @@ impl Coordinator {
                 self.apply(effects);
                 self.snapshot(id)
             }
-            Command::Submit { id, action, values } => {
+            Command::Submit { id, revision, action, values } => {
                 let request = self
                     .state
                     .registry
@@ -226,12 +229,12 @@ impl Coordinator {
                     .registry
                     .lock()
                     .unwrap()
-                    .complete(id, response, code)
+                    .complete_from_ui(id, response, code, revision)
                     .map_err(invalid_registry)?;
                 self.apply(effects);
                 Ok(Value::Null)
             }
-            Command::Finish { id, status, action } => {
+            Command::Finish { id, revision, status, action } => {
                 let request = self
                     .state
                     .registry
@@ -256,7 +259,7 @@ impl Coordinator {
                     .registry
                     .lock()
                     .unwrap()
-                    .complete(id, response, code)
+                    .complete_from_ui(id, response, code, revision)
                     .map_err(invalid_registry)?;
                 self.apply(effects);
                 Ok(Value::Null)

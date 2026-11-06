@@ -236,6 +236,11 @@ mod tests {
         let mut registry = RequestRegistry::default();
         let request = Request::parse(&format!(r#"{{"version":"1.0","mode":"notify","requires_read":{requires_read},"content":{{"title":"History item"}}}}"#)).unwrap();
         let created = registry.create(request.clone(), None);
+        // Model a visible notification: closing queued content alone cannot
+        // establish that the user has seen it and should clear its unread state.
+        registry.activate(created.request_id, std::time::Instant::now());
+        registry.mark_ready(created.request_id).unwrap();
+        registry.mark_shown(created.request_id, std::time::Instant::now()).unwrap();
         match state {
             RequestState::Failed => { registry.fail(created.request_id).unwrap(); }
             RequestState::Cancelled => { registry.dismiss(created.request_id).unwrap(); }
@@ -355,6 +360,11 @@ mod tests {
         let mut registry = RequestRegistry::default();
         let request = Request::parse(r#"{"version":"1.0","mode":"notify","updatable":true,"requires_read":true,"content":{"title":"Progress"}}"#).unwrap();
         let id = registry.create(request.clone(), None).request_id;
+        // The initial close must acknowledge genuinely presented progress so
+        // this test can prove that the later result becomes unread again.
+        registry.activate(id, std::time::Instant::now());
+        registry.mark_ready(id).unwrap();
+        registry.mark_shown(id, std::time::Instant::now()).unwrap();
         registry.complete(id, request.terminal_response(crate::protocol::ResponseStatus::Closed, None), 10).unwrap();
         store.persist(&registry.snapshot(id).unwrap(), registry.checkpoint(id).as_deref()).unwrap();
         assert!(store.get(&id.to_string()).unwrap().read_at_ms.is_some());
@@ -371,6 +381,33 @@ mod tests {
         assert_eq!(store.pending_read_count().unwrap(), 1);
         assert!(store.mark_read_revision(&id.to_string(), Some(2)).unwrap().is_some());
         assert_eq!(store.pending_read_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn closing_old_content_keeps_the_new_revision_unread() {
+        for sealed in [false, true] {
+            let mut store = HistoryStore::from_connection(Connection::open_in_memory().unwrap()).unwrap();
+            let mut registry = RequestRegistry::default();
+            let request = Request::parse(r#"{"version":"1.0","mode":"notify","updatable":true,"requires_read":true,"content":{"title":"Progress"}}"#).unwrap();
+            let id = registry.create(request.clone(), None).request_id;
+            registry.activate(id, std::time::Instant::now());
+            registry.mark_ready(id).unwrap();
+            registry.mark_shown(id, std::time::Instant::now()).unwrap();
+            let mut content = request.content.clone();
+            content.title = "New result".into();
+            registry.update_with_options(id, 1, content, crate::core::UpdateOptions {
+                updatable: Some(!sealed), ..Default::default()
+            }).unwrap();
+            // Even if readiness overtakes this UI event, it still refers to v1.
+            registry.mark_ready(id).unwrap();
+            registry.complete_from_ui(id, request.terminal_response(crate::protocol::ResponseStatus::Closed, None), 10, 1).unwrap();
+            store.persist(&registry.snapshot(id).unwrap(), registry.checkpoint(id).as_deref()).unwrap();
+            let item = store.get(&id.to_string()).unwrap();
+            assert_eq!(item.revision, 2);
+            assert_eq!(item.state, if sealed { "closed" } else { "hidden" });
+            assert!(item.read_at_ms.is_none());
+            assert_eq!(store.pending_read_count().unwrap(), 1);
+        }
     }
 
     #[test]

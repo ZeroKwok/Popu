@@ -65,6 +65,10 @@ WebView logical CSS viewport                         Win32 work area / set_posit
 
 外部模板属于调用方配置，通过 `--template` 提供。Host 在注册请求前解析模板目录的真实路径并进行校验。
 
+内容接受与画面呈现分别记录。Host 只在已展示窗口收到当前版本的 `ui_ready`，或就绪窗口实际揭示时，推进内部已呈现版本；该版本不从检查点恢复。UI 关闭事件携带操作时的画面版本，原生关闭事件在接收时捕获 Host 已呈现版本，避免延迟关闭确认后来的内容。dialog 动作必须对应最新且已呈现的内容版本，冲突时保留窗口与输入，提示用户重新审阅；内容准备期间禁用动作按钮。无动作的关闭或 Esc 取消仍可结束 dialog。
+
+表单统一通过 Popu 动作提交，拦截浏览器默认提交与页面导航。文本或数字输入框按 Enter 时，只有恰好一个 `submit: true` 动作才会提交，并校验全部表单块；多个提交动作必须点击选择。文本域 Enter 保留换行。通知不支持 Esc 收起，dialog 的 Esc 表示取消。
+
 ## RPC
 
 每帧上限为 1 MiB。RPC 版本 `1.0` 提供以下方法：
@@ -72,9 +76,11 @@ WebView logical CSS viewport                         Win32 work area / set_posit
 - `request.create`、`request.update`、`request.dismiss`、`request.get`、`request.wait`
 - `host.hello`
 - `host.status`、`host.stop`
-- `history.list`、`history.clear`
+- `history.list`、`history.get`、`history.clear`
 
 JSON 格式错误、版本不支持、未知方法、帧过大、revision 冲突、更新已终止的请求和 ID 不存在等情况都会返回结构化错误。
+
+目前 `persistence_failed` 不保证操作未执行：Registry 或窗口可能已改变，后台还会重试保存。已知 ID 时先通过 `status` 核对 revision 和内容；创建未获得 ID 时，如原请求使用了 `coalesce_key`，重复创建只能复用仍活动的请求。没有该键或原请求已终止时，不保证重试幂等，不应自动盲目重放。
 
 每条业务连接先发送 `host.hello`（携带 `params.app_version`）。Host 校验 CLI 的应用版本与帧中的 RPC 版本，然后返回 `app_version`、`rpc_version`、`pid` 和 `executable`。客户端验证身份后，在同一连接提交一次业务请求。应用版本和 RPC 版本都必须完全一致。握手使用非阻塞 I/O，在两秒截止时间内处理包括半帧在内的数据，不限制后续业务等待。Host 拒绝未经握手的业务调用。`host.status` 和显式调用的 `host.stop` 无需握手，便于升级恢复；状态响应中的 `host` 字段包含当前运行身份。
 
@@ -84,11 +90,15 @@ JSON 格式错误、版本不支持、未知方法、帧过大、revision 冲突
 
 通知历史和活动通知检查点存储在 Popu 应用数据目录下的 SQLite 数据库中。成功更新会替换已有历史记录，使内容、revision、发生时间和阅读状态保持一致。检查点保留请求、模板位置、用户主动关闭意图和再次展示次数。历史与检查点的变更在成功响应前原子提交。对话框及其表单值不会持久化。保留策略保存最新 500 条归档记录，并保留活动通知。
 
+上述 500 条是数据库归档保留上限，不是 Host 内存中的请求数量上限；当前尚无终态 Registry 自动回收策略。`status` / `wait` 从当前 Host 的 Registry 读取，历史窗口与 `history.*` 从 SQLite 读取。Host 重启只恢复尚存的活动通知检查点，不重新装载已归档 ID 或 dialog，因此“历史仍可查看”不代表旧 ID 仍可通过 `status` / `wait` 查询。清除隐藏历史会删除对应更新通道，后续查询或更新返回 ID 不存在。
+
 历史窗口以只读的主从布局展示当前和已归档通知快照。列表显示标题、展示状态和发生时间，详情区域渲染保存的正文。查看历史不会启动计时、改变通知栈或触发业务动作。清空历史会删除隐藏通知的更新通道，同时保留 `queued`、`preparing`、`ready` 和 `shown` 状态的通知。协调器对清空与更新操作进行串行处理。
 
 通知快照保存成功或历史清空后，Host 向历史窗口定向发送 `history-changed` 事件。历史窗口合并刷新提示，并尽量保留当前选中项。窗口不会轮询数据库；未打开的历史窗口也不会收到刷新工作。
 
 阅读状态按内容 revision 记录。用户关闭会确认已展示的 revision，后续内容重新进入未读状态。前台历史渲染器只确认实际渲染的 revision；迟到的确认不会将更新后的结果标为已读。托盘提醒仅取决于隐藏或归档记录中 `requires_read: true` 的未读项，不取决于可见或排队通知数量。
+
+快照中的 `acknowledged_revision` 由 Host 内部维护，表示关闭或调用方撤销所确认的版本，不是请求输入字段。历史窗口另行记录带 revision 校验的阅读状态。已排队但未终态的一次性通知通常不会出现在历史列表中；持续更新会重置可见通知的计时，当前不承诺排队消息的最大等待时长。
 
 ## 公开 CLI
 

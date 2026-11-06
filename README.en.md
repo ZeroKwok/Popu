@@ -156,6 +156,7 @@ Long-running notifications opt in with `updatable: true` and reuse one ID. Every
 - notifications use the primary display work area, with at most three visible at once;
 - notification windows always use `always_on_top: true`; an explicit `false` is rejected;
 - notifications do not normally take focus;
+- notifications do not support Esc dismissal; Esc cancels dialogs;
 - dialogs can configure their display, work area or physical screen, size, and topmost behavior independently;
 - width and height use logical pixels or percentages, without manual DPI conversion;
 - both notifications and dialogs support selectable text, images, and charts;

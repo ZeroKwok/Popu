@@ -26,6 +26,14 @@ client.dismiss(receipt.request_id)
 
 `status`, `update`, `dismiss`, and `wait` return Host snapshot dictionaries. `wait` reads the authoritative terminal snapshot, including revision, content, timestamps, response and exit code; a hidden updatable notification is not terminal. The same request can be managed from another client using its ID. Updating requires the latest revision and replaces the entire content. Every accepted notification update restarts its display timer using the configured duration; optional `duration_ms` overrides that duration. Updates preserve a dialog's original interaction deadline. Revision conflicts, missing IDs, validation failures, sealed updates and subprocess/JSON errors raise `PopuError`.
 
+`revision` identifies the content accepted by the Host; `expected_revision` detects update conflicts. The snapshot's `acknowledged_revision` is maintained internally by the Host for close or caller-dismissal acknowledgements and cannot be supplied in requests or updates. User close acknowledges only the version already presented at the time of the action, leaving unseen updates unread. History viewing acknowledges revisions separately.
+
+Dialog actions are disabled while replacement content prepares and must match the latest presented revision. A conflict preserves entered values and asks the user to review again, without confirming the new version. Enter in a text or number input submits only when exactly one submit action exists, validating all form blocks. Multiple submit actions require a button choice; textarea Enter retains a newline. Esc cancels dialogs; notifications do not support Esc dismissal.
+
+`status` / `wait` query the current Host Registry, not archived history. Restart restores remaining active notification checkpoints, not archived IDs or dialogs. Retained history does not guarantee that an old ID remains queryable; clearing hidden history also removes its ID. The SQLite limit of 500 archived rows does not bound terminal records in Host memory.
+
+Currently, persistence can fail after the Registry or window has changed, and the Host retries saving in the background. On `persistence_failed`, reconcile a known ID's revision and content before retrying. When creation returned no ID, a retry can create a duplicate. The original `coalesce_key` deduplicates only still-active requests, not terminal ones.
+
 ## Live notifications
 
 Notifications default to `updatable=False` and reject updates. Opt in at creation for progress reports. Update omission preserves this flag; the last report sets `updatable=False`, atomically saving the final contents and rejecting further updates. There is no `final` field. Dialog content updates do not use notification options.
