@@ -16,12 +16,12 @@
         "title": "Artifacts",
         "items": [
           {
-            "label": "FoneTool",
-            "text": "\\\\192.168.4.230\\共享文件夹\\------------项目------------\\FoneTool\\FoneTool\\PC_4.X(04B)\\01 测试包\\2026-08-26 0945"
+            "label": "DemoTool",
+            "text": "\\\\192.0.2.10\\示例共享\\------------示例项目------------\\DemoTool\\DemoTool\\WIN_1.X(01A)\\01 测试包\\2026-10-15 0930"
           },
           {
-            "label": "FoneTool Setup",
-            "text": "\\\\192.168.4.230\\共享文件夹\\------------项目------------\\FoneTool\\FoneTool\\PC_4.X(04B)\\02 离线安装\\2026-08-26 0954\\FoneTool_install.exe"
+            "label": "DemoTool Setup",
+            "text": "\\\\192.0.2.10\\示例共享\\------------示例项目------------\\DemoTool\\DemoTool\\WIN_1.X(01A)\\02 离线安装\\2026-10-15 0940"
           }
         ]
       }
