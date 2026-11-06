@@ -17,7 +17,7 @@
 以下命令均在仓库根目录执行。先在开发虚拟环境中安装 Python 工具，再准备源码并构建：
 
 ```powershell
-python -m pip install build twine packaging pytest
+python -m pip install "setuptools>=77" build twine packaging pytest
 just setup
 just build-wheel
 ```

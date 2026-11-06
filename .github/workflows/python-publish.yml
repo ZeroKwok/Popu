@@ -36,7 +36,9 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
       - name: Install Python release tools
-        run: python -m pip install build twine packaging pytest tomli
+        # Regression tests import setup.py outside PEP 517 build isolation,
+        # so the test environment also needs the declared build backend.
+        run: python -m pip install "setuptools>=77" build twine packaging pytest tomli
       - name: Check release identity before building
         id: identity
         env:
