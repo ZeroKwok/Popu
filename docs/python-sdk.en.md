@@ -65,7 +65,11 @@ CLI response reads and process waits remain interruptible on Windows: the blocki
 
 Notifications are always submitted with `window.always_on_top=True`; `Notification.success` does not expose a non-topmost option. It defaults to the primary display work area and rejects `area=ScreenArea.SCREEN`. Raw request dictionaries are validated by the CLI/Host, which reject notification `always_on_top=False`.
 
-Dialog builders support `always_on_top`, `screen`, `area`, `width`, and `height`. Sizes are logical pixels or percentage strings, without manual DPI multiplication. Both builders support `vertical_align` and `coalesce_key`:
+Dialog builders support `always_on_top`, `screen`, `area`, `width`, and `height`. Sizes are logical pixels or percentage strings, without manual DPI multiplication. Both builders support `vertical_align` and `coalesce_key`.
+
+When omitted, notification dimensions default to `360 × 220` and dialog dimensions to `440 × 300`. These include the title, notification timestamp, margins, and actions. Richer progress or images should specify enough height. An explicit height does not receive an additional timestamp allowance; content exceeding the body remains scrollable.
+
+For example:
 
 ```python
 from popu import Screen, ScreenArea, VerticalAlign
@@ -103,12 +107,12 @@ chart = chart_block({
         "y": {"field": "ms", "type": "quantitative"},
     },
 }, title="Service latency", height=240)
-client.notify(Notification.success(title="Measurements", blocks=[chart], height=400))
+client.notify(Notification.success(title="Measurements", blocks=[chart], height=440))
 client.show(DialogRequest.confirm(title="Review", blocks=[chart], width=740, height=580))
 
 # A caller-rendered graphic, including chart types outside Vega-Lite:
 picture = image_block(image_source("report.svg", alt="Report graphic"), height=240)
-client.notify(Notification.success(title="Report", blocks=[picture], height=400))
+client.notify(Notification.success(title="Report", blocks=[picture], height=440))
 ```
 
 Chart blocks accept generic Vega-Lite 6 specifications with inline data and render interactive SVG without network access. Hover shows encoded field values by default; use `encoding.tooltip` to customize labels and formatting, or `null` to disable. Native Vega-Lite `params` support nearest-point hover, highlighting, legend selection, and scale-bound zoom/pan when declared in the spec. Compilation runs in a local worker; a CSP-compatible live Vega view handles rendering and interaction. Image blocks remain static. Changing the mark/encodings is sufficient for lines, bars and heatmaps. Visual `height` is within 64–1200; an image data URI is limited to 256 KiB, a chart spec to 128 KiB, and the complete content to 768 KiB. SVG scripts and external resources are rejected.

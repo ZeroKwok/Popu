@@ -512,7 +512,9 @@ impl Request {
     pub fn default_window_size(&self) -> (f64, f64) {
         match self.mode {
             Mode::Dialog => (440.0, 300.0),
-            Mode::Notify => (360.0, 180.0),
+            // Budget for the timestamp row as well as short notification text.
+            // Richer progress/image content still needs an explicit height.
+            Mode::Notify => (360.0, 220.0),
         }
     }
 
@@ -905,6 +907,17 @@ mod tests {
         assert_eq!(request.window.area, ScreenArea::WorkArea);
         assert_eq!(request.content.vertical_align, VerticalAlign::Center);
         assert_eq!(request.window_size((1920, 1040)), (440, 300));
+    }
+
+    #[test]
+    fn explicit_notification_size_does_not_receive_an_extra_timestamp_allowance() {
+        // Custom layouts and callers own explicit dimensions; only the default
+        // grows to reserve space for the built-in notification timestamp.
+        let request = Request::parse(
+            r#"{"version":"1.0","mode":"notify","window":{"width":360,"height":180},"content":{"title":"Explicit size"}}"#,
+        )
+        .unwrap();
+        assert_eq!(request.window_size((1920, 1040)), (360, 180));
     }
 
     #[test]

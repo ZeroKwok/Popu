@@ -19,8 +19,8 @@
         "always_on_top": { "type": "boolean" },
         "screen": { "enum": ["cursor", "primary"] },
         "area": { "enum": ["work_area", "screen"] },
-        "width": { "$ref": "#/$defs/windowDimension" },
-        "height": { "$ref": "#/$defs/windowDimension" }
+        "width": { "$ref": "#/$defs/windowDimension", "description": "Whole-window logical width or percentage. Defaults to 360 for notify, 440 for dialog." },
+        "height": { "$ref": "#/$defs/windowDimension", "description": "Whole-window logical height or percentage, including title, timestamp and actions. Defaults to 220 for notify, 300 for dialog." }
       }
     },
     "content": {

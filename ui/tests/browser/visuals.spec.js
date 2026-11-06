@@ -5,7 +5,22 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));
 const readJson = (path) => JSON.parse(readFileSync(resolve(root, path), "utf8"));
-const examples = readdirSync(resolve(root, "protocol/examples")).filter((name) => /^(dialog|notification)-visual-.*\.json$/.test(name));
+const fixtureNames = readdirSync(resolve(root, "protocol/examples")).filter((name) => name.endsWith(".json"));
+const examples = fixtureNames.filter((name) => /^(dialog|notification)-visual-.*\.json$/.test(name));
+// Long-content examples exercise scrolling on purpose; the custom template
+// does not use the built-in body. All remaining summaries should fit at their
+// configured window size, including the title, timestamp and action areas.
+const scrollingExamples = new Set(["dialog-all-elements.json", "dialog-long-content.json", "fullscreen-ultra-long-content.json"]);
+const fittingExamples = fixtureNames.filter((name) => !scrollingExamples.has(name) && name !== "notification-custom-template.json");
+
+function fixtureViewport(fixture) {
+  const dimension = (value, fallback, limit) => value === undefined ? fallback
+    : typeof value === "string" ? Math.round(parseFloat(value) * limit / 100) : value;
+  return {
+    width: dimension(fixture.window?.width, fixture.mode === "notify" ? 360 : 440, 1920),
+    height: dimension(fixture.window?.height, fixture.mode === "notify" ? 220 : 300, 1040),
+  };
+}
 
 async function mockHost(page, fixture, history = [], foreground = true, opened = true) {
   fixture = { ...fixture, actions: (fixture.actions ?? []).map((action) => ({ style: "primary", submit: false, ...action })) };
@@ -36,7 +51,7 @@ async function mockHost(page, fixture, history = [], foreground = true, opened =
           window.__rejectNextAction = false;
           throw '{"code":"revision_conflict","current_revision":2}';
         }
-        if (command === "get_bootstrap") return { request: fixture, revision: 1, occurred_at_ms: Date.now() - 15000, template, maximized: false };
+        if (command === "get_bootstrap") return { request: fixture, revision: 1, occurred_at_ms: Date.now() - 15000, template, maximized: fixture.window?.width === "100%" && fixture.window?.height === "100%" };
         if (command === "ui_ready") { window.__readyRevisions.push(args.revision); window.__presented = true; return; }
         if (command === "render_failed") { window.__failed = args.message; return; }
         if (command === "history_presented") { window.__historyPresented = true; return opened; }
@@ -168,6 +183,41 @@ test("a dialog without fields reports rejected actions and Escape remains cancel
   ]);
 });
 
+for (const name of fittingExamples) {
+  test(`${name} fits its configured viewport without scrolling`, async ({ page }) => {
+    const fixture = readJson(`protocol/examples/${name}`);
+    await page.setViewportSize(fixtureViewport(fixture));
+    await mockHost(page, fixture);
+    await page.goto("/index.html");
+    await expect.poll(() => page.evaluate(() => window.__presented || window.__failed)).toBe(true);
+    expect(await page.evaluate(() => window.__failed)).toBeNull();
+    const body = page.locator(".popu-body");
+    await expect(body).toBeVisible();
+    expect(await body.evaluate((body) => ({
+      vertical: body.scrollHeight - body.clientHeight,
+      horizontal: body.scrollWidth - body.clientWidth,
+    }))).toEqual({ vertical: 0, horizontal: 0 });
+    if (fixture.mode === "notify") await expect(page.locator(".popu-timestamp")).not.toBeEmpty();
+  });
+}
+
+test("long content remains scrollable and its end is reachable", async ({ page }) => {
+  const fixture = readJson("protocol/examples/fullscreen-ultra-long-content.json");
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await mockHost(page, fixture);
+  await page.goto("/index.html");
+  await expect.poll(() => page.evaluate(() => window.__presented || window.__failed)).toBe(true);
+  const body = page.locator(".popu-body");
+  expect(await body.evaluate((body) => body.scrollHeight > body.clientHeight)).toBe(true);
+  // Real wheel input catches overflow:hidden; setting scrollTop directly can
+  // still move a hidden-overflow container that the user cannot scroll.
+  await body.hover();
+  await page.mouse.wheel(0, 100000);
+  await expect.poll(() => body.evaluate((body) =>
+    Math.abs(body.scrollHeight - body.clientHeight - body.scrollTop) <= 1,
+  )).toBe(true);
+});
+
 for (const name of examples) {
   test(`${name} renders offline without overflow or CSP violations`, async ({ page }, testInfo) => {
     const fixture = readJson(`protocol/examples/${name}`);
@@ -188,6 +238,7 @@ for (const name of examples) {
       expect(await images.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0))).toBe(true);
     }
     expect(await page.locator(".popu-body").evaluate((body) => body.scrollWidth <= body.clientWidth)).toBe(true);
+    expect(await page.locator(".popu-body").evaluate((body) => body.scrollHeight <= body.clientHeight)).toBe(true);
     expect(violations).toEqual([]);
     expect(network).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath("render.png") });

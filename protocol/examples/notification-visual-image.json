@@ -1,6 +1,6 @@
 {
   "version": "1.0", "mode": "notify", "template": "notification",
-  "duration_ms": 12000, "window": { "width": 440, "height": 330 },
+  "duration_ms": 12000, "window": { "width": 440, "height": 370 },
   "content": {
     "severity": "success", "title": "Inline SVG snapshot", "vertical_align": "start",
     "blocks": [

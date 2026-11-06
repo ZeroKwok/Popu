@@ -65,7 +65,11 @@ Windows 上的响应读取和进程等待可以被中断：阻塞管道读取由
 
 通知始终使用 `window.always_on_top=True`；`Notification.success` 不提供取消置顶的选项。默认使用主显示器工作区，并拒绝 `area=ScreenArea.SCREEN`。原始请求字典由 CLI / Host 校验，同样拒绝通知的 `always_on_top=False`。
 
-对话框构造器支持 `always_on_top`、`screen`、`area`、`width` 和 `height`。尺寸使用逻辑像素或百分比字符串，无需手工按 DPI 放大。两类构造器均支持 `vertical_align` 和 `coalesce_key`：
+对话框构造器支持 `always_on_top`、`screen`、`area`、`width` 和 `height`。尺寸使用逻辑像素或百分比字符串，无需手工按 DPI 放大。两类构造器均支持 `vertical_align` 和 `coalesce_key`。
+
+未指定尺寸时，通知默认 `360 × 220`，对话框默认 `440 × 300`；宽高包含标题、通知时间戳、边距和动作区。较复杂的进度或图像应显式指定足够高度。显式高度不会再自动加上时间戳高度，超出正文空间的内容仍可滚动。
+
+例如：
 
 ```python
 from popu import Screen, ScreenArea, VerticalAlign
@@ -103,12 +107,12 @@ chart = chart_block({
         "y": {"field": "ms", "type": "quantitative"},
     },
 }, title="Service latency", height=240)
-client.notify(Notification.success(title="Measurements", blocks=[chart], height=400))
+client.notify(Notification.success(title="Measurements", blocks=[chart], height=440))
 client.show(DialogRequest.confirm(title="Review", blocks=[chart], width=740, height=580))
 
 # A caller-rendered graphic, including chart types outside Vega-Lite:
 picture = image_block(image_source("report.svg", alt="Report graphic"), height=240)
-client.notify(Notification.success(title="Report", blocks=[picture], height=400))
+client.notify(Notification.success(title="Report", blocks=[picture], height=440))
 ```
 
 图表块接受包含内联数据的通用 Vega-Lite 6 规格，离线渲染为可交互 SVG。默认悬浮提示展示编码字段值；可通过 `encoding.tooltip` 自定义标签和格式，或设为 `null` 禁用。规格中声明 Vega-Lite 原生 `params` 时，支持最近点悬浮、高亮、图例选择以及绑定坐标轴缩放和平移。编译在本地 worker 中执行，兼容 CSP 的实时 Vega 视图负责渲染和交互。图片块仍为静态内容，修改图表 mark 或编码即可展示折线、柱状图和热力图。图像与图表的 `height` 范围为 64–1200；图像 data URI 上限为 256 KiB，图表规格上限为 128 KiB，完整内容上限为 768 KiB。SVG 中的脚本与外部资源会被拒绝。

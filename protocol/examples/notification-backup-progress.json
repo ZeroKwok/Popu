@@ -4,6 +4,7 @@
   "template": "notification",
   "updatable": true,
   "duration_ms": 20000,
+  "window": { "height": 260 },
   "content": {
     "severity": "info",
     "title": "Backing up Documents",

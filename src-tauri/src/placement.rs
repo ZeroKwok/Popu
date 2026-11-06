@@ -180,9 +180,9 @@ mod tests {
             2.0,
             16,
         );
-        assert_eq!(placement.logical_size, (360, 180));
-        assert_eq!(placement.size, (720, 360));
-        assert_eq!(placement.position, Point { x: 3088, y: 1768 });
+        assert_eq!(placement.logical_size, (360, 220));
+        assert_eq!(placement.size, (720, 440));
+        assert_eq!(placement.position, Point { x: 3088, y: 1688 });
     }
 
 }

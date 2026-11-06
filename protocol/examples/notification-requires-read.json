@@ -4,6 +4,7 @@
   "template": "notification",
   "requires_read": true,
   "duration_ms": 3000,
+  "window": { "height": 240 },
   "content": {
     "severity": "error",
     "title": "Backup failed — please review",
