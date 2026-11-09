@@ -2,7 +2,7 @@
   "version": "1.0",
   "mode": "dialog",
   "template": "confirm",
-  "window": { "always_on_top": true, "width": 600, "height": 350 },
+  "window": { "always_on_top": true, "width": 620 },
   "content": {
     "severity": "success",
     "title": "Packages pushed",

@@ -1,6 +1,6 @@
 {
   "version": "1.0", "mode": "dialog", "template": "confirm",
-  "window": { "width": 840, "height": 760 },
+  "window": { "width": 840 },
   "content": {
     "severity": "info", "title": "Interactive chart reading aids", "vertical_align": "start",
     "blocks": [

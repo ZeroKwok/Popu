@@ -3,7 +3,7 @@
   "mode": "dialog",
   "template": "confirm",
   "position": "cursor_screen_center",
-  "window": { "width": 480, "height": 440 },
+  "window": { "width": 480 },
   "content": {
     "severity": "info",
     "title": "Ordered list examples",

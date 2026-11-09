@@ -1,6 +1,6 @@
 {
   "version": "1.0", "mode": "dialog", "template": "form",
-  "window": { "width": 740, "height": 620 },
+  "window": { "width": 740 },
   "content": {
     "severity": "info", "title": "Review service latency", "vertical_align": "start",
     "blocks": [

@@ -1,6 +1,6 @@
 {
   "version": "1.0", "mode": "dialog", "template": "confirm",
-  "window": { "width": 800, "height": 620 },
+  "window": { "width": 800 },
   "content": {
     "severity": "warning", "title": "Inspect weekly workload", "vertical_align": "start",
     "blocks": [

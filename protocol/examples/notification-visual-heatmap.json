@@ -1,7 +1,7 @@
 {
   "version": "1.0", "mode": "notify", "template": "notification",
   "duration_ms": 12000, "requires_read": true,
-  "window": { "width": 460, "height": 420 },
+  "window": { "width": 460 },
   "content": {
     "severity": "warning", "title": "Sector changes — heatmap", "vertical_align": "start",
     "blocks": [
