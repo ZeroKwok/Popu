@@ -269,17 +269,7 @@ mod host {
                 })
                 .build(tauri::generate_context!())
                 .unwrap();
-            app.run_return(|app, event| {
-                if let RunEvent::ExitRequested { api, .. } = event {
-                    if !app
-                        .state::<Arc<HostState>>()
-                        .stopping
-                        .load(Ordering::SeqCst)
-                    {
-                        api.prevent_exit();
-                    }
-                }
-            });
+            app.run_return(handle_host_event);
             receiver
                 .recv_timeout(Duration::from_secs(5))
                 .unwrap()

@@ -203,6 +203,7 @@ mod host {
                 .create_sync()
                 .unwrap();
             let (done, result) = mpsc::channel();
+            let (loop_ready, wait_for_loop) = mpsc::channel();
             let app = host_builder(Arc::clone(&state)).any_thread().manage(Fault::default())
                 .invoke_handler(tauri::generate_handler![super::get_bootstrap, super::fit_window, self::ui_ready, super::finish, super::render_failed])
                 .setup(move |app| {
@@ -218,6 +219,19 @@ mod host {
                     });
                     std::thread::spawn(move || {
                         let result = (|| -> Result<(), String> {
+                            let early = request(&endpoint, "Queued during startup", 180, 60000)?;
+                            let status = rpc(&endpoint, "host.status", json!({}))?;
+                            if status["requests"][0]["state"] != "queued"
+                                || !status["windows"].as_array().is_some_and(Vec::is_empty)
+                            {
+                                return Err("request started native work before Host UI readiness".into());
+                            }
+                            wait_for_loop.recv_timeout(Duration::from_secs(5)).map_err(|e| e.to_string())?;
+                            super::handle_host_event(&app, RunEvent::Ready);
+                            wait("startup request shown after UI readiness", || shown(&state, early))?;
+                            clear(&endpoint, &state, &app)?;
+                            eprintln!("PASS real IPC: startup request stays queued until UI readiness");
+
                             // The second request must wait for the head's actual
                             // preparation timeout, not be inserted below a hidden slot.
                             let stalled = create(&endpoint, json!({"version":"1.0","mode":"notify","template":"notification","updatable":true,"duration_ms":60000,"window":{"height":180},"content":{"title":"Stalled head"}}))?;
@@ -446,15 +460,11 @@ mod host {
                     });
                     Ok(())
                 }).build(tauri::generate_context!()).unwrap();
-            app.run_return(|app, event| {
-                if let RunEvent::ExitRequested { api, .. } = event {
-                    if !app
-                        .state::<Arc<HostState>>()
-                        .stopping
-                        .load(Ordering::SeqCst)
-                    {
-                        api.prevent_exit();
-                    }
+            app.run_return(move |app, event| {
+                if matches!(event, RunEvent::Ready) {
+                    let _ = loop_ready.send(());
+                } else {
+                    super::handle_host_event(app, event);
                 }
             });
             result

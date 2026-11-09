@@ -22,15 +22,29 @@ Tauri Host ── RequestRegistry ── request_id → WebviewWindow
 
 ## Lifecycle and scheduling
 
-- The first client starts hidden `popu host run` and retries readiness. Listener binding is the single-instance boundary.
+- The first client starts hidden `popu host run` and retries the connection. Listener binding is the single-instance boundary. The Host accepts and queues requests during initialization. The coordinator starts native window work after Tauri delivers `RunEvent::Ready` at the end of setup, including any pending history prewarm.
 - On Windows, `host_process.rs` launches the Host detached with `CreateProcessW(..., bInheritHandles = FALSE, ...)`. The Host inherits neither the submitting CLI's standard streams nor unrelated inheritable handles. Redirecting standard streams alone does not provide this isolation. Unix launches retain null standard streams through `Command`.
 - The Host generates UUID request IDs and starts every request at revision 1.
-- States are `queued`, `preparing`, `ready`, `shown`, `hidden`, `confirmed`, `cancelled`, `closed`, `expired`, `failed`, and `stale`. `hidden` is nonterminal and retains the update channel.
 - Dialogs are globally FIFO with one active window. A dialog CLI waits for a terminal response and adopts its action exit code.
-- Notifications use the primary display, never wait behind dialogs, show at most three, and remain alive after the submitting client exits. `duration_ms` starts at `ui_ready`.
+- Notifications use the primary display, never wait behind dialogs, show at most three, and remain alive after the submitting client exits. `duration_ms` starts when the window is presented and enters `shown`.
 - Notification windows are always on top without requesting focus. Omitting `window.always_on_top` defaults to `true`; explicitly setting it to `false` is rejected by request validation and JSON Schema. Dialogs may still set it to `false`.
 - Closing or expiring a visible request promotes queued work and reflows the notification stack.
 - Host shutdown terminalizes ordinary requests and wakes waiters. Updatable notifications retain durable checkpoints and restore hidden on the next start, preserving their idle deadline and user intent.
+
+`RequestRegistry` tracks the request state. The coordinator advances window preparation and presentation through these main transitions.
+
+```text
+new --> queued --> preparing --> ready --> shown --> terminal
+                       ^           |         |
+                       +-----------+         +----> hidden
+                         newer revision                |
+           queued <------------------------------------+
+                         eligible update / reshow
+
+shown --> ready     temporarily parked after a display change
+```
+
+`queued` waits for Host startup or scheduling. `preparing` creates the window and waits for native preparation and the current revision, with a preparation deadline. `ready` means preparation is complete and the window may still wait for screen space. `shown` means the window has been presented. An updatable notification can enter `hidden` after closing or timing out, then return to the queue on an eligible update or `reshow`. Dismissal or preparation failure can end a request before presentation. Terminal states are `confirmed`, `cancelled`, `closed`, `expired`, `failed`, and `stale`.
 
 ## Window sizing and DPI
 
@@ -57,7 +71,7 @@ WebView logical CSS viewport                         Win32 work area / set_posit
 
 `"100%" × "100%"` continues to fill the selected physical display area after conversion. The resulting logical viewport varies with DPI, as expected for a fullscreen window.
 
-On Windows, notifications and dialogs use transparent, frameless native windows with cards rendered by the WebView. Before sizing or showing a request window, `host/windows.rs` calls `runtime.rs` to install a message handler on the thread that owns the HWND. The handler removes itself on `WM_NCDESTROY`. Initial configuration clears the native frame styles. Tao can write those styles again when showing or hiding the window, so the handler keeps the caption and frame bits clear during `WM_STYLECHANGING`.
+On Windows, notifications and dialogs use transparent, frameless native windows with cards rendered by the WebView. Initial sizing and frame configuration happen while the window is hidden. `runtime.rs` then installs the message handler asynchronously on the thread that owns the HWND and reports the result to the coordinator. After installation, the coordinator lets the window render under DWM cloaking. Both native installation and the current revision's rendering acknowledgement must complete before `ready`, within the same preparation deadline. Tao can write native frame styles again when showing or hiding the window, so the handler keeps those bits clear during `WM_STYLECHANGING`. It removes itself on `WM_NCDESTROY`.
 
 Opening a WebView context menu can activate the window and send `WM_NCACTIVATE`. Default processing can repaint a stale caption in the transparent margin even with the caption style cleared. The handler forwards the activation state with `lParam = -1` so Tao updates focus and Win32 skips the non-client repaint. The WebView handles its context menu. The native lifecycle regression checks style bits after the first show and after re-showing. Comparing screenshots around activation and right-click verifies the separate repaint behavior. [Win32 activation message](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-ncactivate)
 

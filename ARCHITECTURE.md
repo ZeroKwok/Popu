@@ -22,15 +22,29 @@ Tauri Host ── RequestRegistry ── request_id → WebviewWindow
 
 ## 生命周期与调度
 
-- 首个客户端在后台启动 `popu host run`，并重试等待就绪。监听入口的绑定决定单实例边界。
+- 首个客户端在后台启动 `popu host run`，并重试连接。监听入口的绑定决定单实例边界。Host 初始化期间可以接收请求并入队，协调器收到 Tauri 在初始化完成后发出的 `RunEvent::Ready` 才开始创建窗口。启动时暂存的历史窗口预热任务也在此后执行。
 - Windows 上，`host_process.rs` 通过 `CreateProcessW(..., bInheritHandles = FALSE, ...)` 分离启动 Host。Host 不继承提交方 CLI 的标准流或其他可继承句柄；仅重定向标准流不足以实现这种隔离。Unix 路径通过 `Command` 将标准流连接到空设备。
 - Host 生成 UUID 请求 ID，每个请求的初始 revision 为 1。
-- 请求状态包括 `queued`、`preparing`、`ready`、`shown`、`hidden`、`confirmed`、`cancelled`、`closed`、`expired`、`failed` 和 `stale`。`hidden` 不是终态，仍保留更新通道。
 - 对话框按全局 FIFO 排队，同一时刻只有一个活动窗口。提交对话框的 CLI 等待终态响应，并采用相应动作的退出码。
-- 通知显示在主显示器上，不受对话框队列阻塞，最多同时展示三条。提交客户端退出后，通知仍继续存在。`duration_ms` 从 `ui_ready` 开始计时。
+- 通知显示在主显示器上，不受对话框队列阻塞，最多同时展示三条。提交客户端退出后，通知仍继续存在。`duration_ms` 从实际展示、进入 `shown` 时开始计时。
 - 通知窗口始终置顶，不主动请求焦点。省略 `window.always_on_top` 时默认为 `true`；显式设为 `false` 会被请求校验和 JSON Schema 拒绝。对话框仍可设置为 `false`。
 - 可见请求关闭或展示超时后，队列中的后续请求会进入展示，通知栈也会重新排布。
 - Host 退出时，普通请求进入终态并唤醒等待者。可更新通知保留持久化检查点，在下次启动时恢复为隐藏状态，同时保留无更新截止时间和用户关闭意图。
+
+`RequestRegistry` 记录请求状态，协调器负责推进窗口准备和展示。主要状态转移如下。
+
+```text
+new --> queued --> preparing --> ready --> shown --> terminal
+                       ^           |         |
+                       +-----------+         +-----> hidden
+                         newer revision                |
+        queued <---------------------------------------+
+                         eligible update / reshow
+
+shown --> ready     temporarily parked after a display change
+```
+
+`queued` 等待启动或调度。`preparing` 创建窗口并等待原生准备和当前版本就绪，此时开始准备超时计时。`ready` 表示准备已完成，仍可等待屏幕空间。`shown` 表示已实际展示。可更新通知可在关闭或展示超时后进入 `hidden`，符合条件的更新或 `reshow` 会使其重新入队。请求可以在展示前被撤销或因准备失败而结束。终态包括 `confirmed`、`cancelled`、`closed`、`expired`、`failed` 和 `stale`。
 
 ## 窗口尺寸与 DPI
 
@@ -57,7 +71,7 @@ WebView logical CSS viewport                         Win32 work area / set_posit
 
 `"100%" × "100%"` 经转换后仍填满所选的物理显示区域。逻辑视口随 DPI 变化，这是全屏窗口的预期表现。
 
-Windows 上的通知与对话框使用透明、无边框的原生窗口，卡片由 WebView 绘制。`host/windows.rs` 在首次调整尺寸和显示之前调用 `runtime.rs`，由 HWND 所属线程安装窗口消息处理器，并在 `WM_NCDESTROY` 时移除。初始配置清除原生边框样式。Tao 在显示或隐藏窗口时可能重新写入这些样式，处理器通过 `WM_STYLECHANGING` 保持标题栏和边框样式位清除。
+Windows 上的通知与对话框使用透明、无边框的原生窗口，卡片由 WebView 绘制。初始尺寸和边框配置在隐藏时完成。`runtime.rs` 随后在 HWND 所属线程异步安装消息处理器，并把结果交回协调器。收到安装回执后，协调器才允许窗口在 DWM 遮蔽下开始渲染。原生安装与当前版本的渲染确认都完成后才能进入 `ready`，两者共用请求的准备时限。Tao 在显示或隐藏窗口时可能重新写入原生边框样式，处理器通过 `WM_STYLECHANGING` 保持这些样式位清除，并在 `WM_NCDESTROY` 时移除自身。
 
 右键打开 WebView 菜单时，窗口可能收到 `WM_NCACTIVATE`。即使标题栏样式位已清除，这条消息的默认处理也可能在透明边缘重绘旧标题栏。处理器保留激活状态参数，并以 `lParam = -1` 转发，让 Tao 更新焦点，同时跳过 Win32 的非客户区重绘。右键菜单仍由 WebView 处理。原生生命周期回归检查首次显示和重新显示后的样式位，标题栏残影通过激活及右键前后的画面对照验证。 [Win32 激活消息](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-ncactivate)
 

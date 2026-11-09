@@ -95,15 +95,27 @@ pub fn run() -> i32 {
         .build(tauri::generate_context!());
     match app {
         Ok(app) => {
-            app.run(|app, event| {
-                if let RunEvent::ExitRequested { api, .. } = event {
-                    let state = app.state::<Arc<HostState>>();
-                    if !state.stopping.load(Ordering::SeqCst) { api.prevent_exit(); }
-                }
-            });
+            app.run(handle_host_event);
             0
         }
         Err(error) => { eprintln!("Popu Host startup error: {error}"); runtime::EXIT_ERROR }
+    }
+}
+
+fn handle_host_event(app: &AppHandle, event: RunEvent) {
+    let state = app.state::<Arc<HostState>>();
+    match event {
+        RunEvent::Ready => {
+            // Tauri delivers Ready after setup returns. Requests received during
+            // setup stay queued until the UI thread can service window work.
+            if let Err(error) = coordinator::send(&state, Task::HostUiReady) {
+                eprintln!("Popu could not release the window startup gate: {error}");
+            }
+        }
+        RunEvent::ExitRequested { api, .. } if !state.stopping.load(Ordering::SeqCst) => {
+            api.prevent_exit();
+        }
+        _ => {}
     }
 }
 

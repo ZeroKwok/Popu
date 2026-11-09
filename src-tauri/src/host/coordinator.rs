@@ -31,6 +31,9 @@ pub(super) enum Command {
 
 pub(super) enum Task {
     Command(Command, Sender<Result<Value, Value>>),
+    HostUiReady,
+    #[cfg(windows)]
+    NativeFrameInstalled { id: Uuid, result: Result<(), String> },
     Fit {
         id: Uuid,
         revision: u64,
@@ -85,9 +88,13 @@ pub(super) fn start(app: AppHandle, state: Arc<HostState>) {
         let mut worker = Coordinator {
             app,
             state,
+            ui_ready: false,
+            pending_history: None,
             display: None,
             sizes: HashMap::new(),
             layouts: HashMap::new(),
+            #[cfg(windows)]
+            pending_frames: HashMap::new(),
             closing: HashMap::new(),
             unhealthy: HashMap::new(),
             dirty: false,
@@ -108,11 +115,11 @@ pub(super) fn start(app: AppHandle, state: Arc<HostState>) {
                 .expire_due(Instant::now());
             worker.apply(effects);
             if let Some(task) = task { worker.handle(task); }
-            if Instant::now() >= worker.next_check {
-                worker.check_windows();
-                worker.next_check = Instant::now() + Duration::from_secs(1);
-            }
-            if !worker.state.stopping.load(Ordering::SeqCst) {
+            if worker.ui_ready && !worker.state.stopping.load(Ordering::SeqCst) {
+                if Instant::now() >= worker.next_check {
+                    worker.check_windows();
+                    worker.next_check = Instant::now() + Duration::from_secs(1);
+                }
                 worker.drive();
             }
             if let Err(error) = worker.flush() { eprintln!("Popu persistence error: {error}"); }
@@ -124,9 +131,13 @@ pub(super) fn start(app: AppHandle, state: Arc<HostState>) {
 struct Coordinator {
     app: AppHandle,
     state: Arc<HostState>,
+    ui_ready: bool,
+    pending_history: Option<bool>,
     display: Option<Display>,
     sizes: HashMap<Uuid, (u32, u32)>,
     layouts: HashMap<Uuid, WindowLayout>,
+    #[cfg(windows)]
+    pending_frames: HashMap<Uuid, Option<u64>>,
     closing: HashMap<Uuid, u32>,
     unhealthy: HashMap<Uuid, u8>,
     dirty: bool,
@@ -137,6 +148,18 @@ struct Coordinator {
 impl Coordinator {
     fn handle(&mut self, task: Task) {
         match task {
+            Task::HostUiReady => {
+                self.ui_ready = true;
+                if let Some(show) = self.pending_history.take() {
+                    open_history_on_worker(&self.app, &self.state, show);
+                }
+            }
+            #[cfg(windows)]
+            Task::NativeFrameInstalled { id, result } => {
+                if let Err(error) = self.native_frame_installed(id, result) {
+                    self.fail(id, &error);
+                }
+            }
             Task::Fit { id, revision, measurement, reply } => {
                 let result = self.fit(id, revision, measurement);
                 let _ = reply.send(result);
@@ -178,7 +201,14 @@ impl Coordinator {
                 let expected = self.closing.remove(&id).is_some();
                 if !expected { self.fail(id, "native window destroyed before request completion"); }
             }
-            Task::History { show } => open_history_on_worker(&self.app, &self.state, show),
+            Task::History { show } => {
+                if self.ui_ready {
+                    open_history_on_worker(&self.app, &self.state, show);
+                } else {
+                    // A tray open takes precedence over a queued hidden prewarm.
+                    self.pending_history = Some(show || self.pending_history == Some(true));
+                }
+            }
         }
     }
 
@@ -398,6 +428,8 @@ impl Coordinator {
                     if let Err(error) = result { self.fail(id, &error); }
                 }
                 Effect::Close(id) => {
+                    #[cfg(windows)]
+                    self.pending_frames.remove(&id);
                     self.layouts.remove(&id);
                     let notification = self
                         .state
@@ -590,6 +622,13 @@ impl Coordinator {
             self.apply(vec![Effect::Update(id)]);
             return Ok(());
         }
+        #[cfg(windows)]
+        if let Some(deferred) = self.pending_frames.get_mut(&id) {
+            // Keep the request in Preparing so the existing watchdog bounds
+            // both the frame installation and the renderer's first layout.
+            *deferred = Some(revision);
+            return Ok(());
+        }
         self.state
             .registry
             .lock()
@@ -714,7 +753,7 @@ impl Coordinator {
             }
             return;
         }
-        let result = (|| {
+        let result = (|| -> Result<(), String> {
             templates::resolve(&request, template_dir.as_deref()).map_err(|e| e.to_string())?;
             let display = if request.mode == Mode::Notify {
                 self.display()?
@@ -724,11 +763,37 @@ impl Coordinator {
             let layout = WindowLayout::new(&request, display);
             let placement = layout.placement();
             self.layouts.insert(id, layout);
-            windows::create(&self.app, id, &request, placement)
+            let _window = windows::create(&self.app, id, &request, placement)?;
+            #[cfg(windows)]
+            {
+                self.pending_frames.insert(id, None);
+                let state = Arc::clone(&self.state);
+                runtime::install_request_window_frame_handler(&_window, move |result| {
+                    let _ = send(&state, Task::NativeFrameInstalled { id, result });
+                })?;
+            }
+            Ok(())
         })();
         if let Err(error) = result {
             self.fail(id, &error);
         }
+    }
+
+    #[cfg(windows)]
+    fn native_frame_installed(&mut self, id: Uuid, result: Result<(), String>) -> Result<(), String> {
+        let Some(deferred) = self.pending_frames.remove(&id) else {
+            return Ok(()); // The request was closed while the UI task was pending.
+        };
+        result.map_err(|error| format!("install native frame handler: {error}"))?;
+        if !self.state.registry.lock().unwrap().is_preparing(id) {
+            return Ok(()); // A retained notification may have been hidden meanwhile.
+        }
+        let window = self.app.get_webview_window(&id.to_string()).ok_or("native window missing")?;
+        windows::show_cloaked(&window)?;
+        if let Some(revision) = deferred {
+            self.ready(id, revision)?;
+        }
+        Ok(())
     }
 
     fn check_windows(&mut self) {

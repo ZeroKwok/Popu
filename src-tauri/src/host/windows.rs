@@ -46,7 +46,7 @@ pub(super) fn create(
     id: Uuid,
     request: &Request,
     placement: WindowPlacement,
-) -> Result<(), String> {
+) -> Result<WebviewWindow, String> {
     let notify = request.mode == Mode::Notify;
     let window =
         WebviewWindowBuilder::new(app, id.to_string(), WebviewUrl::App("index.html".into()))
@@ -64,17 +64,17 @@ pub(super) fn create(
             .shadow(false)
             .build()
             .map_err(|e| e.to_string())?;
-    // Attach the native frame guard before sizing or showing the request window.
-    #[cfg(windows)]
-    runtime::keep_request_window_frameless(&window)?;
     resize(&window, placement)?;
     #[cfg(windows)]
     runtime::configure_frameless_windows_window(&window, request.window.is_maximized())?;
-    // Hidden WebViews can throttle page startup. On Windows the HWND is shown
-    // while DWM keeps its content cloaked until the renderer is ready.
-    #[cfg(windows)]
-    window.show().map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(window)
+}
+
+#[cfg(windows)]
+pub(super) fn show_cloaked(window: &WebviewWindow) -> Result<(), String> {
+    // Once the native frame handler is installed, allow WebView rendering
+    // without exposing the HWND to the user before content readiness.
+    window.show().map_err(|error| format!("show cloaked request window: {error}"))
 }
 
 pub(super) fn resize(window: &WebviewWindow, placement: WindowPlacement) -> Result<(), String> {

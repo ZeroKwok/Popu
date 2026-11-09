@@ -34,12 +34,13 @@ const NATIVE_FRAME_STYLES: u32 = {
 };
 
 #[cfg(windows)]
-pub(crate) fn keep_request_window_frameless(window: &WebviewWindow) -> Result<(), String> {
-    use std::{sync::mpsc, time::Duration};
+pub(crate) fn install_request_window_frame_handler(
+    window: &WebviewWindow,
+    installed: impl FnOnce(Result<(), String>) + Send + 'static,
+) -> Result<(), String> {
     use windows_sys::Win32::UI::Shell::SetWindowSubclass;
 
     // Subclass registration must run on the thread that owns the HWND.
-    let (sender, receiver) = mpsc::channel();
     let request_window = window.clone();
     window
         .run_on_main_thread(move || {
@@ -49,10 +50,9 @@ pub(crate) fn keep_request_window_frameless(window: &WebviewWindow) -> Result<()
                 }
                 Ok(())
             });
-            let _ = sender.send(result);
+            installed(result);
         })
-        .map_err(|error| error.to_string())?;
-    receiver.recv_timeout(Duration::from_secs(2)).map_err(|error| error.to_string())?
+        .map_err(|error| format!("dispatch native frame handler installation: {error}"))
 }
 
 #[cfg(windows)]
