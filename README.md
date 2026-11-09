@@ -84,7 +84,7 @@ popu request notification.json
 
 ## 为什么使用 Popu
 
-自动化任务通常需要把结果告诉人，或者在继续执行前等待一个明确决定。Popu 适合以下场景：
+自动化任务通常需要把结果告诉用户，或者在继续执行前等待一个明确决定。Popu 适合以下场景：
 
 - 备份、构建、部署等任务完成后发送通知；
 - AI Agent 执行高风险操作前请求确认；
@@ -97,7 +97,7 @@ popu request notification.json
 ### 通知管理
 
 - 常驻 Host 统一管理通知生命周期；
-- 通知严格 FIFO 排队，主显示器工作区最多显示三条；
+- 通知严格 FIFO 排队，根据主显示器工作区可显示数量；
 - 支持提交回执、状态查询、完整内容更新、撤销和等待终态；
 - 支持 `coalesce_key`，避免同一个业务位置重复创建通知；
 - 支持通知历史、未读状态和托盘提醒；
@@ -107,9 +107,9 @@ popu request notification.json
 ### 轻量交互
 
 - `dialog` 确认对话框和轻量表单；
-- 结构化 action、表单值、终态和退出码；
-- 段落、属性、列表、进度、图片和 Vega-Lite 图表；
-- 内容更新和 revision 冲突检测；
+- 结构化 `action`、表单值、终态和退出码；
+- 段落、属性、列表、进度、图片和 `Vega-Lite` 图表；
+- 内容更新和 `revision` 冲突检测；
 - 无边框、透明的本机窗口；可仅指定宽度，省略高度时首次按内容自适应，显示后尺寸固定。
 
 ### 集成方式
@@ -134,7 +134,7 @@ Persistent Popu Host
         └── tray reminder
 ```
 
-Host 在首次请求时自动启动。调用方提交请求后获得 Host 生成的 `request_id` 和 revision：
+Host 在首次请求时自动启动。调用方提交请求后获得 Host 生成的 `request_id` 和 `revision`：
 
 | CLI 入口或请求模式 | 行为 |
 | --- | --- |
@@ -153,14 +153,14 @@ Host 在首次请求时自动启动。调用方提交请求后获得 Host 生成
 
 ## 通知与窗口规则
 
-- 通知使用主显示器工作区，最多同时展示三条；
+- 通知使用主显示器工作区，目前最多同时展示三条；
 - 通知窗口始终 `always_on_top: true`，显式提交 `false` 会被拒绝；
 - 通知默认不抢占焦点；
 - 通知不支持 Esc 收起；dialog 可通过 Esc 取消；
 - dialog 可独立配置屏幕、工作区或物理屏幕、尺寸和是否置顶；
 - 宽高支持逻辑像素或百分比，不需要根据 DPI 手动换算；
 - 通知和 dialog 都支持可复制文本、图片和图表；
-- 大量日志、完整报告和复杂编辑界面应留在调用方产品中，Popu 负责展示摘要和必要输入。
+- Popu 只负责展示摘要信息和必要简短输入。
 
 ## 文档导航
 
@@ -177,7 +177,9 @@ Host 在首次请求时自动启动。调用方提交请求后获得 Host 生成
 
 ## 构建与测试
 
-当前主要在 Windows 10/11、Rust stable、Node.js 20+、just 和 WebView2 Runtime 上验证。根目录 just 编排任务，`ui/` 管理 npm 项目，`src-tauri/` 管理 Cargo 项目，`python/` 管理 SDK 与 wheel。界面源码位于 `ui/src/`，Cargo 只嵌入 `ui/dist/` 构建产物。协议与 IPC 设计包含 Unix Domain Socket 路径，具体窗口能力取决于目标平台。
+当前主要在 Windows 10/11、Rust stable、Node.js 20+、just 和 WebView2 Runtime 上验证。
+
+根目录 just 编排任务，`ui/` 管理 npm 项目，`src-tauri/` 管理 Cargo 项目，`python/` 管理 SDK 与 wheel。界面源码位于 `ui/src/`，Cargo 只嵌入 `ui/dist/` 构建产物。协议与 IPC 设计包含 Unix Domain Socket 路径，具体窗口能力取决于目标平台。
 
 首次检出需要安装 ImageMagick。安装前端依赖、准备生成文件并构建：
 
@@ -186,7 +188,7 @@ just setup
 just build-release
 ```
 
-Windows 可执行文件位于 `src-tauri/target/release/popu.exe`。将该目录加入 `PATH`，或直接使用此路径调用。
+Windows 可执行文件位于 `src-tauri/target/release/popu.exe`。
 
 运行测试：
 
@@ -207,11 +209,11 @@ cargo build --manifest-path src-tauri/Cargo.toml
 
 直接运行 `just` 会显示分组帮助。自动化检查使用 `just check`，交互演示使用 `just demo-fixture notification-success.json` 或 `just demo-fixtures notification`。演示通过 Cargo metadata 获取程序路径，支持 `CARGO_TARGET_DIR`。构建会按需生成缺失或过期的图标，`just icons` 可强制重建。`just test-native` 目前仅在 Windows 提供。
 
-欢迎通过 issue 和 pull request 参与改进，详见[贡献指南](CONTRIBUTING.md)。原生通知窗口生命周期测试见[通知窗口协调与排布](docs/notification-layout.md)；运行这些测试需要解锁的 Windows 桌面。
+欢迎通过 issue 和 pull request 参与改进，详见[贡献指南](CONTRIBUTING.md)。原生通知窗口生命周期测试见[通知窗口协调与排布](docs/notification-layout.md)；
 
 ## 项目边界
 
-Popu 是本机人机交互层，不是任务调度器、日志系统、远程推送服务或完整业务界面。调用方负责任务执行和业务数据，Popu 负责把需要用户看到或决定的摘要可靠地呈现出来。
+Popu 是本机人机交互层，调用方负责任务执行和业务数据，Popu 负责把需要用户看到或决定的摘要可靠地呈现出来。
 
 项目当前处于持续演进阶段，除非需求明确要求，不承诺 CLI、SDK 和协议接口的向后兼容。
 

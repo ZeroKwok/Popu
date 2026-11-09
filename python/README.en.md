@@ -15,7 +15,7 @@ python -m pip install popu
 python -m popu.demo progress
 ```
 
-The demo shows a progress notification followed by a result summary. It simulates a short task without modifying your files. Try closing the progress card: updates continue in the background, and the final summary requests one more presentation. Press Ctrl+C to stop the demo. Add `--wait` to wait for the final notification to finish displaying. Notification content and console messages are in English.
+The demo shows the progress of a simulated task and a summary of its results. Try closing the progress card. Updates continue in the background, and the final summary requests to be shown once more. Press Ctrl+C to stop the demo. Add `--wait` to wait for the final notification to finish displaying.
 
 The native executable is included. You can run the installed package from any directory without checking out the repository or installing build tools. The background Host starts automatically on the first request and keeps notifications and history available after the submitting script exits.
 

@@ -84,7 +84,7 @@ If `popu` is not on `PATH`, use `python -m popu` instead. See the [JSON Schema](
 
 ## Why Popu
 
-Automation often needs to tell a person what happened or wait for an explicit decision before continuing. Popu is useful for:
+Automation often needs to report results to the user or wait for an explicit decision before continuing. Popu is useful for:
 
 - reporting completion of backups, builds, deployments, and other jobs;
 - asking for confirmation before an AI agent performs a risky action;
@@ -97,7 +97,7 @@ Automation often needs to tell a person what happened or wait for an explicit de
 ### Notification management
 
 - one persistent Host owns notification lifetimes;
-- strict FIFO scheduling with up to three visible notifications on the primary work area;
+- strict FIFO scheduling, with available space in the primary display's work area limiting how many notifications can appear;
 - acceptance receipts, status queries, complete content updates, dismissal, and terminal waiting;
 - `coalesce_key` support to avoid duplicate requests for the same business slot;
 - notification history, unread state, and tray reminders;
@@ -107,9 +107,9 @@ Automation often needs to tell a person what happened or wait for an explicit de
 ### Lightweight interaction
 
 - `dialog` confirmation windows and small forms;
-- structured actions, form values, terminal states, and exit codes;
-- paragraphs, properties, lists, progress, images, and Vega-Lite charts;
-- content updates with revision conflict detection;
+- structured `action` entries, form values, terminal states, and exit codes;
+- paragraphs, properties, lists, progress, images, and `Vega-Lite` charts;
+- content updates with `revision` conflict detection;
 - frameless, transparent local windows; supply just a width to fit initial content height, with a fixed size after first presentation.
 
 ### Integration
@@ -134,7 +134,7 @@ Persistent Popu Host
         └── tray reminder
 ```
 
-The Host starts automatically when the first request arrives. Callers receive a Host-generated `request_id` and revision:
+The Host starts automatically when the first request arrives. Callers receive a Host-generated `request_id` and `revision`:
 
 | CLI entry point or request mode | Behavior |
 | --- | --- |
@@ -153,14 +153,14 @@ Long-running notifications opt in with `updatable: true` and reuse one ID. Every
 
 ## Notification and window rules
 
-- notifications use the primary display work area, with at most three visible at once;
+- notifications use the primary display work area, with a current limit of three visible at once;
 - notification windows always use `always_on_top: true`; an explicit `false` is rejected;
 - notifications do not normally take focus;
 - notifications do not support Esc dismissal; Esc cancels dialogs;
 - dialogs can configure their display, work area or physical screen, size, and topmost behavior independently;
 - width and height use logical pixels or percentages, without manual DPI conversion;
 - both notifications and dialogs support selectable text, images, and charts;
-- large logs, complete reports, and complex editing belong in the caller's product; Popu presents summaries and necessary input.
+- Popu presents summaries and collects brief input when needed.
 
 ## Documentation
 
@@ -177,7 +177,9 @@ Long-running notifications opt in with `updatable: true` and reuse one ID. Every
 
 ## Build and test
 
-The project is currently validated primarily on Windows 10/11 with Rust stable, Node.js 20+, just, and the WebView2 Runtime. Root just tasks coordinate the npm project in `ui/`, Cargo project in `src-tauri/`, and SDK/wheel project in `python/`. UI sources live in `ui/src/`; Cargo embeds only `ui/dist/` build output. The protocol and IPC design include a Unix Domain Socket path; window capabilities depend on the target platform.
+The project is currently validated primarily on Windows 10/11 with Rust stable, Node.js 20+, just, and the WebView2 Runtime.
+
+Root just tasks coordinate the npm project in `ui/`, Cargo project in `src-tauri/`, and SDK/wheel project in `python/`. UI sources live in `ui/src/`, and Cargo embeds only `ui/dist/` build output. The protocol and IPC design include a Unix Domain Socket path. Window capabilities depend on the target platform.
 
 For a fresh checkout, install ImageMagick. Install frontend dependencies, prepare generated inputs, and build:
 
@@ -186,7 +188,7 @@ just setup
 just build-release
 ```
 
-On Windows, the executable is `src-tauri/target/release/popu.exe`. Add that directory to `PATH` or invoke it by path.
+On Windows, the executable is `src-tauri/target/release/popu.exe`.
 
 Run tests:
 
@@ -207,11 +209,11 @@ Change only `package.version` in `src-tauri/Cargo.toml` for a product release. T
 
 Running `just` displays grouped help. Use `just check` for automated checks; use `just demo-fixture notification-success.json` or `just demo-fixtures notification` for interactive demos. Demos resolve executables through Cargo metadata, including `CARGO_TARGET_DIR`. Builds prepare missing/outdated icons automatically; `just icons` forces regeneration. The current `test-native` task is Windows-only.
 
-Issues and pull requests are welcome; see [Contributing (Chinese)](CONTRIBUTING.md). Native notification lifecycle tests are documented in [notification window coordination (Chinese)](docs/notification-layout.md) and require an unlocked Windows desktop.
+Issues and pull requests are welcome. See [Contributing (Chinese)](CONTRIBUTING.md). Native notification lifecycle tests are documented in [notification window coordination (Chinese)](docs/notification-layout.md).
 
 ## Scope
 
-Popu is a local human-interaction layer. It is not a task scheduler, logging system, remote push service, or full business application UI. Callers own task execution and business data; Popu reliably presents the summaries and decisions that require a person's attention.
+Popu is a local human-interaction layer. Callers handle task execution and business data. Popu reliably presents summaries users need to see and decisions they need to make.
 
 The project is evolving. Unless explicitly requested, CLI, SDK, and protocol interfaces do not promise backward compatibility.
 
