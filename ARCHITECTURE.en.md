@@ -57,6 +57,10 @@ WebView logical CSS viewport                         Win32 work area / set_posit
 
 `"100%" × "100%"` continues to fill the selected physical display area after conversion. The resulting logical viewport varies with DPI, as expected for a fullscreen window.
 
+On Windows, notifications and dialogs use transparent, frameless native windows with cards rendered by the WebView. Before sizing or showing a request window, `host/windows.rs` calls `runtime.rs` to install a message handler on the thread that owns the HWND. The handler removes itself on `WM_NCDESTROY`. Initial configuration clears the native frame styles. Tao can write those styles again when showing or hiding the window, so the handler keeps the caption and frame bits clear during `WM_STYLECHANGING`.
+
+Opening a WebView context menu can activate the window and send `WM_NCACTIVATE`. Default processing can repaint a stale caption in the transparent margin even with the caption style cleared. The handler forwards the activation state with `lParam = -1` so Tao updates focus and Win32 skips the non-client repaint. The WebView handles its context menu. The native lifecycle regression checks style bits after the first show and after re-showing. Comparing screenshots around activation and right-click verifies the separate repaint behavior. [Win32 activation message](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-ncactivate)
+
 ## Identity, coalescing, and updates
 
 `coalesce_key` is an optional live business-slot key scoped by mode. A duplicate create returns the existing ID, state, and revision without changing content. Terminalization releases the key immediately.

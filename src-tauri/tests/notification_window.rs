@@ -106,6 +106,19 @@ mod host {
             state.registry.lock().unwrap().is_presented(id)
         }
 
+        // Verify style persistence independently of the activation repaint path.
+        fn assert_no_native_frame_styles(window: &WebviewWindow) -> Result<(), String> {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                GetWindowLongPtrW, GWL_STYLE, WS_CAPTION, WS_SYSMENU, WS_THICKFRAME,
+            };
+            let hwnd = window.hwnd().map_err(|error| error.to_string())?.0;
+            let style = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } as u32;
+            if style & (WS_CAPTION | WS_SYSMENU | WS_THICKFRAME) != 0 {
+                return Err(format!("request window regained native frame styles: {style:#010x}"));
+            }
+            Ok(())
+        }
+
         fn bottom(app: &AppHandle, id: Uuid) -> bool {
             let Ok(display) = runtime::notification_display() else {
                 return false;
@@ -230,6 +243,7 @@ mod host {
                             let tall = (f64::from(display.area.height) / display.scale * 0.6) as u32;
                             let first = request(&endpoint, "First tall", tall, 60000)?;
                             wait("first tall notification", || shown(&state, first))?;
+                            assert_no_native_frame_styles(&app.get_webview_window(&first.to_string()).unwrap())?;
                             let blocked = request(&endpoint, "Blocked tall head", tall, 60000)?;
                             let small = request(&endpoint, "Small newcomer", 100, 60000)?;
                             std::thread::sleep(Duration::from_millis(300));
@@ -264,6 +278,7 @@ mod host {
                             wait("auto notification retained hidden", || state.registry.lock().unwrap().snapshot(auto).is_ok_and(|s| s.state == crate::core::RequestState::Hidden))?;
                             rpc(&endpoint, "request.update", json!({"request_id":auto,"expected_revision":2,"reshow":true,"content":{"title":"Reshown short update"}}))?;
                             wait("auto notification reshown", || shown(&state, auto))?;
+                            assert_no_native_frame_styles(&window)?;
                             if window.inner_size().map_err(|e| e.to_string())? != initial { return Err("reshow discarded locked height".into()); }
                             clear(&endpoint, &state, &app)?;
 

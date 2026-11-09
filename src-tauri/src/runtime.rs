@@ -26,9 +26,71 @@ pub(crate) fn is_window_foreground(window: &WebviewWindow) -> Result<bool, Strin
 }
 
 #[cfg(windows)]
+const NATIVE_FRAME_STYLES: u32 = {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        WS_CAPTION, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME,
+    };
+    WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU | WS_THICKFRAME
+};
+
+#[cfg(windows)]
+pub(crate) fn keep_request_window_frameless(window: &WebviewWindow) -> Result<(), String> {
+    use std::{sync::mpsc, time::Duration};
+    use windows_sys::Win32::UI::Shell::SetWindowSubclass;
+
+    // Subclass registration must run on the thread that owns the HWND.
+    let (sender, receiver) = mpsc::channel();
+    let request_window = window.clone();
+    window
+        .run_on_main_thread(move || {
+            let result = windows_hwnd(&request_window).and_then(|hwnd| {
+                if unsafe { SetWindowSubclass(hwnd, Some(frameless_window_proc), 0, 0) } == 0 {
+                    return Err("failed to install frameless request window handler".into());
+                }
+                Ok(())
+            });
+            let _ = sender.send(result);
+        })
+        .map_err(|error| error.to_string())?;
+    receiver.recv_timeout(Duration::from_secs(2)).map_err(|error| error.to_string())?
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn frameless_window_proc(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+    message: u32,
+    wparam: usize,
+    lparam: isize,
+    subclass_id: usize,
+    _data: usize,
+) -> isize {
+    use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GWL_STYLE, STYLESTRUCT, WM_NCACTIVATE, WM_NCDESTROY, WM_STYLECHANGING,
+    };
+
+    // Right-click can activate a notification and paint a stale caption into
+    // the transparent margin even with WS_CAPTION cleared. Win32 defines -1
+    // as activation without repaint. Forward it so Tao still updates focus.
+    if message == WM_NCACTIVATE {
+        return unsafe { DefSubclassProc(hwnd, message, wparam, -1) };
+    }
+
+    // Tao can restore the native frame bits on show/hide after initial sizing.
+    if message == WM_STYLECHANGING && wparam as i32 == GWL_STYLE && lparam != 0 {
+        let styles = unsafe { &mut *(lparam as *mut STYLESTRUCT) };
+        styles.styleNew &= !NATIVE_FRAME_STYLES;
+    }
+    if message == WM_NCDESTROY {
+        unsafe { RemoveWindowSubclass(hwnd, Some(frameless_window_proc), subclass_id) };
+    }
+    unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+}
+
+#[cfg(windows)]
 pub(crate) fn configure_frameless_windows_window(window: &WebviewWindow, maximized: bool) -> Result<(), String> {
     use windows_sys::Win32::Graphics::Gdi::{CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_STYLE, HWND_TOP, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_CAPTION, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_STYLE, HWND_TOP, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER};
     let hwnd = windows_hwnd(window)?;
     set_window_cloaked(hwnd, true)?;
     let size = window.outer_size().map_err(|e| e.to_string())?;
@@ -36,7 +98,7 @@ pub(crate) fn configure_frameless_windows_window(window: &WebviewWindow, maximiz
     let width = i32::try_from(size.width).map_err(|_| "window width is too large")?;
     let height = i32::try_from(size.height).map_err(|_| "window height is too large")?;
     unsafe {
-        let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32 & !(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32 & !NATIVE_FRAME_STYLES;
         SetWindowLongPtrW(hwnd, GWL_STYLE, style as isize);
         if SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE) == 0 { return Err("SetWindowPos failed".into()); }
         let region = if maximized { CreateRectRgn(0, 0, width + 1, height + 1) } else { CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2) };

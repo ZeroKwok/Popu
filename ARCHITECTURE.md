@@ -57,6 +57,10 @@ WebView logical CSS viewport                         Win32 work area / set_posit
 
 `"100%" × "100%"` 经转换后仍填满所选的物理显示区域。逻辑视口随 DPI 变化，这是全屏窗口的预期表现。
 
+Windows 上的通知与对话框使用透明、无边框的原生窗口，卡片由 WebView 绘制。`host/windows.rs` 在首次调整尺寸和显示之前调用 `runtime.rs`，由 HWND 所属线程安装窗口消息处理器，并在 `WM_NCDESTROY` 时移除。初始配置清除原生边框样式。Tao 在显示或隐藏窗口时可能重新写入这些样式，处理器通过 `WM_STYLECHANGING` 保持标题栏和边框样式位清除。
+
+右键打开 WebView 菜单时，窗口可能收到 `WM_NCACTIVATE`。即使标题栏样式位已清除，这条消息的默认处理也可能在透明边缘重绘旧标题栏。处理器保留激活状态参数，并以 `lParam = -1` 转发，让 Tao 更新焦点，同时跳过 Win32 的非客户区重绘。右键菜单仍由 WebView 处理。原生生命周期回归检查首次显示和重新显示后的样式位，标题栏残影通过激活及右键前后的画面对照验证。 [Win32 激活消息](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-ncactivate)
+
 ## 请求标识、合并与更新
 
 `coalesce_key` 是可选的活动业务位置标识，按请求模式分别作用。重复创建会返回已有请求的 ID、状态和 revision，不修改内容。请求进入终态后立即释放该标识。

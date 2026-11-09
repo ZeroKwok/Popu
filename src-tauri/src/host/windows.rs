@@ -64,6 +64,9 @@ pub(super) fn create(
             .shadow(false)
             .build()
             .map_err(|e| e.to_string())?;
+    // Attach the native frame guard before sizing or showing the request window.
+    #[cfg(windows)]
+    runtime::keep_request_window_frameless(&window)?;
     resize(&window, placement)?;
     #[cfg(windows)]
     runtime::configure_frameless_windows_window(&window, request.window.is_maximized())?;
