@@ -52,20 +52,17 @@ async function open(page, { mode = "dialog", width, height, blocks = [], externa
 
 const paragraph = (text) => ({ type: "paragraph", text });
 
-for (const mode of ["dialog", "notify"]) test(`${mode} keeps a growing title readable without changing window size`, async ({ page }, testInfo) => {
+for (const mode of ["dialog", "notify"]) test(`${mode} truncates a growing title and exposes its full tooltip`, async ({ page }, testInfo) => {
   await open(page, { mode });
   const initial = page.viewportSize();
   const title = "标题".repeat(39) + "终点";
   await page.evaluate((title) => window.popuApplyUpdate({ title, blocks: [] }, 2, Date.now()), title);
   await expect.poll(() => page.evaluate(() => window.ready.includes(2))).toBe(true);
-  const body = page.locator(".popu-body");
-  expect(await body.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
-  await body.focus();
-  await page.keyboard.press("End");
-  await expect.poll(() => body.evaluate((node) => Math.abs(node.scrollHeight - node.clientHeight - node.scrollTop) <= 1)).toBe(true);
-  const bounds = await page.locator(".popu-title").boundingBox();
-  const viewport = await body.boundingBox();
-  expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.y + viewport.height + 1);
+  const heading = page.locator(".popu-title");
+  await expect(heading).toHaveAttribute("title", title);
+  await expect(heading).toHaveText(title);
+  await expect(heading).toHaveCSS("text-overflow", "ellipsis");
+  expect(await heading.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
   if (mode === "dialog") {
     const button = page.getByRole("button", { name: "OK", exact: true });
     const buttonBounds = await button.boundingBox();
@@ -123,21 +120,26 @@ test("the initial layout fits content beyond the minimum without a scrollbar", a
   await page.screenshot({ path: testInfo.outputPath("auto-height.png") });
 });
 
-test("long content reaches the maximum, keeps actions visible and scrolls to the end", async ({ page }, testInfo) => {
-  await open(page, { blocks: [paragraph("Long content line\n".repeat(100))] });
-  expect(page.viewportSize().height).toBe(720);
+for (const mode of ["dialog", "notify"]) test(`${mode} scrolls long content without moving its header`, async ({ page }, testInfo) => {
+  await open(page, { mode, blocks: [paragraph("Long content line\n".repeat(100))] });
+  expect(page.viewportSize()).toEqual(mode === "dialog" ? { width: 440, height: 720 } : { width: 360, height: 480 });
   const body = page.locator(".popu-body");
-  await expect(page.getByRole("button", { name: "OK", exact: true })).toBeInViewport();
+  const heading = page.locator(".popu-heading");
+  const titleBounds = await heading.boundingBox();
+  const timestamp = page.locator(".popu-timestamp");
+  const timestampBounds = mode === "notify" ? await timestamp.boundingBox() : null;
   await body.hover();
   await page.mouse.wheel(0, 100000);
   await expect.poll(() => body.evaluate((body) => Math.abs(body.scrollHeight - body.clientHeight - body.scrollTop) <= 1)).toBe(true);
+  expect(await body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  expect(await heading.boundingBox()).toEqual(titleBounds);
+  if (mode === "notify") {
+    await expect(timestamp).not.toBeEmpty();
+    expect(await timestamp.boundingBox()).toEqual(timestampBounds);
+  } else {
+    await expect(page.getByRole("button", { name: "OK", exact: true })).toBeInViewport();
+  }
   await page.screenshot({ path: testInfo.outputPath("capped-height.png") });
-});
-
-test("notification content uses its own default width and limits", async ({ page }) => {
-  await open(page, { mode: "notify", blocks: [paragraph("Notification line\n".repeat(60))] });
-  expect(page.viewportSize()).toEqual({ width: 360, height: 480 });
-  await expect(page.locator(".popu-timestamp")).not.toBeEmpty();
 });
 
 test("an explicit height bypasses measurement", async ({ page }) => {

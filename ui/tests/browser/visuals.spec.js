@@ -7,10 +7,11 @@ const root = fileURLToPath(new URL("../../..", import.meta.url));
 const readJson = (path) => JSON.parse(readFileSync(resolve(root, path), "utf8"));
 const fixtureNames = readdirSync(resolve(root, "protocol/examples")).filter((name) => name.endsWith(".json"));
 const examples = fixtureNames.filter((name) => /^(dialog|notification)-visual-.*\.json$/.test(name));
-// Long-content examples exercise scrolling on purpose; the custom template
-// does not use the built-in body. All remaining summaries should fit at their
-// configured window size, including the title, timestamp and action areas.
-const scrollingExamples = new Set(["dialog-all-elements.json", "dialog-long-content.json", "fullscreen-ultra-long-content.json"]);
+// Long-content examples and the interactive charts exceed their window height.
+// The custom template does not use the built-in body. All other examples fit.
+const scrollingExamples = new Set([
+  "dialog-all-elements.json", "dialog-long-content.json", "dialog-visual-interactive.json", "fullscreen-ultra-long-content.json",
+]);
 const fittingExamples = fixtureNames.filter((name) => !scrollingExamples.has(name) && name !== "notification-custom-template.json");
 
 function fixtureViewport(fixture) {
@@ -208,25 +209,26 @@ for (const name of fittingExamples) {
   });
 }
 
-test("long content remains scrollable and its end is reachable", async ({ page }) => {
-  const fixture = readJson("protocol/examples/fullscreen-ultra-long-content.json");
-  await page.setViewportSize({ width: 1280, height: 720 });
-  await mockHost(page, fixture);
-  await page.goto("/index.html");
-  await expect.poll(() => page.evaluate(() => window.__presented || window.__failed)).toBe(true);
-  const body = page.locator(".popu-body");
-  expect(await body.evaluate((body) => body.scrollHeight > body.clientHeight)).toBe(true);
-  // Real wheel input catches overflow:hidden; setting scrollTop directly can
-  // still move a hidden-overflow container that the user cannot scroll.
-  await body.hover();
-  await page.mouse.wheel(0, 100000);
-  await expect.poll(() => body.evaluate((body) =>
-    Math.abs(body.scrollHeight - body.clientHeight - body.scrollTop) <= 1,
-  )).toBe(true);
-});
+for (const name of ["fullscreen-ultra-long-content.json", "dialog-visual-interactive.json"]) {
+  test(`${name} remains scrollable and its end is reachable`, async ({ page }) => {
+    const fixture = readJson(`protocol/examples/${name}`);
+    await page.setViewportSize(name === "fullscreen-ultra-long-content.json" ? { width: 1280, height: 720 } : fixtureViewport(fixture));
+    await mockHost(page, fixture);
+    await page.goto("/index.html");
+    await expect.poll(() => page.evaluate(() => window.__presented || window.__failed)).toBe(true);
+    const body = page.locator(".popu-body");
+    expect(await body.evaluate((body) => body.scrollHeight > body.clientHeight)).toBe(true);
+    // Real wheel input verifies that the user can scroll the body.
+    await body.hover({ position: { x: 4, y: 4 } });
+    await page.mouse.wheel(0, 100000);
+    await expect.poll(() => body.evaluate((body) =>
+      Math.abs(body.scrollHeight - body.clientHeight - body.scrollTop) <= 1,
+    )).toBe(true);
+  });
+}
 
 for (const name of examples) {
-  test(`${name} renders offline without overflow or CSP violations`, async ({ page }, testInfo) => {
+  test(`${name} renders offline with expected scrolling and no CSP violations`, async ({ page }, testInfo) => {
     const fixture = readJson(`protocol/examples/${name}`);
     await page.setViewportSize(fixtureViewport(fixture));
     const violations = [];
@@ -245,7 +247,7 @@ for (const name of examples) {
       expect(await images.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0))).toBe(true);
     }
     expect(await page.locator(".popu-body").evaluate((body) => body.scrollWidth <= body.clientWidth)).toBe(true);
-    expect(await page.locator(".popu-body").evaluate((body) => body.scrollHeight <= body.clientHeight)).toBe(true);
+    expect(await page.locator(".popu-body").evaluate((body) => body.scrollHeight > body.clientHeight)).toBe(scrollingExamples.has(name));
     expect(violations).toEqual([]);
     expect(network).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath("render.png") });

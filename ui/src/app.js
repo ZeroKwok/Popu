@@ -28,9 +28,12 @@ function element(slot) {
   return document.querySelector(`[data-popu-slot="${slot}"]`);
 }
 
-function setText(slot, value) {
-  const target = element(slot);
-  if (target) target.textContent = value ?? "";
+function renderTitle(value) {
+  const target = element("title");
+  if (!target) return;
+  const title = value ?? "";
+  target.textContent = title;
+  target.title = title;
 }
 
 function hasVisibleText(value) {
@@ -205,7 +208,7 @@ function restoreValues(values) {
 function renderContent(content, preserveForm = false) {
   const version = ++renderVersion;
   const values = preserveForm ? collectValues() : null;
-  setText("title", content.title);
+  renderTitle(content.title);
   renderContentIcon(element("icon"), content);
   pendingContent = renderContentBlocks(element("content"), content.blocks ?? [], content.vertical_align ?? "center", renderFormBlock, { waitForImages: false })
     .catch((error) => { if (version === renderVersion) throw error; });
