@@ -1,5 +1,5 @@
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -169,6 +169,48 @@ pub(crate) fn validate_file(path: &Path) -> Result<(), String> {
         .and_then(|text| parse(&text))
         .map(|_| ())
         .map_err(|error| format!("{}: {error}", path.display()))
+}
+
+pub(crate) fn initialize_if_missing(path: &Path) -> io::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            match initialize_file(path, false) {
+                Ok(()) => Ok(true),
+                // Another invocation may have initialized it in the meantime.
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+                Err(error) => Err(error),
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub(crate) fn initialize_file(path: &Path, force: bool) -> io::Result<()> {
+    let defaults = toml::to_string_pretty(&Config::default()).map_err(io::Error::other)?;
+    let directory = path.parent().expect("configuration path has a parent directory");
+    fs::create_dir_all(directory)?;
+    let mut file = tempfile::NamedTempFile::new_in(directory)?;
+    writeln!(file, "# Popu Host configuration")?;
+    writeln!(
+        file,
+        "# Uncomment the settings you want to override, then restart the Host."
+    )?;
+    writeln!(file)?;
+    for line in defaults.lines() {
+        if line.is_empty() || line.starts_with('[') {
+            writeln!(file, "{line}")?;
+        } else {
+            writeln!(file, "# {line}")?;
+        }
+    }
+    file.as_file().sync_all()?;
+    if force {
+        file.persist(path)?;
+    } else {
+        file.persist_noclobber(path)?;
+    }
+    Ok(())
 }
 
 fn parse(text: &str) -> Result<Config, String> {

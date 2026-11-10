@@ -39,8 +39,8 @@ enum Commands {
     Wait { request_id: uuid::Uuid },
     /// Inspect or control the persistent Host.
     Host { #[command(subcommand)] command: HostCommands },
-    /// Validate Host configuration.
-    Config { #[command(subcommand)] command: ConfigCommands },
+    /// Check Host configuration and initialize the default file if missing.
+    Config { #[command(subcommand)] command: Option<ConfigCommands> },
     /// Inspect and validate templates.
     Templates { #[command(subcommand)] command: TemplateCommands },
 }
@@ -50,8 +50,21 @@ enum HostCommands { Status, Stop, #[command(hide = true)] Run }
 
 #[derive(Debug, Subcommand)]
 enum ConfigCommands {
-    /// Check a TOML file, using the Host's configuration path by default.
-    Validate { #[arg(long)] path: Option<PathBuf> },
+    /// Validate a TOML file without writing to disk.
+    Validate {
+        /// File to validate. Defaults to the Host's configuration path.
+        path: Option<PathBuf>,
+        #[arg(long = "path", hide = true, conflicts_with = "path")]
+        legacy_path: Option<PathBuf>,
+    },
+    /// Create a starter file at the default configuration path.
+    Init {
+        /// Replace an existing configuration file with the starter template.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Print the default configuration path.
+    Path,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -104,17 +117,46 @@ fn run_inner() -> Result<i32, Box<dyn std::error::Error>> {
         Commands::Host { command: HostCommands::Run } => { preflight::check()?; Ok(host::run()) },
         Commands::Host { command: HostCommands::Status } => print_rpc(rpc_call("host.status", serde_json::json!({}))?),
         Commands::Host { command: HostCommands::Stop } => print_rpc(rpc_call("host.stop", serde_json::json!({}))?),
-        Commands::Config { command: ConfigCommands::Validate { path } } => {
-            let path = path.map_or_else(config::default_path, Ok)?;
-            config::validate_file(&path)?;
-            print_rpc(serde_json::json!({"status":"valid","path":path}))
-        }
+        Commands::Config { command } => run_config(command),
         Commands::Templates { command: TemplateCommands::List } => {
             println!("{}", serde_json::to_string(templates::builtin_names())?); Ok(runtime::EXIT_OK)
         }
         Commands::Templates { command: TemplateCommands::Validate { path } } => {
             let name = templates::validate_directory(&path)?;
             println!("{}", serde_json::to_string(&serde_json::json!({"status":"valid","template":name}))?);
+            Ok(runtime::EXIT_OK)
+        }
+    }
+}
+
+fn run_config(command: Option<ConfigCommands>) -> Result<i32, Box<dyn std::error::Error>> {
+    match command {
+        None => {
+            let path = config::default_path()?;
+            let initialized = config::initialize_if_missing(&path)
+                .map_err(|error| format!("{}: {error}", path.display()))?;
+            config::validate_file(&path)?;
+            print_rpc(serde_json::json!({"status":"valid","path":path,"initialized":initialized}))
+        }
+        Some(ConfigCommands::Validate { path, legacy_path }) => {
+            let path = path.or(legacy_path).map_or_else(config::default_path, Ok)?;
+            config::validate_file(&path)?;
+            print_rpc(serde_json::json!({"status":"valid","path":path}))
+        }
+        Some(ConfigCommands::Init { force }) => {
+            let path = config::default_path()?;
+            if let Err(error) = config::initialize_file(&path, force) {
+                let hint = if !force && error.kind() == io::ErrorKind::AlreadyExists {
+                    " (use popu config init --force to replace it)"
+                } else {
+                    ""
+                };
+                return Err(format!("{}: {error}{hint}", path.display()).into());
+            }
+            print_rpc(serde_json::json!({"status":"initialized","path":path}))
+        }
+        Some(ConfigCommands::Path) => {
+            println!("{}", config::default_path()?.display());
             Ok(runtime::EXIT_OK)
         }
     }

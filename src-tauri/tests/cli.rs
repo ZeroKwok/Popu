@@ -24,22 +24,89 @@ fn lists_builtin_templates_as_json() {
 fn validates_host_configuration_without_starting_host() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
-    let validate = || Command::new(env!("CARGO_BIN_EXE_popu"))
-        .args(["config", "validate", "--path"])
+    let validate = |flags: &[&str]| Command::new(env!("CARGO_BIN_EXE_popu"))
+        .args(["config", "validate"])
+        .args(flags)
         .arg(&path)
         .output()
         .expect("run popu");
 
+    assert_eq!(validate(&[]).status.code(), Some(12));
+    assert!(!path.exists());
+
     std::fs::write(&path, "[notification]\nmax_visible = 2").unwrap();
-    let valid = validate();
-    assert!(valid.status.success(), "{}", String::from_utf8_lossy(&valid.stderr));
-    let result: serde_json::Value = serde_json::from_slice(&valid.stdout).unwrap();
-    assert_eq!(result["status"], "valid");
+    for flags in [&[][..], &["--path"][..]] {
+        let valid = validate(flags);
+        assert!(valid.status.success(), "{}", String::from_utf8_lossy(&valid.stderr));
+        let result: serde_json::Value = serde_json::from_slice(&valid.stdout).unwrap();
+        assert_eq!(result["status"], "valid");
+    }
 
     std::fs::write(&path, "[notification]\nmax_visible = 0").unwrap();
-    let invalid = validate();
+    let invalid = validate(&[]);
     assert_eq!(invalid.status.code(), Some(12));
     assert!(String::from_utf8_lossy(&invalid.stderr).contains("/notification/max_visible"));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "[notification]\nmax_visible = 0");
+}
+
+fn config_command(directory: &std::path::Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_popu"));
+    let config_home = if cfg!(windows) { "LOCALAPPDATA" } else { "XDG_CONFIG_HOME" };
+    command.env(config_home, directory).arg("config");
+    command
+}
+
+#[test]
+fn bare_config_initializes_only_a_missing_default_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| config_command(dir.path()).args(args).output().unwrap();
+    let folder = if cfg!(windows) { "Popu" } else { "popu" };
+    let path = dir.path().join(folder).join("config.toml");
+
+    let output = run(&["path"]);
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim_end(), path.to_str().unwrap());
+    assert_eq!(run(&["validate"]).status.code(), Some(12));
+    assert!(!path.parent().unwrap().exists());
+
+    for initialized in [true, false] {
+        let output = run(&[]);
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["status"], "valid");
+        assert_eq!(result["initialized"], initialized);
+    }
+
+    let invalid = "[notification]\nmax_visible = 0";
+    std::fs::write(&path, invalid).unwrap();
+    assert_eq!(run(&[]).status.code(), Some(12));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), invalid);
+}
+
+#[test]
+fn config_init_requires_force_to_replace_an_existing_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| config_command(dir.path()).args(args).output().unwrap();
+    let created = run(&["init"]);
+    assert!(created.status.success(), "{}", String::from_utf8_lossy(&created.stderr));
+    let result: serde_json::Value = serde_json::from_slice(&created.stdout).unwrap();
+    assert_eq!(result["status"], "initialized");
+    let path = PathBuf::from(result["path"].as_str().unwrap());
+
+    let customized = "[notification]\nmax_visible = 2";
+    std::fs::write(&path, customized).unwrap();
+    let existing = run(&["init"]);
+    assert_eq!(existing.status.code(), Some(12));
+    assert!(String::from_utf8_lossy(&existing.stderr).contains("init --force"));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), customized);
+
+    let replaced = run(&["init", "--force"]);
+    assert!(replaced.status.success(), "{}", String::from_utf8_lossy(&replaced.stderr));
+    let template = std::fs::read_to_string(&path).unwrap();
+    assert!(template.contains("# max_visible = 3"));
+    let overrides: toml::Table = toml::from_str(&template).unwrap();
+    assert!(overrides.values().all(|value| value.as_table().unwrap().is_empty()));
+    assert!(run(&["validate"]).status.success());
 }
 
 #[test]
