@@ -103,7 +103,7 @@ fn config_init_requires_force_to_replace_an_existing_file() {
     let replaced = run(&["init", "--force"]);
     assert!(replaced.status.success(), "{}", String::from_utf8_lossy(&replaced.stderr));
     let template = std::fs::read_to_string(&path).unwrap();
-    assert!(template.contains("# max_visible = 3"));
+    assert_eq!(template, include_str!("../resources/config.template.toml"));
     let overrides: toml::Table = toml::from_str(&template).unwrap();
     assert!(overrides.values().all(|value| value.as_table().unwrap().is_empty()));
     assert!(run(&["validate"]).status.success());

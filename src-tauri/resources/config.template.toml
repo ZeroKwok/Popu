@@ -1,0 +1,44 @@
+# Popu Host configuration
+#
+# Uncomment only the settings you want to override. Commented settings use
+# the built-in defaults. Run "popu config validate" after editing.
+# Restart the Host to apply changes.
+#
+# Sizes and spacing are in logical pixels. Explicit request values take
+# precedence over defaults for window width, height, and timeouts.
+
+[notification]
+
+# Distance from the right and bottom edges of the primary display's work area.
+# edge_margin_px = 16
+
+# Vertical space between notifications. Use 0 to stack without a gap.
+# gap_px = 12
+
+# Maximum number of visible notifications (1–16). Others wait in the queue.
+# max_visible = 3
+
+# Default window width when the request omits window.width.
+# default_width_px = 360
+
+# Automatic height when the request omits window.height. The fallback height
+# must be between the minimum and maximum. A small work area may limit height.
+# auto_min_height_px = 120
+# auto_max_height_px = 480
+# fallback_height_px = 220
+
+# Default display duration in milliseconds (500–86400000), timed from display.
+# default_duration_ms = 8000
+
+[dialog]
+
+# Default window width when the request omits window.width.
+# default_width_px = 440
+
+# Automatic height limits and fallback when content cannot be measured.
+# auto_min_height_px = 160
+# auto_max_height_px = 720
+# fallback_height_px = 300
+
+# Default interaction timeout in seconds (1–86400), timed from display.
+# default_timeout_seconds = 300

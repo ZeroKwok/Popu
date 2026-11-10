@@ -9,6 +9,7 @@ pub const DEFAULT_GAP_PX: u32 = 12;
 pub const DEFAULT_MAX_VISIBLE: usize = 3;
 pub(crate) const DEFAULT_DURATION_MS: u64 = 8_000;
 pub(crate) const DEFAULT_TIMEOUT_SECONDS: u64 = 300;
+const CONFIG_TEMPLATE: &str = include_str!("../resources/config.template.toml");
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct WindowDefaults {
@@ -187,23 +188,12 @@ pub(crate) fn initialize_if_missing(path: &Path) -> io::Result<bool> {
 }
 
 pub(crate) fn initialize_file(path: &Path, force: bool) -> io::Result<()> {
-    let defaults = toml::to_string_pretty(&Config::default()).map_err(io::Error::other)?;
-    let directory = path.parent().expect("configuration path has a parent directory");
+    let directory = path
+        .parent()
+        .expect("configuration path has a parent directory");
     fs::create_dir_all(directory)?;
     let mut file = tempfile::NamedTempFile::new_in(directory)?;
-    writeln!(file, "# Popu Host configuration")?;
-    writeln!(
-        file,
-        "# Uncomment the settings you want to override, then restart the Host."
-    )?;
-    writeln!(file)?;
-    for line in defaults.lines() {
-        if line.is_empty() || line.starts_with('[') {
-            writeln!(file, "{line}")?;
-        } else {
-            writeln!(file, "# {line}")?;
-        }
-    }
+    file.write_all(CONFIG_TEMPLATE.as_bytes())?;
     file.as_file().sync_all()?;
     if force {
         file.persist(path)?;
@@ -266,6 +256,25 @@ fn parse(text: &str) -> Result<Config, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn template_examples_match_built_in_defaults() {
+        let mut uncommented = String::new();
+        for line in CONFIG_TEMPLATE.lines() {
+            let assignment = line.strip_prefix("# ").filter(|text| {
+                text.split_once(" = ").is_some_and(|(key, _)| {
+                    !key.is_empty()
+                        && key
+                            .bytes()
+                            .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
+                })
+            });
+            uncommented.push_str(assignment.unwrap_or(line));
+            uncommented.push('\n');
+        }
+        let examples: toml::Table = toml::from_str(&uncommented).unwrap();
+        assert_eq!(examples, toml::Table::try_from(Config::default()).unwrap());
+    }
 
     #[test]
     fn partial_config_merges_with_built_in_defaults() {

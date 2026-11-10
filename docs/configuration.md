@@ -1,6 +1,6 @@
 # Host 配置
 
-在 Windows 上，默认配置文件是 `%LOCALAPPDATA%\Popu\config.toml`。运行 `popu config` 即可检查文件，缺失时会生成模板。模板里的设置都是注释，取消注释即可覆盖对应默认值。以下是全部字段及内置默认值，尺寸和间距均为逻辑像素。
+在 Windows 上，默认配置文件是 `%LOCALAPPDATA%\Popu\config.toml`。运行 `popu config` 即可检查文件，缺失时会写出[内置模板](../src-tauri/resources/config.template.toml)。模板注释说明了各项设置，取消注释即可覆盖对应默认值。以下是全部字段及内置默认值，尺寸和间距均为逻辑像素。
 
 ```toml
 [notification]
