@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Popu Host configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "notification": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "edge_margin_px": { "$ref": "#/$defs/spacing" },
+        "gap_px": { "$ref": "#/$defs/spacing" },
+        "max_visible": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "default_width_px": { "$ref": "#/$defs/dimension" },
+        "auto_min_height_px": { "$ref": "#/$defs/dimension" },
+        "auto_max_height_px": { "$ref": "#/$defs/dimension" },
+        "fallback_height_px": { "$ref": "#/$defs/dimension" },
+        "default_duration_ms": { "type": "integer", "minimum": 500, "maximum": 86400000 }
+      }
+    },
+    "dialog": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_width_px": { "$ref": "#/$defs/dimension" },
+        "auto_min_height_px": { "$ref": "#/$defs/dimension" },
+        "auto_max_height_px": { "$ref": "#/$defs/dimension" },
+        "fallback_height_px": { "$ref": "#/$defs/dimension" },
+        "default_timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 }
+      }
+    }
+  },
+  "$defs": {
+    "spacing": { "type": "integer", "minimum": 0, "maximum": 256 },
+    "dimension": { "type": "integer", "minimum": 1, "maximum": 8192 }
+  }
+}

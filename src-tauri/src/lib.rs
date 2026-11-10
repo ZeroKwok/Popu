@@ -1,3 +1,4 @@
+pub mod config;
 pub mod core;
 mod history;
 mod host;
@@ -38,12 +39,20 @@ enum Commands {
     Wait { request_id: uuid::Uuid },
     /// Inspect or control the persistent Host.
     Host { #[command(subcommand)] command: HostCommands },
+    /// Validate Host configuration.
+    Config { #[command(subcommand)] command: ConfigCommands },
     /// Inspect and validate templates.
     Templates { #[command(subcommand)] command: TemplateCommands },
 }
 
 #[derive(Debug, Subcommand)]
 enum HostCommands { Status, Stop, #[command(hide = true)] Run }
+
+#[derive(Debug, Subcommand)]
+enum ConfigCommands {
+    /// Check a TOML file, using the Host's configuration path by default.
+    Validate { #[arg(long)] path: Option<PathBuf> },
+}
 
 #[derive(Debug, Args, Clone)]
 struct RunArgs {
@@ -71,11 +80,11 @@ pub fn run() -> i32 {
 fn run_inner() -> Result<i32, Box<dyn std::error::Error>> {
     match Cli::parse().command {
         Commands::Request(args) => {
-            let request = load_request(&args.request)?;
+            let (request, payload) = load_request(&args.request)?;
             let mode = request.mode;
             let template = args.template.map(|path| path.canonicalize()).transpose()?;
             let _ = templates::resolve(&request, template.as_deref())?;
-            let created = rpc_with_start("request.create", serde_json::json!({"request":request,"template":template}))?;
+            let created = rpc_with_start("request.create", serde_json::json!({"request":payload,"template":template}))?;
             println!("{}", serde_json::to_string(&created)?);
             if mode == Mode::Notify { return Ok(runtime::EXIT_OK); }
             let id = created.get("request_id").and_then(|v| v.as_str()).ok_or("Host response has no request_id")?;
@@ -95,6 +104,11 @@ fn run_inner() -> Result<i32, Box<dyn std::error::Error>> {
         Commands::Host { command: HostCommands::Run } => { preflight::check()?; Ok(host::run()) },
         Commands::Host { command: HostCommands::Status } => print_rpc(rpc_call("host.status", serde_json::json!({}))?),
         Commands::Host { command: HostCommands::Stop } => print_rpc(rpc_call("host.stop", serde_json::json!({}))?),
+        Commands::Config { command: ConfigCommands::Validate { path } } => {
+            let path = path.map_or_else(config::default_path, Ok)?;
+            config::validate_file(&path)?;
+            print_rpc(serde_json::json!({"status":"valid","path":path}))
+        }
         Commands::Templates { command: TemplateCommands::List } => {
             println!("{}", serde_json::to_string(templates::builtin_names())?); Ok(runtime::EXIT_OK)
         }
@@ -128,9 +142,30 @@ fn rpc_with_start(method: &str, params: serde_json::Value) -> Result<serde_json:
     unwrap_rpc(host_client::call(&rpc_request(method, params))?)
 }
 
-fn load_request(path: &Path) -> Result<Request, Box<dyn std::error::Error>> {
+fn load_request(path: &Path) -> Result<(Request, serde_json::Value), Box<dyn std::error::Error>> {
     let text = if path == Path::new("-") {
         let mut text = String::new(); io::stdin().read_to_string(&mut text)?; text
     } else { fs::read_to_string(path)? };
-    Ok(Request::parse(&text)?)
+    // Forward the original fields so omitted values can receive Host defaults.
+    Ok((Request::parse(&text)?, serde_json::from_str(&text)?))
+}
+
+#[cfg(test)]
+mod request_loading_tests {
+    use super::*;
+
+    #[test]
+    fn forwards_omitted_and_explicit_timeouts_distinctly() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("request.json");
+        let mut payload = serde_json::json!({
+            "version":"1.0", "mode":"notify", "content":{"title":"Done"},
+        });
+        fs::write(&path, payload.to_string()).unwrap();
+        assert!(load_request(&path).unwrap().1.get("duration_ms").is_none());
+
+        payload["duration_ms"] = serde_json::json!(8_000);
+        fs::write(&path, payload.to_string()).unwrap();
+        assert_eq!(load_request(&path).unwrap().1["duration_ms"], 8_000);
+    }
 }

@@ -1,3 +1,4 @@
+use crate::config::{Config, DEFAULT_EDGE_MARGIN_PX};
 use crate::protocol::{Mode, Position, Request, WindowDimension};
 use serde::Deserialize;
 
@@ -35,7 +36,7 @@ pub struct Display {
 
 impl Display {
     pub fn resolve(self, request: &Request) -> WindowPlacement {
-        resolve(request, self.area, self.scale, 16)
+        resolve(request, self.area, self.scale, DEFAULT_EDGE_MARGIN_PX)
     }
 }
 
@@ -57,16 +58,20 @@ pub struct WindowLayout {
     fallback: u32,
     min_height: u32,
     max_height: u32,
+    margin: u32,
     preferred_height: Option<u32>,
     locked: bool,
 }
 
 impl WindowLayout {
     pub fn new(request: &Request, display: Display) -> Self {
-        let defaults = request.default_window_size();
-        let (min_height, max_height) = match request.mode {
-            Mode::Dialog => (160, 720),
-            Mode::Notify => (120, 480),
+        Self::with_config(request, display, &Config::default())
+    }
+
+    pub fn with_config(request: &Request, display: Display, config: &Config) -> Self {
+        let (defaults, margin) = match request.mode {
+            Mode::Dialog => (config.dialog.window, DEFAULT_EDGE_MARGIN_PX),
+            Mode::Notify => (config.notification.window, config.notification.edge_margin_px),
         };
         Self {
             display,
@@ -79,11 +84,12 @@ impl WindowLayout {
                 .window
                 .width
                 .clone()
-                .unwrap_or(WindowDimension::Pixels(defaults.0)),
+                .unwrap_or(WindowDimension::Pixels(f64::from(defaults.default_width_px))),
             height: request.window.height.clone(),
-            fallback: defaults.1 as u32,
-            min_height,
-            max_height,
+            fallback: defaults.fallback_height_px,
+            min_height: defaults.auto_min_height_px,
+            max_height: defaults.auto_max_height_px,
+            margin,
             preferred_height: None,
             locked: false,
         }
@@ -98,7 +104,8 @@ impl WindowLayout {
         let height = if let Some(height) = &self.height {
             height.resolve(bounds.1)
         } else {
-            let max = self.max_height.min(bounds.1.saturating_sub(32).max(1));
+            let available = bounds.1.saturating_sub(self.margin.saturating_mul(2)).max(1);
+            let max = self.max_height.min(available);
             self.preferred_height
                 .unwrap_or(self.fallback)
                 .clamp(self.min_height.min(max), max)
@@ -108,7 +115,7 @@ impl WindowLayout {
             (self.width.resolve(bounds.0), height),
             self.display.area,
             self.display.scale,
-            16,
+            self.margin,
         )
     }
 
@@ -339,6 +346,31 @@ mod tests {
                 height: natural
             })));
             assert_eq!(layout.placement().logical_size, (500, expected));
+        }
+    }
+
+    #[test]
+    fn notification_window_uses_configured_width_heights_and_margin() {
+        let request = Request::parse(r#"{"version":"1.0","mode":"notify","content":{"title":"Test"}}"#).unwrap();
+        let display = Display {
+            area: Rect { x: 0, y: 0, width: 1200, height: 450 },
+            scale: 1.5,
+        };
+        let mut config = Config::default();
+        config.notification.edge_margin_px = 20;
+        config.notification.window = crate::config::WindowDefaults {
+            default_width_px: 400,
+            auto_min_height_px: 140,
+            auto_max_height_px: 350,
+            fallback_height_px: 180,
+        };
+        let mut layout = WindowLayout::with_config(&request, display, &config);
+        assert_eq!(layout.placement().logical_size, (400, 180));
+        assert_eq!(layout.placement().position, Point { x: 570, y: 150 });
+
+        for (natural, expected) in [(40.0, 140), (600.0, 260)] {
+            assert!(layout.measure(Some(ContentSize { width: 400.0, height: natural })));
+            assert_eq!(layout.placement().logical_size.1, expected);
         }
     }
 

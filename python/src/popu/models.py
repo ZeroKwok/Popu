@@ -75,7 +75,7 @@ class DialogRequest:
         confirm_label: str = "Confirm",
         cancel_label: str = "Cancel",
         dangerous: bool = False,
-        timeout_seconds: int = 300,
+        timeout_seconds: int | None = None,
         screen: Screen = Screen.CURSOR,
         area: ScreenArea = ScreenArea.WORK_AREA,
         width: WindowDimension | None = None,
@@ -105,7 +105,7 @@ class DialogRequest:
                     },
                     {"id": "cancel", "label": cancel_label, "style": "secondary", "result_status": "cancelled"},
                 ],
-                "timeout_seconds": timeout_seconds,
+                **({"timeout_seconds": timeout_seconds} if timeout_seconds is not None else {}),
             }
         )
 
@@ -126,7 +126,7 @@ class Notification:
         blocks: list[Mapping[str, Any]] | None = None,
         icon: Mapping[str, str] | None = None,
         position: Position = Position.BOTTOM_RIGHT,
-        duration_ms: int = 8_000,
+        duration_ms: int | None = None,
         requires_read: bool = False,
         updatable: bool = False,
         screen: Screen = Screen.PRIMARY,
@@ -147,7 +147,7 @@ class Notification:
                 "window": _window_options(
                     screen=screen, area=area, width=width, height=height
                 ),
-                "duration_ms": duration_ms,
+                **({"duration_ms": duration_ms} if duration_ms is not None else {}),
                 "requires_read": requires_read,
                 "updatable": updatable,
                 "content": _content("success", title, message, blocks, icon, vertical_align),

@@ -530,7 +530,8 @@ impl Coordinator {
             ids.push(id);
             sizes.push(size);
         }
-        Ok(Layout::new(display)
+        let config = &self.state.config.settings.notification;
+        Ok(Layout::with_spacing(display, config.edge_margin_px, config.gap_px)
             .stack(&sizes)
             .map(|points| ids.into_iter().zip(points).collect()))
     }
@@ -760,7 +761,7 @@ impl Coordinator {
             } else {
                 runtime::resolve_display(request.window.screen, request.window.area)?
             };
-            let layout = WindowLayout::new(&request, display);
+            let layout = WindowLayout::with_config(&request, display, &self.state.config.settings);
             let placement = layout.placement();
             self.layouts.insert(id, layout);
             let _window = windows::create(&self.app, id, &request, placement)?;

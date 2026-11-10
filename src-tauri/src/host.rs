@@ -12,6 +12,7 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use uuid::Uuid;
 
+use crate::config::{Config, LoadedConfig};
 use crate::core::{RequestRegistry, UpdateOptions};
 use crate::ipc::{self, RpcRequest, RpcResponse, RPC_VERSION};
 use crate::history::HistoryStore;
@@ -25,6 +26,7 @@ use crate::templates::{self, TemplateAssets};
 use crate::tray;
 
 pub struct HostState {
+    config: LoadedConfig,
     registry: Mutex<RequestRegistry>,
     changed: Condvar,
     stopping: AtomicBool,
@@ -35,13 +37,9 @@ pub struct HostState {
 
 struct HistoryWindowSession { started: Instant, ready: bool, detail_ready: bool, open_requested: bool }
 
-impl Default for HostState {
-    fn default() -> Self { Self::with_history(HistoryStore::open_default().ok()) }
-}
-
 impl HostState {
-    fn with_history(history: Option<HistoryStore>) -> Self {
-        let mut registry = RequestRegistry::default();
+    fn with_history(history: Option<HistoryStore>, config: LoadedConfig) -> Self {
+        let mut registry = RequestRegistry::with_max_visible(config.settings.notification.max_visible);
         if let Some(store) = &history {
             match store.load_live() {
                 Ok(records) => for (id, checkpoint) in records {
@@ -53,7 +51,7 @@ impl HostState {
             }
         }
         registry.expire_due(Instant::now());
-        Self { registry: Mutex::new(registry), changed: Condvar::new(), stopping: AtomicBool::new(false), history: Mutex::new(history), sender: Mutex::new(None), history_window: Mutex::new(None) }
+        Self { config, registry: Mutex::new(registry), changed: Condvar::new(), stopping: AtomicBool::new(false), history: Mutex::new(history), sender: Mutex::new(None), history_window: Mutex::new(None) }
     }
 }
 
@@ -63,6 +61,78 @@ struct Bootstrap { request: Request, revision: u64, occurred_at_ms: u64, templat
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreateParams { request: Request, #[serde(default)] template: Option<PathBuf> }
+
+impl CreateParams {
+    fn parse(mut params: Value, config: &Config) -> serde_json::Result<Self> {
+        if let Some(request) = params.get_mut("request").and_then(Value::as_object_mut) {
+            let timeout = match request.get("mode").and_then(Value::as_str) {
+                Some("notify") => Some(("duration_ms", config.notification.default_duration_ms)),
+                Some("dialog") => Some(("timeout_seconds", config.dialog.default_timeout_seconds)),
+                _ => None,
+            };
+            if let Some((field, default)) = timeout {
+                request.entry(field).or_insert_with(|| json!(default));
+            }
+        }
+        serde_json::from_value(params)
+    }
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn host_resolves_omitted_timeouts_and_preserves_explicit_values() {
+        let mut config = Config::default();
+        config.notification.default_duration_ms = 2_000;
+        config.dialog.default_timeout_seconds = 40;
+        let notify = json!({
+            "request": {"version":"1.0", "mode":"notify", "content":{"title":"Done"}}
+        });
+        let dialog = json!({
+            "request": {"version":"1.0", "mode":"dialog", "content":{"title":"Continue?"},
+                "actions":[{"id":"ok","label":"OK","submit":true}]}
+        });
+        for (mut params, field, configured, explicit) in [
+            (notify, "duration_ms", 2_000, 8_000),
+            (dialog, "timeout_seconds", 40, 300),
+        ] {
+            let request = CreateParams::parse(params.clone(), &config).unwrap().request;
+            request.validate().unwrap();
+            assert_eq!(json!(request)[field], configured);
+
+            params["request"][field] = json!(explicit);
+            let request = CreateParams::parse(params.clone(), &config).unwrap().request;
+            assert_eq!(json!(request)[field], explicit);
+
+            params["request"][field] = Value::Null;
+            assert!(CreateParams::parse(params, &config).is_err());
+        }
+    }
+
+    #[test]
+    fn restored_notification_keeps_its_resolved_duration() {
+        let mut config = Config::default();
+        config.notification.default_duration_ms = 2_000;
+        let params = json!({
+            "request": {"version":"1.0", "mode":"notify", "updatable":true,
+                "content":{"title":"Backup"}}
+        });
+        let request = CreateParams::parse(params, &config).unwrap().request;
+        let mut store = HistoryStore::from_connection(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        let mut registry = RequestRegistry::default();
+        let id = registry.create(request, None).request_id;
+        store.save_live(&id.to_string(), registry.checkpoint(id).as_deref()).unwrap();
+
+        let restored = HostState::with_history(Some(store), LoadedConfig::default());
+        let mut registry = restored.registry.lock().unwrap();
+        let content = registry.request(id).unwrap().content.clone();
+        registry.update(id, 1, content).unwrap();
+        assert_eq!(registry.request(id).unwrap().duration_ms, 2_000);
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct IdParams { request_id: Uuid }
@@ -81,7 +151,8 @@ where D: serde::Deserializer<'de>, T: Deserialize<'de> {
 }
 
 pub fn run() -> i32 {
-    let state = Arc::new(HostState::default());
+    let config = LoadedConfig::load();
+    let state = Arc::new(HostState::with_history(HistoryStore::open_default().ok(), config));
     let managed = Arc::clone(&state);
     let app = host_builder(managed)
         .setup(move |app| {
@@ -233,7 +304,7 @@ fn dispatch(rpc: RpcRequest, _app: &AppHandle, state: &Arc<HostState>) -> RpcRes
     }
     let result: Result<Value, Value> = (|| match rpc.method.as_str() {
         "request.create" => {
-            let mut params: CreateParams = serde_json::from_value(rpc.params).map_err(invalid)?;
+            let mut params = CreateParams::parse(rpc.params, &state.config.settings).map_err(invalid)?;
             params.request.validate().map_err(invalid)?;
             params.template = params.template.map(|path| path.canonicalize()).transpose().map_err(invalid)?;
             if let Some(path) = params.template.as_deref() { templates::resolve(&params.request, Some(path)).map_err(invalid)?; }
@@ -264,6 +335,7 @@ fn dispatch(rpc: RpcRequest, _app: &AppHandle, state: &Arc<HostState>) -> RpcRes
         "host.status" => {
             let mut status = coordinator::call(state, Command::Status)?;
             status["host"] = serde_json::to_value(ipc::HostInfo::current().map_err(invalid)?).map_err(invalid)?;
+            status["config"] = serde_json::to_value(&state.config.status).map_err(invalid)?;
             Ok(status)
         }
         "history.list" => {

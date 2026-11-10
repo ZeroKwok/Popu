@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use thiserror::Error;
 
+use crate::config::{WindowDefaults, DEFAULT_DURATION_MS, DEFAULT_TIMEOUT_SECONDS};
+
 pub const PROTOCOL_VERSION: &str = "1.0";
 
 fn default_template() -> String {
@@ -28,11 +30,11 @@ fn default_area() -> ScreenArea {
 }
 
 fn default_dialog_timeout() -> u64 {
-    300
+    DEFAULT_TIMEOUT_SECONDS
 }
 
 fn default_notification_duration() -> u64 {
-    8_000
+    DEFAULT_DURATION_MS
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -512,10 +514,11 @@ impl Request {
     pub fn default_window_size(&self) -> (f64, f64) {
         // Provisional/fallback geometry only. WindowLayout resolves omitted
         // heights from the renderer before the first native presentation.
-        match self.mode {
-            Mode::Dialog => (440.0, 300.0),
-            Mode::Notify => (360.0, 220.0),
-        }
+        let defaults = match self.mode {
+            Mode::Dialog => WindowDefaults::DIALOG,
+            Mode::Notify => WindowDefaults::NOTIFICATION,
+        };
+        (f64::from(defaults.default_width_px), f64::from(defaults.fallback_height_px))
     }
 
     pub fn window_size(&self, bounds: (u32, u32)) -> (u32, u32) {

@@ -3,7 +3,7 @@
 #![cfg(windows)]
 #![allow(dead_code)]
 
-pub use popu_lib::{core, ipc, notifications, placement, protocol, templates};
+pub use popu_lib::{config, core, ipc, notifications, placement, protocol, templates};
 #[path = "../src/history.rs"]
 mod history;
 #[path = "../src/runtime.rs"]
@@ -18,7 +18,7 @@ mod host {
         use super::{
             coordinator, handle_connection, host_builder, id_for, ipc, json, mpsc, runtime,
             windows, AppHandle, Arc, AtomicBool, Duration, HistoryStore, HostState, Instant,
-            Manager, Ordering, RunEvent, State, Task, Uuid, WebviewWindow,
+            LoadedConfig, Manager, Ordering, RunEvent, State, Task, Uuid, WebviewWindow,
         };
         use interprocess::local_socket::traits::ListenerExt;
         use interprocess::local_socket::{prelude::*, GenericNamespaced, ListenerOptions, Stream};
@@ -196,7 +196,7 @@ mod host {
             let state = Arc::new(HostState::with_history(Some(
                 HistoryStore::from_connection(rusqlite::Connection::open_in_memory().unwrap())
                     .unwrap(),
-            )));
+            ), LoadedConfig::default()));
             let endpoint = format!("popu-notification-test-{}", Uuid::new_v4());
             let listener = ListenerOptions::new()
                 .name(endpoint.as_str().to_ns_name::<GenericNamespaced>().unwrap())

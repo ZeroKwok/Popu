@@ -3,7 +3,7 @@
 #![cfg(windows)]
 #![allow(dead_code)]
 
-pub use popu_lib::{core, ipc, notifications, placement, protocol, templates};
+pub use popu_lib::{config, core, ipc, notifications, placement, protocol, templates};
 #[path = "../src/history.rs"]
 mod history;
 #[path = "../src/runtime.rs"]
@@ -100,7 +100,7 @@ mod host {
             store
                 .record(&registry.snapshot(created.request_id).unwrap())
                 .unwrap();
-            let state = Arc::new(HostState::with_history(Some(store)));
+            let state = Arc::new(HostState::with_history(Some(store), LoadedConfig::default()));
             let (sender, receiver) = mpsc::channel();
             let app = host_builder(Arc::clone(&state))
                 .any_thread()

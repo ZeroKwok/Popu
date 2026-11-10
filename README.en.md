@@ -19,7 +19,7 @@ python -m popu.demo progress
 
 The demo shows task progress followed by a result summary. Try closing the progress card to see background updates and the final summary's explicit reshow. It simulates a short task without modifying your files. Press Ctrl+C to stop it. Add `--wait` to wait for the final notification to finish displaying. Notification content and console messages are in English.
 
-The package includes the matching native executable. Run it from any directory without a repository checkout or build tools. The background Host starts automatically on the first request.
+The package includes the matching native executable. Run it from any directory without a repository checkout or build tools. The background Host starts automatically on the first request. To customize notification spacing, visible count, window sizes or timeouts, edit the [Host configuration file](docs/configuration.md), validate it with `popu config validate`, and restart the Host.
 
 ### Python SDK
 

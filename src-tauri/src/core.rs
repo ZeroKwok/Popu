@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::protocol::{Content, ContentBlock, Mode, Request, Response, ResponseStatus};
 
-pub const MAX_VISIBLE_NOTIFICATIONS: usize = 3;
+pub use crate::config::DEFAULT_MAX_VISIBLE as MAX_VISIBLE_NOTIFICATIONS;
 pub const PRESENTATION_TIMEOUT: Duration = Duration::from_secs(15);
 pub const NOTIFICATION_IDLE_TIMEOUT: Duration = Duration::from_secs(12 * 60 * 60);
 pub const MAX_USER_RESHOWS: u32 = 1;
@@ -153,7 +153,6 @@ struct Record {
     exit_code: Option<i32>,
 }
 
-#[derive(Default)]
 pub struct RequestRegistry {
     records: HashMap<Uuid, Record>,
     dialog_queue: VecDeque<Uuid>,
@@ -163,6 +162,13 @@ pub struct RequestRegistry {
     notification_visible: VecDeque<Uuid>,
     coalesced: HashMap<(ModeKey, String), Uuid>,
     dirty: HashSet<Uuid>,
+    max_visible: usize,
+}
+
+impl Default for RequestRegistry {
+    fn default() -> Self {
+        Self::with_max_visible(MAX_VISIBLE_NOTIFICATIONS)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -180,6 +186,20 @@ impl From<Mode> for ModeKey {
 }
 
 impl RequestRegistry {
+    pub fn with_max_visible(max_visible: usize) -> Self {
+        Self {
+            records: HashMap::new(),
+            dialog_queue: VecDeque::new(),
+            active_dialog: None,
+            notification_queue: VecDeque::new(),
+            notification_pending: None,
+            notification_visible: VecDeque::new(),
+            coalesced: HashMap::new(),
+            dirty: HashSet::new(),
+            max_visible,
+        }
+    }
+
     pub fn create(&mut self, request: Request, template_dir: Option<PathBuf>) -> CreateResult {
         if let Some(key) = request.coalesce_key.as_ref() {
             if let Some(id) = self
@@ -295,7 +315,7 @@ impl RequestRegistry {
     }
     pub fn next_notification(&self) -> Option<Uuid> {
         (self.notification_pending.is_none()
-            && self.notification_visible.len() < MAX_VISIBLE_NOTIFICATIONS)
+            && self.notification_visible.len() < self.max_visible)
             .then(|| self.notification_queue.front().copied())
             .flatten()
     }
@@ -926,6 +946,21 @@ mod tests {
         assert_eq!(r.snapshot(ids[3]).unwrap().state, RequestState::Queued);
         show(&mut r, ids[3], now);
         assert_eq!(r.visible_notification_ids(), ids[1..]);
+    }
+
+    #[test]
+    fn configured_visible_capacity_limits_fifo_promotion() {
+        let mut registry = RequestRegistry::with_max_visible(1);
+        let a = registry.create(req("notify", None), None).request_id;
+        let b = registry.create(req("notify", None), None).request_id;
+        let c = registry.create(req("notify", None), None).request_id;
+        let now = Instant::now();
+        show(&mut registry, a, now);
+        assert_eq!(registry.next_notification(), None);
+        assert!(!registry.activate(b, now));
+        registry.dismiss(a).unwrap();
+        assert_eq!(registry.next_notification(), Some(b));
+        assert!(!registry.activate(c, now));
     }
 
     #[test]

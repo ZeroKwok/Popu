@@ -1,21 +1,28 @@
 //! Geometry for one notification stack. No window handles or mutable scheduler state.
 
+use crate::config::{DEFAULT_EDGE_MARGIN_PX, DEFAULT_GAP_PX};
 use crate::placement::{Display, Point};
 
 pub struct Layout {
     pub display: Display,
+    margin: u32,
+    gap: u32,
 }
 
 impl Layout {
     pub fn new(display: Display) -> Self {
-        Self { display }
+        Self::with_spacing(display, DEFAULT_EDGE_MARGIN_PX, DEFAULT_GAP_PX)
+    }
+
+    pub fn with_spacing(display: Display, margin: u32, gap: u32) -> Self {
+        Self { display, margin, gap }
     }
 
     /// All sizes and coordinates are physical; spacing is converted once per plan.
     /// The first item may fill the work area. Subsequent items must fit in full.
     pub fn stack(&self, sizes: &[(u32, u32)]) -> Option<Vec<Point>> {
-        let gap = (12.0 * self.display.scale).round() as i64;
-        let margin = (16.0 * self.display.scale).round() as i64;
+        let gap = (f64::from(self.gap) * self.display.scale).round() as i64;
+        let margin = (f64::from(self.margin) * self.display.scale).round() as i64;
         let mut next_bottom = i64::from(self.display.area.y) + i64::from(self.display.area.height);
         let mut positions = Vec::with_capacity(sizes.len());
         for (index, &(width, height)) in sizes.iter().enumerate() {
@@ -84,5 +91,13 @@ mod tests {
             Point { x: -2560, y: -100 }
         );
         assert!(d.stack(&[(2560, 1400), (100, 100)]).is_none());
+    }
+
+    #[test]
+    fn custom_spacing_applies_to_the_whole_stack_at_scaled_dpi() {
+        let d = Layout::with_spacing(display(1.5).display, 20, 8);
+        let p = d.stack(&[(600, 300), (500, 250)]).unwrap();
+        assert_eq!(p[0], Point { x: -630, y: 970 });
+        assert_eq!(p[1], Point { x: -530, y: 708 });
     }
 }

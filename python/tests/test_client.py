@@ -360,6 +360,13 @@ def test_builders_emit_current_protocol() -> None:
     json.dumps(request)
 
 
+def test_builders_leave_unspecified_timeouts_to_the_host() -> None:
+    assert "timeout_seconds" not in DialogRequest.confirm(title="Continue?").as_dict()
+    assert "duration_ms" not in Notification.success(title="Done").as_dict()
+    assert DialogRequest.confirm(title="Continue?", timeout_seconds=300).as_dict()["timeout_seconds"] == 300
+    assert Notification.success(title="Done", duration_ms=8000).as_dict()["duration_ms"] == 8000
+
+
 def test_notification_can_require_reading() -> None:
     notification = Notification.success(title="Review result", requires_read=True).as_dict()
     assert notification["requires_read"] is True

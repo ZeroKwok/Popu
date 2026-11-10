@@ -21,6 +21,28 @@ fn lists_builtin_templates_as_json() {
 }
 
 #[test]
+fn validates_host_configuration_without_starting_host() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let validate = || Command::new(env!("CARGO_BIN_EXE_popu"))
+        .args(["config", "validate", "--path"])
+        .arg(&path)
+        .output()
+        .expect("run popu");
+
+    std::fs::write(&path, "[notification]\nmax_visible = 2").unwrap();
+    let valid = validate();
+    assert!(valid.status.success(), "{}", String::from_utf8_lossy(&valid.stderr));
+    let result: serde_json::Value = serde_json::from_slice(&valid.stdout).unwrap();
+    assert_eq!(result["status"], "valid");
+
+    std::fs::write(&path, "[notification]\nmax_visible = 0").unwrap();
+    let invalid = validate();
+    assert_eq!(invalid.status.code(), Some(12));
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("/notification/max_visible"));
+}
+
+#[test]
 fn invalid_notify_request_fails_without_starting_ui() {
     let fixture = project_root().join("protocol/examples/invalid/notify-with-form.json");
     let output = Command::new(env!("CARGO_BIN_EXE_popu"))
