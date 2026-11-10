@@ -30,6 +30,14 @@
 # Default display duration in milliseconds (500–86400000), timed from display.
 # default_duration_ms = 8000
 
+# Seconds without a successful update before a live notification is archived.
+# Range: 60–2592000. Restored notifications keep their last update time.
+# idle_timeout_seconds = 43200
+
+# Maximum explicit redisplays after the user closes a notification (0–10).
+# Use 0 to disable them. Only actual displays count against this limit.
+# max_user_reshows = 1
+
 [dialog]
 
 # Default window width when the request omits window.width.
@@ -42,3 +50,9 @@
 
 # Default interaction timeout in seconds (1–86400), timed from display.
 # default_timeout_seconds = 300
+
+[history]
+
+# Keep this many archived notifications (50–5000). The next archive write
+# deletes older archived entries. Live notifications are kept separately.
+# max_entries = 500

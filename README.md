@@ -149,7 +149,7 @@ Host 在首次请求时自动启动。调用方提交请求后获得 Host 生成
 
 通知终态会保存到历史；dialog 及其表单值不会持久化。只有 `requires_read: true` 且仍未阅读的历史通知会持续触发托盘提醒。
 
-长时间任务创建通知时声明 `updatable: true`，使用同一 ID 持续更新；最后一次更新设为 `updatable: false`。用户关闭后普通更新静默保存，`reshow: true` 默认允许最后再次展示一次；自动超时后的下次更新会正常再次展示。每次成功更新都重新计时，并可通过 `duration_ms` 覆盖展示时长，默认模板显示通知发生时间。连续 12 小时未上报会自动过期归档。完整规则见[可更新通知](docs/live-notifications.md)，可运行的进度演示见[Python 示例](python/src/popu/demo/README.md)。
+长时间任务创建通知时声明 `updatable: true`，使用同一 ID 持续更新；最后一次更新设为 `updatable: false`。用户关闭后普通更新静默保存，`reshow: true` 默认允许最后再次展示一次；自动超时后的下次更新会正常再次展示。每次成功更新都重新计时，并可通过 `duration_ms` 覆盖展示时长，默认模板显示通知发生时间。无上报达到闲置时限（默认 12 小时）后自动归档。 [可更新通知](docs/live-notifications.md) · [Python 示例](python/src/popu/demo/README.md)
 
 ## 通知与窗口规则
 

@@ -30,7 +30,7 @@ client.dismiss(receipt.request_id)
 
 dialog 更新准备期间动作按钮不可用；动作提交必须对应最新且已呈现的内容。版本冲突会保留输入并提示重新审阅，不会确认新版内容。文本或数字输入框按 Enter 时，仅在恰好一个提交动作存在时提交，并校验所有表单块；多个提交动作需点击选择，文本域 Enter 保留换行。Esc 取消 dialog，通知不支持 Esc 收起。
 
-`status` / `wait` 查询当前 Host 的 Registry，不查询归档历史。Host 重启后仅恢复尚存的活动通知检查点，已归档 ID 和 dialog 不重新载入；历史仍可查看不保证旧 ID 可查询。清除隐藏历史也会删除对应 ID。SQLite 最新 500 条归档的保留上限不限制 Host 的终态内存记录。
+`status` / `wait` 查询当前 Host 的 Registry，不查询归档历史。Host 重启后仅恢复尚存的活动通知检查点，已归档 ID 和 dialog 不重新载入；历史仍可查看不保证旧 ID 可查询。清除隐藏历史也会删除对应 ID。`history.max_entries` 控制 SQLite 的归档保留条数（默认 500），Host 的终态内存记录独立于此上限。
 
 当前持久化失败可能发生在 Registry 或窗口已经变化之后，后台还会重试保存。收到 `persistence_failed` 时，已知 ID 应先查询当前 revision 和内容；创建未返回 ID 时，不能保证重试不会重复。原请求的 `coalesce_key` 只对仍活动的请求去重，不提供终态后的幂等保证。
 
@@ -51,7 +51,7 @@ snapshot = client.update(receipt.request_id, snapshot["revision"], {
 
 用户主动关闭会收起进度并使普通更新保持静默。显式传入 `reshow=True`，默认允许额外展示一次；次数耗尽时通过 `reshow_suppressed` 告知，但仍接受内容更新。自动展示超时也会收起卡片，但只要用户之前没有主动关闭，下次上报就会再次展示。`dismiss` 表示调用方取消，会直接结束通知。
 
-默认模板展示通知发生时间，每次成功上报都会刷新。隐藏内容仍在历史中保持最新。连续 12 小时没有成功上报后，通知进入 `stale` 状态并拒绝更新。Host 重启后将活动记录恢复为隐藏状态，不重置该截止时间。完整规则见[通知生命周期](https://github.com/ZeroKwok/Popu/blob/HEAD/docs/live-notifications.md)，可运行示例见[包内进度演示](https://github.com/ZeroKwok/Popu/blob/HEAD/python/src/popu/demo/README.md)。
+默认模板展示通知发生时间，每次成功上报都会刷新。隐藏内容仍在历史中保持最新。无成功上报达到闲置时限（默认 12 小时）后，通知进入 `stale` 状态并拒绝更新。Host 重启后以隐藏状态恢复未过期的活动记录，按原时间戳和当前配置计算到期时间。 [通知生命周期](https://github.com/ZeroKwok/Popu/blob/HEAD/docs/live-notifications.md) · [包内进度演示](https://github.com/ZeroKwok/Popu/blob/HEAD/python/src/popu/demo/README.md)
 
 对话框取消、关闭或超时都是正常的 `InteractionResult` 结果。自定义动作可使用 `12` 或其他 0–255 范围内的退出码；SDK 读取 Host 结果，不会将这种业务退出码当作传输错误。对话框终态没有响应时，`show` 会抛出包含终态信息的 `PopuError`。
 

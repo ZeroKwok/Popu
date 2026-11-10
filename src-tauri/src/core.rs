@@ -9,12 +9,13 @@ use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::config::{NotificationConfig, DEFAULT_IDLE_TIMEOUT_SECONDS};
 use crate::protocol::{Content, ContentBlock, Mode, Request, Response, ResponseStatus};
 
 pub use crate::config::DEFAULT_MAX_VISIBLE as MAX_VISIBLE_NOTIFICATIONS;
+pub use crate::config::DEFAULT_MAX_USER_RESHOWS as MAX_USER_RESHOWS;
 pub const PRESENTATION_TIMEOUT: Duration = Duration::from_secs(15);
-pub const NOTIFICATION_IDLE_TIMEOUT: Duration = Duration::from_secs(12 * 60 * 60);
-pub const MAX_USER_RESHOWS: u32 = 1;
+pub const NOTIFICATION_IDLE_TIMEOUT: Duration = Duration::from_secs(DEFAULT_IDLE_TIMEOUT_SECONDS);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -114,7 +115,7 @@ pub enum RegistryError {
     Terminal,
     #[error("notification does not accept updates")]
     NotUpdatable,
-    #[error("notification expired after 12 hours without an update")]
+    #[error("notification expired after exceeding the idle timeout without an update")]
     NotificationExpired,
     #[error("revision conflict (current revision: {current_revision})")]
     RevisionConflict { current_revision: u64 },
@@ -163,11 +164,13 @@ pub struct RequestRegistry {
     coalesced: HashMap<(ModeKey, String), Uuid>,
     dirty: HashSet<Uuid>,
     max_visible: usize,
+    idle_timeout: Duration,
+    max_user_reshows: u32,
 }
 
 impl Default for RequestRegistry {
     fn default() -> Self {
-        Self::with_max_visible(MAX_VISIBLE_NOTIFICATIONS)
+        Self::with_notification_config(&NotificationConfig::default())
     }
 }
 
@@ -187,6 +190,10 @@ impl From<Mode> for ModeKey {
 
 impl RequestRegistry {
     pub fn with_max_visible(max_visible: usize) -> Self {
+        Self { max_visible, ..Self::default() }
+    }
+
+    pub fn with_notification_config(config: &NotificationConfig) -> Self {
         Self {
             records: HashMap::new(),
             dialog_queue: VecDeque::new(),
@@ -196,7 +203,9 @@ impl RequestRegistry {
             notification_visible: VecDeque::new(),
             coalesced: HashMap::new(),
             dirty: HashSet::new(),
-            max_visible,
+            max_visible: config.max_visible,
+            idle_timeout: Duration::from_secs(config.idle_timeout_seconds),
+            max_user_reshows: config.max_user_reshows,
         }
     }
 
@@ -523,7 +532,7 @@ impl RequestRegistry {
         r.reshow_suppressed = options.reshow
             && r.user_closed
             && r.state == RequestState::Hidden
-            && r.reshow_count >= MAX_USER_RESHOWS;
+            && r.reshow_count >= self.max_user_reshows;
         // Every accepted notification revision gets a full display interval,
         // using the previous duration unless this update overrides it.
         if r.request.mode == Mode::Notify {
@@ -694,7 +703,7 @@ impl RequestRegistry {
                 if !r.state.is_terminal()
                     && r.request.updatable
                     && wall.duration_since(r.occurred_at).unwrap_or_default()
-                        >= NOTIFICATION_IDLE_TIMEOUT
+                        >= self.idle_timeout
                 {
                     return Some((*id, RequestState::Stale));
                 }
@@ -1348,15 +1357,20 @@ mod tests {
         change(&mut r, id, UpdateOptions::default());
         let occurred = r.snapshot(id).unwrap().occurred_at;
         let checkpoint = r.checkpoint(id).unwrap();
-        let mut restored = RequestRegistry::default();
+        let config = NotificationConfig {
+            idle_timeout_seconds: 60,
+            ..NotificationConfig::default()
+        };
+        let idle_timeout = Duration::from_secs(config.idle_timeout_seconds);
+        let mut restored = RequestRegistry::with_notification_config(&config);
         restored.restore(id, &checkpoint).unwrap();
         assert!(restored
             .expire_due_at(
                 Instant::now(),
-                occurred + NOTIFICATION_IDLE_TIMEOUT - Duration::from_secs(1)
+                occurred + idle_timeout - Duration::from_secs(1)
             )
             .is_empty());
-        restored.expire_due_at(Instant::now(), occurred + NOTIFICATION_IDLE_TIMEOUT);
+        restored.expire_due_at(Instant::now(), occurred + idle_timeout);
         let snapshot = restored.snapshot(id).unwrap();
         assert_eq!(snapshot.state, RequestState::Stale);
         assert!(matches!(
@@ -1382,21 +1396,47 @@ mod tests {
         );
         show(&mut r, id, Instant::now());
         let checkpoint = r.checkpoint(id).unwrap();
-        let mut restored = RequestRegistry::default();
-        restored.restore(id, &checkpoint).unwrap();
-        change(
-            &mut restored,
-            id,
-            UpdateOptions {
-                reshow: true,
-                ..Default::default()
-            },
-        );
-        let snapshot = restored.snapshot(id).unwrap();
+        for (max_user_reshows, suppressed) in [(1, true), (3, false)] {
+            let config = NotificationConfig {
+                max_user_reshows,
+                ..NotificationConfig::default()
+            };
+            let mut restored = RequestRegistry::with_notification_config(&config);
+            restored.restore(id, &checkpoint).unwrap();
+            change(
+                &mut restored,
+                id,
+                UpdateOptions { reshow: true, ..Default::default() },
+            );
+            let snapshot = restored.snapshot(id).unwrap();
+            assert_eq!(snapshot.reshow_suppressed, suppressed);
+            assert!(snapshot.user_closed);
+            assert_eq!(snapshot.reshow_count, 1);
+            assert_eq!(restored.next_notification(), (!suppressed).then_some(id));
+            if !suppressed {
+                show(&mut restored, id, Instant::now());
+                assert_eq!(restored.snapshot(id).unwrap().reshow_count, 2);
+            }
+        }
+    }
+
+    #[test]
+    fn zero_reshows_still_allows_updates_and_automatic_timeout_reappearance() {
+        let config = NotificationConfig { max_user_reshows: 0, ..NotificationConfig::default() };
+        let mut registry = RequestRegistry::with_notification_config(&config);
+        let id = live(&mut registry);
+        let now = Instant::now();
+        show(&mut registry, id, now);
+        assert_eq!(registry.expire_due(now + Duration::from_secs(10)), [Effect::Hide(id)]);
+        change(&mut registry, id, UpdateOptions::default());
+        show(&mut registry, id, Instant::now());
+        close_user(&mut registry, id);
+
+        change(&mut registry, id, UpdateOptions { reshow: true, ..Default::default() });
+        let snapshot = registry.snapshot(id).unwrap();
+        assert_eq!(snapshot.state, RequestState::Hidden);
         assert!(snapshot.reshow_suppressed);
-        assert!(snapshot.user_closed);
-        assert_eq!(snapshot.reshow_count, 1);
-        assert_eq!(restored.active_notification_count(), 0);
+        assert_eq!(snapshot.reshow_count, 0);
     }
 
     #[test]

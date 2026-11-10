@@ -18,7 +18,7 @@ Registry 的互斥锁只保护快速读写。原生窗口操作、模板读取�
 
 `queued → preparing → ready → shown → confirmed / cancelled / closed / expired / failed`
 
-可更新通知增加非终态 `hidden`：主动关闭或展示超时只收起窗口，保留更新入口。自动超时后普通更新重新入队；主动关闭后只在显式 `reshow: true` 且预算允许时重新入队。复用原窗口，重新准备并确认最新 revision 后展示，实际展示时才消耗再次展示次数。`updatable: false` 关闭更新入口；连续 12 小时无上报进入 `stale` 终态。完整规则见[可更新通知](live-notifications.md)。
+可更新通知增加非终态 `hidden`：主动关闭或展示超时只收起窗口，保留更新入口。自动超时后普通更新重新入队；主动关闭后只在显式 `reshow: true` 且预算允许时重新入队。复用原窗口，重新准备并确认最新 revision 后展示，实际展示时才消耗再次展示次数。`updatable: false` 关闭更新入口。无上报达到配置的闲置时限（默认 12 小时）后，通知进入 `stale` 终态。 [可更新通知](live-notifications.md)
 
 1. 接受请求时入队，不提前声明 `shown`；去重只复用同 mode、同 key 的活动请求。
 2. dialog 队首在没有活动 dialog 时获得准备资格。
@@ -81,7 +81,7 @@ Registry 的互斥锁只保护快速读写。原生窗口操作、模板读取�
 - `closing`：尚在清理的窗口请求 ID。
 - `config`：Host 启动时加载的配置来源、路径和错误（如有）。
 
-诊断摘要不携带图表、图片或整份 content，以免大量排队通知让状态查询超过 RPC 帧限制。标准错误记录展示、恢复与失败原因。
+诊断摘要不携带图表、图片或整份 content，以免大量排队通知让状态查询超过 RPC 帧限制。标准错误记录展示、恢复与失败原因。IPC 的 `history.list` 支持 `limit`（1–500）与 `offset`（从 0 开始）。列表超出单帧容量时返回 `history_pagination_required`，可用更小的页读取。
 
 ## 验证
 

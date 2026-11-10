@@ -8,7 +8,10 @@ use serde::Serialize;
 use crate::core::{RequestSnapshot, RequestState};
 use crate::protocol::Mode;
 
-pub struct HistoryStore { connection: Connection }
+pub struct HistoryStore {
+    connection: Connection,
+    max_entries: u32,
+}
 
 #[derive(Serialize)]
 pub struct HistoryItem {
@@ -28,13 +31,18 @@ pub struct HistoryItem {
 }
 
 impl HistoryStore {
-    pub fn open_default() -> rusqlite::Result<Self> {
+    pub fn open_default(max_entries: u32) -> rusqlite::Result<Self> {
         let path = default_path();
         if let Some(parent) = path.parent() { let _ = fs::create_dir_all(parent); }
-        Self::from_connection(Connection::open(path)?)
+        Self::with_max_entries(Connection::open(path)?, max_entries)
     }
 
-    pub(crate) fn from_connection(mut connection: Connection) -> rusqlite::Result<Self> {
+    #[cfg(test)]
+    pub(crate) fn from_connection(connection: Connection) -> rusqlite::Result<Self> {
+        Self::with_max_entries(connection, crate::config::DEFAULT_HISTORY_MAX_ENTRIES)
+    }
+
+    fn with_max_entries(mut connection: Connection, max_entries: u32) -> rusqlite::Result<Self> {
         let transaction = connection.transaction()?;
         transaction.execute_batch("CREATE TABLE IF NOT EXISTS notification_history (
           request_id TEXT PRIMARY KEY, state TEXT NOT NULL, revision INTEGER NOT NULL,
@@ -67,7 +75,7 @@ impl HistoryStore {
         transaction.execute_batch("UPDATE notification_history SET occurred_at_ms = created_at_ms WHERE occurred_at_ms = 0;
           CREATE TABLE IF NOT EXISTS live_notifications (request_id TEXT PRIMARY KEY, record_json TEXT NOT NULL);")?;
         transaction.commit()?;
-        Ok(Self { connection })
+        Ok(Self { connection, max_entries })
     }
 
     pub fn record(&mut self, snapshot: &RequestSnapshot) -> rusqlite::Result<()> {
@@ -89,18 +97,24 @@ impl HistoryStore {
             snapshot.shown_at.map(millis), ended_at_ms,
             snapshot.response.as_ref().map(|v| serde_json::to_string(v).unwrap()), snapshot.requires_read, read_at_ms,
             millis(snapshot.occurred_at), snapshot.updatable, snapshot.hidden_reason.map(|state| serde_json::to_value(state).unwrap().as_str().unwrap().to_owned())])?;
-        transaction.execute("DELETE FROM notification_history WHERE request_id IN
-          (SELECT request_id FROM notification_history WHERE state NOT IN ('queued','preparing','ready','shown','hidden') ORDER BY ended_at_ms DESC, rowid DESC LIMIT -1 OFFSET 500)", [])?;
+        if snapshot.state.is_terminal() {
+            transaction.execute("DELETE FROM notification_history WHERE request_id IN
+              (SELECT request_id FROM notification_history WHERE state NOT IN ('queued','preparing','ready','shown','hidden') ORDER BY ended_at_ms DESC, rowid DESC LIMIT -1 OFFSET ?1)", [self.max_entries])?;
+        }
         transaction.commit()
     }
 
     pub fn list(&self) -> rusqlite::Result<Vec<HistoryItem>> {
+        self.list_page(None, 0)
+    }
+
+    pub(crate) fn list_page(&self, limit: Option<u32>, offset: u32) -> rusqlite::Result<Vec<HistoryItem>> {
         // List only the fields used in the sidebar, never every inline image/spec.
         let mut statement = self.connection.prepare("SELECT request_id,state,revision,
           json_object('title',json_extract(content_json,'$.title'),'severity',COALESCE(json_extract(content_json,'$.severity'),'info')),
           created_at_ms,shown_at_ms,ended_at_ms,response_json,requires_read,read_at_ms,occurred_at_ms,updatable,hidden_reason
-          FROM notification_history ORDER BY occurred_at_ms DESC, rowid DESC")?;
-        let items = statement.query_map([], history_item)?.collect();
+          FROM notification_history ORDER BY occurred_at_ms DESC, rowid DESC LIMIT ?1 OFFSET ?2")?;
+        let items = statement.query_map(params![limit.map_or(-1, i64::from), offset], history_item)?.collect();
         items
     }
 
@@ -208,6 +222,35 @@ mod tests {
         let items = store.list().unwrap();
         assert_eq!(items.len(), 500);
         assert_eq!(items[0].content["title"], "Item 500");
+    }
+
+    #[test]
+    fn lower_limit_prunes_on_archive_and_keeps_hidden_live_records() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.db");
+        {
+            let mut store = HistoryStore::from_connection(Connection::open(&path).unwrap()).unwrap();
+            for _ in 0..52 {
+                store.record(&terminal(false, RequestState::Cancelled)).unwrap();
+            }
+        }
+        let mut store = HistoryStore::with_max_entries(Connection::open(&path).unwrap(), 50).unwrap();
+        assert_eq!(store.list().unwrap().len(), 52);
+
+        let request = Request::parse(r#"{"version":"1.0","mode":"notify","updatable":true,"content":{"title":"Live"}}"#).unwrap();
+        let mut registry = RequestRegistry::default();
+        let id = registry.create(request, None).request_id;
+        let mut restored = RequestRegistry::default();
+        restored.restore(id, &registry.checkpoint(id).unwrap()).unwrap();
+        store.persist(&restored.snapshot(id).unwrap(), restored.checkpoint(id).as_deref()).unwrap();
+        assert_eq!(store.list().unwrap().len(), 53);
+
+        let latest = terminal(false, RequestState::Cancelled);
+        store.record(&latest).unwrap();
+        assert_eq!(store.list().unwrap().len(), 51);
+        assert!(store.get(&latest.request_id.to_string()).is_ok());
+        assert_eq!(store.get(&id.to_string()).unwrap().state, "hidden");
+        assert_eq!(store.load_live().unwrap()[0].0, id.to_string());
     }
 
     #[test]

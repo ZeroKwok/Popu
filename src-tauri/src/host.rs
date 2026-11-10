@@ -39,7 +39,7 @@ struct HistoryWindowSession { started: Instant, ready: bool, detail_ready: bool,
 
 impl HostState {
     fn with_history(history: Option<HistoryStore>, config: LoadedConfig) -> Self {
-        let mut registry = RequestRegistry::with_max_visible(config.settings.notification.max_visible);
+        let mut registry = RequestRegistry::with_notification_config(&config.settings.notification);
         if let Some(store) = &history {
             match store.load_live() {
                 Ok(records) => for (id, checkpoint) in records {
@@ -131,11 +131,46 @@ mod config_tests {
         registry.update(id, 1, content).unwrap();
         assert_eq!(registry.request(id).unwrap().duration_ms, 2_000);
     }
+
+    #[test]
+    fn oversized_history_can_be_read_in_ipc_pages() {
+        let mut store = HistoryStore::from_connection(rusqlite::Connection::open_in_memory().unwrap()).unwrap();
+        assert_eq!(history_list_rpc(&store, Value::Null).unwrap(), json!([]));
+        let mut registry = RequestRegistry::default();
+        let request = Request::parse(&json!({
+            "version":"1.0", "mode":"notify", "updatable":true,
+            "content":{"title":format!("A{}", "\u{0001}".repeat(199))}
+        }).to_string()).unwrap();
+        for _ in 0..900 {
+            let id = registry.create(request.clone(), None).request_id;
+            store.record(&registry.snapshot(id).unwrap()).unwrap();
+        }
+
+        assert_eq!(store.list().unwrap().len(), 900);
+        assert_eq!(
+            history_list_rpc(&store, json!({})).unwrap_err()["code"],
+            "history_pagination_required",
+        );
+        let first = history_list_rpc(&store, json!({"limit":500,"offset":0})).unwrap();
+        let second = history_list_rpc(&store, json!({"limit":500,"offset":500})).unwrap();
+        assert_eq!(first.as_array().unwrap().len(), 500);
+        assert_eq!(second.as_array().unwrap().len(), 400);
+        assert_ne!(first[499]["request_id"], second[0]["request_id"]);
+        assert!(history_list_rpc(&store, json!({"limit":501})).is_err());
+    }
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct IdParams { request_id: Uuid }
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct HistoryListParams {
+    limit: Option<u32>,
+    offset: u32,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct UpdateParams {
@@ -152,7 +187,8 @@ where D: serde::Deserializer<'de>, T: Deserialize<'de> {
 
 pub fn run() -> i32 {
     let config = LoadedConfig::load();
-    let state = Arc::new(HostState::with_history(HistoryStore::open_default().ok(), config));
+    let history = HistoryStore::open_default(config.settings.history.max_entries).ok();
+    let state = Arc::new(HostState::with_history(history, config));
     let managed = Arc::clone(&state);
     let app = host_builder(managed)
         .setup(move |app| {
@@ -340,8 +376,8 @@ fn dispatch(rpc: RpcRequest, _app: &AppHandle, state: &Arc<HostState>) -> RpcRes
         }
         "history.list" => {
             let history = state.history.lock().unwrap();
-            let items = history.as_ref().ok_or_else(|| json!({"code":"history_unavailable"}))?.list().map_err(invalid)?;
-            serde_json::to_value(items).map_err(invalid)
+            let store = history.as_ref().ok_or_else(|| json!({"code":"history_unavailable"}))?;
+            history_list_rpc(store, rpc.params)
         }
         "history.get" => {
             let params: IdParams = serde_json::from_value(rpc.params).map_err(invalid)?;
@@ -360,6 +396,25 @@ fn dispatch(rpc: RpcRequest, _app: &AppHandle, state: &Arc<HostState>) -> RpcRes
 }
 
 fn invalid(error: impl std::fmt::Display) -> Value { json!({"code":"invalid_request","message":error.to_string()}) }
+
+fn history_list_rpc(store: &HistoryStore, params: Value) -> Result<Value, Value> {
+    const MAX_PAGE_SIZE: u32 = 500;
+    let params: Option<HistoryListParams> = serde_json::from_value(params).map_err(invalid)?;
+    let params = params.unwrap_or_default();
+    let limit = params.limit.or((params.offset > 0).then_some(MAX_PAGE_SIZE));
+    if limit.is_some_and(|limit| !(1..=MAX_PAGE_SIZE).contains(&limit)) {
+        return Err(invalid(format!("history.list limit must be within 1–{MAX_PAGE_SIZE}")));
+    }
+    let items = store.list_page(limit, params.offset).map_err(invalid)?;
+    let response = RpcResponse::success(items).map_err(invalid)?;
+    if serde_json::to_vec(&response).map_err(invalid)?.len() > ipc::MAX_FRAME_BYTES {
+        return Err(json!({
+            "code": "history_pagination_required",
+            "message": "History exceeds one IPC frame. Request a smaller page with limit and offset.",
+        }));
+    }
+    Ok(response.result.expect("successful history response contains a result"))
+}
 fn failure(code: &str, message: String) -> RpcResponse { RpcResponse::failure(json!({"code":code,"message":message})).unwrap() }
 
 fn update_tray_tooltip(app: &AppHandle, state: &Arc<HostState>) {

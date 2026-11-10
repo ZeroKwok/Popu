@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_EDGE_MARGIN_PX: u32 = 16;
 pub const DEFAULT_GAP_PX: u32 = 12;
 pub const DEFAULT_MAX_VISIBLE: usize = 3;
+pub(crate) const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 12 * 60 * 60;
+pub const DEFAULT_MAX_USER_RESHOWS: u32 = 1;
+pub const DEFAULT_HISTORY_MAX_ENTRIES: u32 = 500;
 pub(crate) const DEFAULT_DURATION_MS: u64 = 8_000;
 pub(crate) const DEFAULT_TIMEOUT_SECONDS: u64 = 300;
 const CONFIG_TEMPLATE: &str = include_str!("../resources/config.template.toml");
@@ -42,6 +45,22 @@ pub struct NotificationConfig {
     pub gap_px: u32,
     pub max_visible: usize,
     pub default_duration_ms: u64,
+    pub idle_timeout_seconds: u64,
+    pub max_user_reshows: u32,
+}
+
+impl Default for NotificationConfig {
+    fn default() -> Self {
+        Self {
+            window: WindowDefaults::NOTIFICATION,
+            edge_margin_px: DEFAULT_EDGE_MARGIN_PX,
+            gap_px: DEFAULT_GAP_PX,
+            max_visible: DEFAULT_MAX_VISIBLE,
+            default_duration_ms: DEFAULT_DURATION_MS,
+            idle_timeout_seconds: DEFAULT_IDLE_TIMEOUT_SECONDS,
+            max_user_reshows: DEFAULT_MAX_USER_RESHOWS,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -52,24 +71,27 @@ pub struct DialogConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct HistoryConfig {
+    pub max_entries: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     pub notification: NotificationConfig,
     pub dialog: DialogConfig,
+    pub history: HistoryConfig,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            notification: NotificationConfig {
-                window: WindowDefaults::NOTIFICATION,
-                edge_margin_px: DEFAULT_EDGE_MARGIN_PX,
-                gap_px: DEFAULT_GAP_PX,
-                max_visible: DEFAULT_MAX_VISIBLE,
-                default_duration_ms: DEFAULT_DURATION_MS,
-            },
+            notification: NotificationConfig::default(),
             dialog: DialogConfig {
                 window: WindowDefaults::DIALOG,
                 default_timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
+            },
+            history: HistoryConfig {
+                max_entries: DEFAULT_HISTORY_MAX_ENTRIES,
             },
         }
     }
@@ -279,14 +301,24 @@ mod tests {
     #[test]
     fn partial_config_merges_with_built_in_defaults() {
         let config = parse(
-            "[notification]\nmax_visible = 5\ngap_px = 0\n[dialog]\ndefault_timeout_seconds = 15",
+            "[notification]\nmax_visible = 5\ngap_px = 0\nidle_timeout_seconds = 60\nmax_user_reshows = 0\n[dialog]\ndefault_timeout_seconds = 15\n[history]\nmax_entries = 5000",
         )
         .unwrap();
         assert_eq!(config.notification.max_visible, 5);
         assert_eq!(config.notification.gap_px, 0);
         assert_eq!(config.notification.window.default_width_px, 360);
+        assert_eq!(config.notification.idle_timeout_seconds, 60);
+        assert_eq!(config.notification.max_user_reshows, 0);
         assert_eq!(config.dialog.default_timeout_seconds, 15);
         assert_eq!(config.dialog.window.fallback_height_px, 300);
+        assert_eq!(config.history.max_entries, 5000);
+        assert_eq!(
+            parse("[history]\nmax_entries = 50")
+                .unwrap()
+                .history
+                .max_entries,
+            50
+        );
     }
 
     #[test]
@@ -308,6 +340,18 @@ mod tests {
                 "default_timeout_seconds",
             ),
             ("[dialog]\ndefault_width_px = 8193", "default_width_px"),
+            (
+                "[notification]\nidle_timeout_seconds = 59",
+                "idle_timeout_seconds",
+            ),
+            (
+                "[notification]\nidle_timeout_seconds = 2592001",
+                "idle_timeout_seconds",
+            ),
+            ("[notification]\nmax_user_reshows = -1", "max_user_reshows"),
+            ("[notification]\nmax_user_reshows = 11", "max_user_reshows"),
+            ("[history]\nmax_entries = 49", "max_entries"),
+            ("[history]\nmax_entries = 5001", "max_entries"),
             (
                 "[notification]\nauto_max_height_px = 180",
                 "fallback_height_px",

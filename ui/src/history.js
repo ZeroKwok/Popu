@@ -44,7 +44,7 @@ const statusLabels = {
   cancelled: "Dismissed",
   failed: "Failed",
   confirmed: "Confirmed",
-  stale: "No notification received for 12 hours",
+  stale: "Expired without updates",
   hidden: "Hidden · accepting updates",
   queued: "Waiting to display",
   preparing: "Preparing",

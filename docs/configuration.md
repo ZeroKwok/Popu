@@ -12,6 +12,8 @@ auto_min_height_px = 120
 auto_max_height_px = 480
 fallback_height_px = 220
 default_duration_ms = 8000
+idle_timeout_seconds = 43200
+max_user_reshows = 1
 
 [dialog]
 default_width_px = 440
@@ -19,11 +21,17 @@ auto_min_height_px = 160
 auto_max_height_px = 720
 fallback_height_px = 300
 default_timeout_seconds = 300
+
+[history]
+max_entries = 500
 ```
 
 - 通知按主显示器工作区右下角对齐，`edge_margin_px` 控制底部和右侧留白，`gap_px` 控制相邻通知的垂直间距。可同时显示的数量由 `max_visible` 和实际可用空间共同决定。
 - 省略窗口宽度时使用 `default_width_px`。省略高度时按内容自适应，限制在 `auto_min_height_px` 和 `auto_max_height_px` 之间。测量不可用时采用 `fallback_height_px`，小工作区的实际空间优先。
 - 请求显式提供的 `window.width`、`window.height`、`duration_ms` 或 `timeout_seconds` 优先。展示计时从窗口正式显示开始。通知更新省略 `duration_ms` 时沿用该通知的当前时长。
+- `notification.idle_timeout_seconds` 接受 `60–2592000`。可更新通知从创建或最后一次成功更新开始计时。Host 重启后按新上限检查仍可更新的记录，超出时限的记录直接归档。
+- `notification.max_user_reshows` 接受 `0–10`。用户关闭后，显式请求再次展示且窗口实际显示才消耗一次。设为 `0` 会关闭这条重显路径，重启保留已消耗的次数。
+- `history.max_entries` 接受 `50–5000`，仅统计已归档通知。调低后，下一次写入归档时会永久裁剪超出上限的旧条目。仍可更新的通知及其恢复记录会保留。
 
 | 命令 | 行为 |
 | --- | --- |
